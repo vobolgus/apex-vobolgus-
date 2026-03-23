@@ -185,6 +185,7 @@
   const params = new URLSearchParams(location.search);
   const DIFFICULTY = params.get('difficulty') || 'easy';
   const ROUNDS = parseInt(params.get('rounds') || '10');
+  let LANGUAGE = params.get('lang') || 'en';
 
   let sessionId = null, usedHint = false, questionStartTime = null;
   let stars = [], drawnEdges = [], selectedStar = null;
