@@ -1,8 +1,8 @@
-use super::{localize_star, QuestionData, QuestionFactory, CONSTELLATION_FACTS, NAMED_STARS};
+use super::{CONSTELLATION_FACTS, NAMED_STARS, QuestionData, QuestionFactory, localize_star};
 use crate::models::{DrawStar, QuestionResponse};
 use crate::svg_generator::{get_constellations_data, localize_constellation};
-use anyhow::{anyhow, Result};
-use rand::{seq::SliceRandom, Rng};
+use anyhow::{Result, anyhow};
+use rand::{Rng, seq::SliceRandom};
 use rust_core::catalog::{HipCatalog, MessierCatalog};
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +33,12 @@ pub(super) fn generate(
 
     let const_json = get_constellations_data()
         .get(&correct_abbr)
-        .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "constellation '{}' not found in embedded data",
+                correct_abbr
+            )
+        })?;
     let constellation_name = localize_constellation(&correct_abbr, &const_json.name);
 
     let center = [
@@ -209,7 +214,8 @@ pub(super) fn generate(
     let q_data = QuestionData {
         question_type: "draw".to_string(),
         question_text:
-            "Соедините звёзды созвездия линиями так, как они соединены на официальных картах.".to_string(),
+            "Соедините звёзды созвездия линиями так, как они соединены на официальных картах."
+                .to_string(),
         options: None,
         correct_answer,
         hint,
@@ -231,7 +237,8 @@ pub(super) fn generate(
         total_rounds: 10,
         question_type: "draw".to_string(),
         question_text:
-            "Соедините звёзды созвездия линиями так, как они соединены на официальных картах.".to_string(),
+            "Соедините звёзды созвездия линиями так, как они соединены на официальных картах."
+                .to_string(),
         options: None,
         image_svg: None,
         draw_stars: Some(stars_list),
@@ -253,8 +260,8 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (resp, data) =
-            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate draw question");
+        let (resp, data) = generate("easy", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate draw question");
 
         assert_eq!(resp.question_type, "draw");
         assert_eq!(data.question_type, "draw");
@@ -268,10 +275,13 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (_, data) =
-            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate draw question");
+        let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate draw question");
 
-        let abbr = data.correct_abbr.clone().expect("draw question should include constellation abbr");
+        let abbr = data
+            .correct_abbr
+            .clone()
+            .expect("draw question should include constellation abbr");
         assert!(
             data.used_objects.contains(&abbr),
             "used_objects should include selected constellation"

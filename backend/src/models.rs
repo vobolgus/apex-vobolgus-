@@ -46,7 +46,7 @@ pub struct StyleConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartGameRequest {
-    pub mode: String, // "constellation" | "star" | "messier" | "draw" | "trivia"
+    pub mode: String,       // "constellation" | "star" | "messier" | "draw" | "trivia"
     pub difficulty: String, // "easy" | "medium" | "hard"
     pub total_rounds: Option<i32>,
 }
@@ -67,8 +67,8 @@ pub struct QuestionResponse {
     pub total_rounds: i32,
     pub question_type: String,
     pub question_text: String,
-    pub options: Option<Vec<String>>, // для 4 вариантов
-    pub image_svg: Option<String>,    // карта звездного неба в SVG (для визуальных вопросов)
+    pub options: Option<Vec<String>>,      // для 4 вариантов
+    pub image_svg: Option<String>,         // карта звездного неба в SVG (для визуальных вопросов)
     pub draw_stars: Option<Vec<DrawStar>>, // для режима Draw
     pub has_hint: bool,
 }

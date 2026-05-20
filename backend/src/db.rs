@@ -1,5 +1,5 @@
 use anyhow::Context;
-use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::fs;
 use std::path::Path;
 
@@ -18,7 +18,11 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<SqlitePool> {
         }
     }
 
-    let max_connections = if database_url == "sqlite::memory:" { 1 } else { 5 };
+    let max_connections = if database_url == "sqlite::memory:" {
+        1
+    } else {
+        5
+    };
 
     let pool = SqlitePoolOptions::new()
         .max_connections(max_connections)
@@ -77,12 +81,12 @@ mod tests {
         }
 
         let game_session_columns: Vec<String> = sqlx::query("PRAGMA table_info(game_sessions)")
-        .fetch_all(&pool)
-        .await
-        .expect("read game_sessions columns")
-        .into_iter()
-        .map(|row| row.get("name"))
-        .collect();
+            .fetch_all(&pool)
+            .await
+            .expect("read game_sessions columns")
+            .into_iter()
+            .map(|row| row.get("name"))
+            .collect();
 
         for expected_column in EXPECTED_COLUMNS {
             assert!(
