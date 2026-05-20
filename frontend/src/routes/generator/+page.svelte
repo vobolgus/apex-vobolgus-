@@ -39,6 +39,23 @@
 		options?: { maxSegmentLength?: number }
 	) => (t: number) => string;
 
+	type PerceptualCacheKey = {
+		width: number;
+		height: number;
+		fovDeg: number;
+		starVectorsLen: number;
+		orientation: Quaternion;
+	};
+
+	type ViewportCacheKey = {
+		cx: number;
+		cy: number;
+		radius: number;
+		pinholeViewportWidth: number;
+		pinholeViewportHeight: number;
+		cornerRadius: number;
+	};
+
 	let canvasEl: HTMLCanvasElement | null = null;
 	let dragging = false;
 	let lastArcballVector: Vec3 | null = null;
@@ -61,12 +78,12 @@
 	let projectionBlendTo = 0;
 	let projectionBlendStartMs = 0;
 	let projectionBlendDurationMs = PROJECTION_TRANSITION_MS;
-	let cachedViewportMorphKey = '';
+	let cachedViewportInterpolatorKey: ViewportCacheKey | null = null;
 	let cachedViewportInterpolator: ((t: number) => string) | null = null;
 	let cachedMorphBlend = Number.NaN;
 	let cachedMorphPath = '';
 	let cachedMorphPath2D: Path2D | null = null;
-	let cachedPerceptualKey = '';
+	let cachedPerceptualKey: PerceptualCacheKey | null = null;
 	let cachedPerceptualCumulative: number[] | null = null;
 	const activeCanvasPointers = new Map<number, { x: number; y: number }>();
 	let pinchStartDistance = 0;
@@ -126,7 +143,7 @@
 				return;
 			}
 			flubberInterpolate = interpolate;
-			cachedViewportMorphKey = '';
+			cachedViewportInterpolatorKey = null;
 			cachedViewportInterpolator = null;
 			cachedMorphBlend = Number.NaN;
 			cachedMorphPath = '';
@@ -151,15 +168,40 @@
 	}
 
 
+	function perceptualKeyEquals(a: PerceptualCacheKey, b: PerceptualCacheKey): boolean {
+		return (
+			a.width === b.width &&
+			a.height === b.height &&
+			a.fovDeg === b.fovDeg &&
+			a.starVectorsLen === b.starVectorsLen &&
+			a.orientation.x === b.orientation.x &&
+			a.orientation.y === b.orientation.y &&
+			a.orientation.z === b.orientation.z &&
+			a.orientation.w === b.orientation.w
+		);
+	}
+
 	function getPerceptualBlendCumulative(width: number, height: number) {
 		// Cache key includes orientation: energy depends on which stars are visible
 		// at each blend step, which changes when the user rotates the sky. Without
 		// orientation in the key, the LUT goes stale after any drag/rotation.
-		const orientationKey =
-			`${view.orientation.x.toFixed(3)}:${view.orientation.y.toFixed(3)}:` +
-			`${view.orientation.z.toFixed(3)}:${view.orientation.w.toFixed(3)}`;
-		const key = `${width}:${height}:${view.fovDeg.toFixed(3)}:${catalog.starVectors.length}:${orientationKey}`;
-		if (cachedPerceptualCumulative && cachedPerceptualKey === key) {
+		const key: PerceptualCacheKey = {
+			width,
+			height,
+			fovDeg: view.fovDeg,
+			starVectorsLen: catalog.starVectors.length,
+			orientation: {
+				x: view.orientation.x,
+				y: view.orientation.y,
+				z: view.orientation.z,
+				w: view.orientation.w
+			}
+		};
+		if (
+			cachedPerceptualKey &&
+			cachedPerceptualCumulative &&
+			perceptualKeyEquals(cachedPerceptualKey, key)
+		) {
 			return cachedPerceptualCumulative;
 		}
 		const cumulative = new Array<number>(PERCEPTUAL_LUT_POINTS).fill(0);
@@ -240,6 +282,17 @@
 		return cumulative;
 	}
 
+	function viewportKeyEquals(a: ViewportCacheKey, b: ViewportCacheKey): boolean {
+		return (
+			a.cx === b.cx &&
+			a.cy === b.cy &&
+			a.radius === b.radius &&
+			a.pinholeViewportWidth === b.pinholeViewportWidth &&
+			a.pinholeViewportHeight === b.pinholeViewportHeight &&
+			a.cornerRadius === b.cornerRadius
+		);
+	}
+
 	function getPerceptualProjectionBlend(rawBlend: number, width: number, height: number) {
 		const normalizedRawBlend = clamp(rawBlend, 0, 1);
 		if (normalizedRawBlend <= 0) return 0;
@@ -302,15 +355,19 @@
 		pinholeHeight: number,
 		pinholeRadius: number
 	): (t: number) => string {
-		const key = [
-			String(cx),
-			String(cy),
-			String(stereoRadius),
-			String(pinholeWidth),
-			String(pinholeHeight),
-			String(pinholeRadius)
-		].join(':');
-		if (cachedViewportInterpolator && cachedViewportMorphKey === key) {
+		const key: ViewportCacheKey = {
+			cx,
+			cy,
+			radius: stereoRadius,
+			pinholeViewportWidth: pinholeWidth,
+			pinholeViewportHeight: pinholeHeight,
+			cornerRadius: pinholeRadius
+		};
+		if (
+			cachedViewportInterpolatorKey &&
+			cachedViewportInterpolator &&
+			viewportKeyEquals(cachedViewportInterpolatorKey, key)
+		) {
 			return cachedViewportInterpolator;
 		}
 
@@ -324,7 +381,7 @@
 		cachedViewportInterpolator = flubberInterpolate(circlePath, roundedRectPath, {
 			maxSegmentLength: FLUBBER_MAX_SEGMENT_LENGTH
 		});
-		cachedViewportMorphKey = key;
+		cachedViewportInterpolatorKey = key;
 		cachedMorphBlend = Number.NaN;
 		cachedMorphPath = '';
 		cachedMorphPath2D = null;
