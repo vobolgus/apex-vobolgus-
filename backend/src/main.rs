@@ -32,6 +32,11 @@ fn build_app(state: AppState) -> Router {
     } else {
         "../web/static"
     };
+    let images_dir = if Path::new("web/images").exists() {
+        "web/images"
+    } else {
+        "../web/images"
+    };
 
     // Настройка CORS
     let cors = CorsLayer::new()
@@ -42,6 +47,7 @@ fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/", get(|| async { "Apex Backend is running!" }))
         .nest_service("/static", ServeDir::new(static_dir))
+        .nest_service("/images", ServeDir::new(images_dir))
         // Catalog endpoints
         .route("/api/catalog/bright", get(handlers::catalog::get_bright_stars))
         .route("/api/catalog/full", get(handlers::catalog::get_full_stars))
@@ -98,6 +104,7 @@ mod tests {
     use axum::http::header;
     use serde_json::json;
     use serde_json::Value;
+    use std::path::Path;
     use tower::ServiceExt;
 
     async fn test_app() -> Router {
@@ -201,6 +208,38 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn smoke_messier_images_available() {
+        let local_images = if Path::new("web/images").exists() {
+            "web/images"
+        } else {
+            "../web/images"
+        };
+
+        let messier_count = std::fs::read_dir(local_images)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with('m') && name.ends_with(".jpeg")
+            })
+            .count();
+        assert_eq!(messier_count, 110);
+
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/images/m31.jpeg")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
 
