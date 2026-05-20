@@ -25,9 +25,9 @@ pub struct ConstellationJson {
 pub fn get_constellations_data() -> &'static HashMap<String, ConstellationJson> {
     static CONSTELLATIONS: OnceLock<HashMap<String, ConstellationJson>> = OnceLock::new();
     CONSTELLATIONS.get_or_init(|| {
-        let json_str = include_str!("../../../astrageek/catalogs/constellations/constellations_data.json");
+        let json_str = include_str!("../../assets/constellations/constellations_data.json");
         serde_json::from_str(json_str)
-            .expect("invariant violation: embedded astrageek/catalogs/constellations/constellations_data.json is malformed; this indicates checked-in data corruption")
+            .expect("invariant violation: embedded backend/assets/constellations/constellations_data.json is malformed; this indicates checked-in data corruption")
     })
 }
 
