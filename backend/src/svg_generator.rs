@@ -82,7 +82,9 @@ impl SvgGenerator {
         let grid_color = &config.style.grid_color;
         let font_family = &config.style.font_family;
 
-        let mut svg = String::new();
+        // Pre-allocate to avoid O(n²) reallocations during SVG build.
+        // Empirically derived from full-sky maps ~200KB; round to power-of-2.
+        let mut svg = String::with_capacity(256 * 1024);
         svg.push_str(&format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="100%" height="100%">"##,
             width, height
@@ -193,7 +195,7 @@ impl SvgGenerator {
                 let dec_rad = dec_deg.to_radians();
                 let cos_d = dec_rad.cos();
                 let sin_d = dec_rad.sin();
-                let mut path = String::new();
+                let mut path = String::with_capacity(4096);
                 let mut first = true;
 
                 for i in 0..=72 {
@@ -227,7 +229,7 @@ impl SvgGenerator {
                 let ra_rad = ra_deg.to_radians();
                 let cos_r = ra_rad.cos();
                 let sin_r = ra_rad.sin();
-                let mut path = String::new();
+                let mut path = String::with_capacity(4096);
                 let mut first = true;
 
                 for i in 0..=36 {
@@ -258,7 +260,7 @@ impl SvgGenerator {
         }
 
         if config.layers.equator {
-            let mut path = String::new();
+            let mut path = String::with_capacity(4096);
             let mut first = true;
             for i in 0..=72 {
                 let ra_deg = (i as f32) * 5.0;
@@ -290,7 +292,7 @@ impl SvgGenerator {
             let epsilon = 23.4392911f32.to_radians();
             let cos_eps = epsilon.cos();
             let sin_eps = epsilon.sin();
-            let mut path = String::new();
+            let mut path = String::with_capacity(4096);
             let mut first = true;
 
             for i in 0..=72 {
