@@ -24,9 +24,14 @@ pub async fn init_db(database_url: &str) -> anyhow::Result<SqlitePool> {
         5
     };
 
+    let connect_options: sqlx::sqlite::SqliteConnectOptions = database_url
+        .parse()
+        .with_context(|| format!("invalid SQLite database URL: {database_url}"))?;
+    let connect_options = connect_options.create_if_missing(true);
+
     let pool = SqlitePoolOptions::new()
         .max_connections(max_connections)
-        .connect(database_url)
+        .connect_with(connect_options)
         .await
         .with_context(|| format!("failed to connect to SQLite at {database_url}"))?;
 
