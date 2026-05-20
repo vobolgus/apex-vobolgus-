@@ -327,8 +327,9 @@
 		const stereoNormYRaw = stereoFinite ? vy / denom : 0;
 		const stereoNormX = clamp(stereoNormXRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
 		const stereoNormY = clamp(stereoNormYRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
-		const stereoInsideDisk = stereoFinite && vz >= 0 && Math.hypot(stereoNormXRaw, stereoNormYRaw) <= 1;
-		const stereoSdf = stereoInsideDisk ? Math.hypot(stereoNormXRaw, stereoNormYRaw) - 1 : PROJECTION_INFINITE_SDF;
+		const stereoNormHypot = Math.hypot(stereoNormXRaw, stereoNormYRaw);
+		const stereoInsideDisk = stereoFinite && vz >= 0 && stereoNormHypot <= 1;
+		const stereoSdf = stereoInsideDisk ? stereoNormHypot - 1 : PROJECTION_INFINITE_SDF;
 		const stereoAlpha = Math.max(STEREO_STAR_MIN_ALPHA, 1 - star.v_mag / STEREO_STAR_ALPHA_MAG_DIVISOR);
 		const stereoRadius = Math.max(STEREO_STAR_MIN_RADIUS_PX, STEREO_STAR_BASE_RADIUS_PX - star.v_mag * STEREO_STAR_MAG_RADIUS_COEFF);
 
