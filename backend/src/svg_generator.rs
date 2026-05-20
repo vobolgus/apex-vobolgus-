@@ -20,7 +20,8 @@ pub fn get_constellations_data() -> &'static HashMap<String, ConstellationJson> 
     static CONSTELLATIONS: OnceLock<HashMap<String, ConstellationJson>> = OnceLock::new();
     CONSTELLATIONS.get_or_init(|| {
         let json_str = include_str!("../../astrageek/catalogs/constellations/constellations_data.json");
-        serde_json::from_str(json_str).expect("Failed to parse constellations_data.json")
+        serde_json::from_str(json_str)
+            .expect("invariant violation: embedded astrageek/catalogs/constellations/constellations_data.json is malformed; this indicates checked-in data corruption")
     })
 }
 
@@ -179,7 +180,8 @@ impl SvgGenerator {
                 let svg_y = center_y - res.y * scale;
                 Some((svg_x, svg_y))
             } else {
-                let res = PinholeProjection::project(x, y, z, center_dir, tilt_angle, camera_config.as_ref().unwrap())?;
+                let camera = camera_config.as_ref()?;
+                let res = PinholeProjection::project(x, y, z, center_dir, tilt_angle, camera)?;
                 Some((res.x_pix, res.y_pix))
             }
         };
