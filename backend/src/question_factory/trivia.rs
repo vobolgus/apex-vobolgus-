@@ -1,10 +1,12 @@
-use super::{QuestionData, QuestionFactory, TriviaQuestion, CONSTELLATION_FACTS, TRIVIA_QUESTIONS};
+use super::{CONSTELLATION_FACTS, QuestionData, QuestionFactory, TRIVIA_QUESTIONS, TriviaQuestion};
 use crate::models::{LayersConfig, QuestionResponse, RenderConfig, StyleConfig};
-use crate::svg_generator::{get_constellations_data, localize_constellation, SvgGenerator};
-use anyhow::{anyhow, Result};
-use rand::{seq::SliceRandom, Rng};
+use crate::svg_generator::{SvgGenerator, get_constellations_data, localize_constellation};
+use anyhow::{Result, anyhow};
+use rand::{Rng, seq::SliceRandom};
 use rust_core::catalog::{HipCatalog, MessierCatalog};
 use std::collections::HashSet;
+
+const GAME_QUESTION_PLANETS_ENABLED: bool = false;
 
 pub(super) fn generate(
     difficulty: &str,
@@ -42,7 +44,12 @@ pub(super) fn generate(
 
     let const_json = get_constellations_data()
         .get(&correct_abbr)
-        .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "constellation '{}' not found in embedded data",
+                correct_abbr
+            )
+        })?;
     let correct_name = localize_constellation(&correct_abbr, &const_json.name);
 
     let mut distractors = pool
@@ -80,7 +87,8 @@ pub(super) fn generate(
             ecliptic: false,
             equator: false,
             galactic_equator: false,
-            planets: false,
+            // intentional: game question images render without planets for deterministic visuals
+            planets: GAME_QUESTION_PLANETS_ENABLED,
             horizontal_grid: false,
             equatorial_grid: false,
             constellations: true,
@@ -155,8 +163,8 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (resp, data) =
-            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate trivia question");
+        let (resp, data) = generate("easy", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate trivia question");
 
         assert_eq!(resp.question_type, "trivia");
         assert_eq!(data.question_type, "trivia");
@@ -174,10 +182,13 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (_, data) =
-            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate trivia question");
+        let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate trivia question");
 
-        let abbr = data.correct_abbr.clone().expect("trivia question should include constellation abbr");
+        let abbr = data
+            .correct_abbr
+            .clone()
+            .expect("trivia question should include constellation abbr");
         assert!(
             data.used_objects.contains(&abbr),
             "used_objects should include selected trivia answer constellation"
@@ -195,6 +206,9 @@ mod tests {
 
         let result = generate("easy", &mut used, &hip_catalog, &messier_catalog);
 
-        assert!(result.is_ok(), "fully used trivia pool should reset and generate");
+        assert!(
+            result.is_ok(),
+            "fully used trivia pool should reset and generate"
+        );
     }
 }

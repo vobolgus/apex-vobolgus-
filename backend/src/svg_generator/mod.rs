@@ -1,15 +1,17 @@
 use crate::models::RenderConfig;
+use chrono::{Datelike, Timelike};
 use rust_core::{
-    Star, DateTime, StereoProjection, PinholeProjection, CameraConfig,
-    catalog::{HipCatalog, MessierCatalog}
+    CameraConfig, DateTime, PinholeProjection, Star, StereoProjection,
+    catalog::{HipCatalog, MessierCatalog},
+    julian_date,
+    planets::{Body, PlanetPosition, all_positions},
 };
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use serde::Deserialize;
-use chrono::{Datelike, Timelike};
 
-mod grids;
 mod constellation_renderer;
+mod grids;
 
 use self::constellation_renderer::{draw_constellation_lines, draw_constellation_names};
 use self::grids::draw_coordinate_grids;
@@ -33,23 +35,57 @@ pub fn get_constellations_data() -> &'static HashMap<String, ConstellationJson> 
 
 // Словарь русских названий созвездий для локализации
 pub static CONSTELLATION_NAMES_RU: &[(&str, &str)] = &[
-    ("AND", "Андромеда"), ("AQL", "Орёл"), ("AQR", "Водолей"),
-    ("ARI", "Овен"), ("AUR", "Возничий"), ("BOO", "Волопас"),
-    ("CAM", "Жираф"), ("CAP", "Козерог"), ("CAS", "Кассиопея"),
-    ("CEP", "Цефей"), ("CET", "Кит"), ("CMA", "Большой Пёс"),
-    ("CMI", "Малый Пёс"), ("CNC", "Рак"), ("COL", "Голубь"),
-    ("COM", "Волосы Вероники"), ("COR", "Южная Корона"), ("CRA", "Южная Корона"),
-    ("CRB", "Северная Корона"), ("CRU", "Южный Крест"), ("CRV", "Ворон"),
-    ("CRT", "Чаша"), ("CVN", "Гончие Псы"), ("CYG", "Лебедь"),
-    ("DEL", "Дельфин"), ("DRA", "Дракон"), ("EQU", "Малый Конь"),
-    ("ERI", "Эридан"), ("GEM", "Близнецы"), ("GRU", "Журавль"),
-    ("HER", "Геркулес"), ("HYA", "Гидра"), ("LEO", "Лев"),
-    ("LIB", "Весы"), ("LYR", "Лира"), ("OPH", "Змееносец"),
-    ("ORI", "Орион"), ("PEG", "Пегас"), ("PER", "Персей"),
-    ("PSC", "Рыбы"), ("SCO", "Скорпион"), ("SCT", "Щит"),
-    ("SER", "Змея"), ("SGR", "Стрелец"), ("TAU", "Телец"),
-    ("TRI", "Треугольник"), ("UMA", "Большая Медведица"), ("UMI", "Малая Медведица"),
-    ("VIR", "Дева"), ("VUL", "Лисичка"), ("SAG", "Стрелец"),
+    ("AND", "Андромеда"),
+    ("AQL", "Орёл"),
+    ("AQR", "Водолей"),
+    ("ARI", "Овен"),
+    ("AUR", "Возничий"),
+    ("BOO", "Волопас"),
+    ("CAM", "Жираф"),
+    ("CAP", "Козерог"),
+    ("CAS", "Кассиопея"),
+    ("CEP", "Цефей"),
+    ("CET", "Кит"),
+    ("CMA", "Большой Пёс"),
+    ("CMI", "Малый Пёс"),
+    ("CNC", "Рак"),
+    ("COL", "Голубь"),
+    ("COM", "Волосы Вероники"),
+    ("COR", "Южная Корона"),
+    ("CRA", "Южная Корона"),
+    ("CRB", "Северная Корона"),
+    ("CRU", "Южный Крест"),
+    ("CRV", "Ворон"),
+    ("CRT", "Чаша"),
+    ("CVN", "Гончие Псы"),
+    ("CYG", "Лебедь"),
+    ("DEL", "Дельфин"),
+    ("DRA", "Дракон"),
+    ("EQU", "Малый Конь"),
+    ("ERI", "Эридан"),
+    ("GEM", "Близнецы"),
+    ("GRU", "Журавль"),
+    ("HER", "Геркулес"),
+    ("HYA", "Гидра"),
+    ("LEO", "Лев"),
+    ("LIB", "Весы"),
+    ("LYR", "Лира"),
+    ("OPH", "Змееносец"),
+    ("ORI", "Орион"),
+    ("PEG", "Пегас"),
+    ("PER", "Персей"),
+    ("PSC", "Рыбы"),
+    ("SCO", "Скорпион"),
+    ("SCT", "Щит"),
+    ("SER", "Змея"),
+    ("SGR", "Стрелец"),
+    ("TAU", "Телец"),
+    ("TRI", "Треугольник"),
+    ("UMA", "Большая Медведица"),
+    ("UMI", "Малая Медведица"),
+    ("VIR", "Дева"),
+    ("VUL", "Лисичка"),
+    ("SAG", "Стрелец"),
 ];
 
 pub fn localize_constellation(abbr: &str, default_name: &str) -> String {
@@ -63,6 +99,60 @@ pub fn localize_constellation(abbr: &str, default_name: &str) -> String {
 
 pub struct SvgGenerator;
 
+fn planet_name(body: Body) -> &'static str {
+    match body {
+        Body::Sun => "sun",
+        Body::Mercury => "mercury",
+        Body::Venus => "venus",
+        Body::Earth => "earth",
+        Body::Moon => "moon",
+        Body::Mars => "mars",
+        Body::Jupiter => "jupiter",
+        Body::Saturn => "saturn",
+        Body::Uranus => "uranus",
+        Body::Neptune => "neptune",
+    }
+}
+
+fn planet_label(body: Body) -> &'static str {
+    match body {
+        Body::Sun => "Sun",
+        Body::Mercury => "Mercury",
+        Body::Venus => "Venus",
+        Body::Earth => "Earth",
+        Body::Moon => "Moon",
+        Body::Mars => "Mars",
+        Body::Jupiter => "Jupiter",
+        Body::Saturn => "Saturn",
+        Body::Uranus => "Uranus",
+        Body::Neptune => "Neptune",
+    }
+}
+
+fn planet_color(body: Body) -> &'static str {
+    match body {
+        Body::Sun => "#FFD166",
+        Body::Mercury => "#B4B0AA",
+        Body::Venus => "#F4E0A0",
+        Body::Earth => "#4A78D0",
+        Body::Moon => "#E8E8E8",
+        Body::Mars => "#E27D60",
+        Body::Jupiter => "#D9A45C",
+        Body::Saturn => "#C9B27B",
+        Body::Uranus => "#7FD8D8",
+        Body::Neptune => "#6E8FE0",
+    }
+}
+
+fn planet_radius(position: &PlanetPosition, magnitude_scale: f32) -> f32 {
+    let base = (magnitude_scale * 1.3 * 10.0f32.powf(-0.16 * position.magnitude as f32)).max(0.6);
+    match position.body {
+        Body::Sun => base.min(12.0),
+        Body::Moon => base.min(10.0),
+        _ => base.min(12.0),
+    }
+}
+
 impl SvgGenerator {
     pub fn render_map(
         config: &RenderConfig,
@@ -72,7 +162,7 @@ impl SvgGenerator {
         highlight_messier: Option<i32>,
     ) -> String {
         let is_stereo = config.projection == "stereo";
-        
+
         // Определяем размеры холста
         let (width, height) = if is_stereo {
             (800, 800)
@@ -120,9 +210,23 @@ impl SvgGenerator {
         // Парсим время
         let dt = if let Some(ref dt_str) = config.datetime {
             if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(dt_str, "%Y-%m-%d %H:%M:%S") {
-                DateTime::new(naive.year(), naive.month(), naive.day(), naive.hour(), naive.minute(), naive.second())
+                DateTime::new(
+                    naive.year(),
+                    naive.month(),
+                    naive.day(),
+                    naive.hour(),
+                    naive.minute(),
+                    naive.second(),
+                )
             } else if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(dt_str, "%Y-%m-%d") {
-                DateTime::new(naive_date.year(), naive_date.month(), naive_date.day(), 0, 0, 0)
+                DateTime::new(
+                    naive_date.year(),
+                    naive_date.month(),
+                    naive_date.day(),
+                    0,
+                    0,
+                    0,
+                )
             } else {
                 DateTime::new(2024, 6, 14, 6, 10, 0)
             }
@@ -143,7 +247,10 @@ impl SvgGenerator {
         let center_dir = if !is_stereo {
             let mut dir = [1.0, 0.0, 0.0];
             if let Some(custom_dir) = config.center_direction {
-                let norm = ((custom_dir[0] as f64).powi(2) + (custom_dir[1] as f64).powi(2) + (custom_dir[2] as f64).powi(2)).sqrt();
+                let norm = ((custom_dir[0] as f64).powi(2)
+                    + (custom_dir[1] as f64).powi(2)
+                    + (custom_dir[2] as f64).powi(2))
+                .sqrt();
                 if norm > 1e-7 {
                     dir = [
                         custom_dir[0] as f64 / norm,
@@ -152,26 +259,32 @@ impl SvgGenerator {
                     ];
                 }
             }
-            if config.center_direction.is_none() {
-                if let Some(ref const_abbr) = config.constellation {
-                    if let Some(c_data) = get_constellations_data().get(const_abbr) {
-                        dir = [c_data.center[0] as f64, c_data.center[1] as f64, c_data.center[2] as f64];
-                    }
-                }
+            if config.center_direction.is_none()
+                && let Some(ref const_abbr) = config.constellation
+                && let Some(c_data) = get_constellations_data().get(const_abbr)
+            {
+                dir = [
+                    c_data.center[0] as f64,
+                    c_data.center[1] as f64,
+                    c_data.center[2] as f64,
+                ];
             }
-            // Если мы подсвечиваем звезду, камера должна смотреть ровно на неё!
-            if let Some(hip_id) = highlight_star_hip {
-                let temp_stars = hip_catalog.get_stars(7.5, None);
-                if let Some(star) = temp_stars.iter().find(|s| s.hip_id == hip_id) {
-                    dir = [star.x as f64, star.y as f64, star.z as f64];
-                }
+
+            if let Some(hip_id) = highlight_star_hip
+                && let Some(star) = hip_catalog
+                    .get_stars(7.5, None)
+                    .iter()
+                    .find(|s| s.hip_id == hip_id)
+            {
+                dir = [star.x as f64, star.y as f64, star.z as f64];
             }
-            // Аналогично для Мессье
-            if let Some(m_num) = highlight_messier {
-                if let Some(obj) = messier_catalog.get_object_by_number(m_num) {
-                    dir = [obj.x as f64, obj.y as f64, obj.z as f64];
-                }
+
+            if let Some(m_num) = highlight_messier
+                && let Some(obj) = messier_catalog.get_object_by_number(m_num)
+            {
+                dir = [obj.x as f64, obj.y as f64, obj.z as f64];
             }
+
             dir
         } else {
             [0.0, 0.0, 0.0]
@@ -182,7 +295,8 @@ impl SvgGenerator {
         // Вспомогательная функция для проецирования звезды/точки ECI
         let project_point = |x: f32, y: f32, z: f32| -> Option<(f32, f32)> {
             if is_stereo {
-                let res = StereoProjection::project(x, y, z, config.latitude, config.longitude, dt)?;
+                let res =
+                    StereoProjection::project(x, y, z, config.latitude, config.longitude, dt)?;
                 let scale = 190.0;
                 let svg_x = center_x + res.x * scale;
                 let svg_y = center_y - res.y * scale;
@@ -227,72 +341,113 @@ impl SvgGenerator {
             }
         }
 
-        // 4. Подсветка Звезды ( highlight_star_hip )
-        if let Some(hip_id) = highlight_star_hip {
-            let temp_stars = hip_catalog.get_stars(7.5, None);
-            if let Some(star) = temp_stars.iter().find(|s| s.hip_id == hip_id) {
-                if let Some((px, py)) = project_point(star.x, star.y, star.z) {
+        // 3.1 Планеты
+        if config.layers.planets {
+            let time_fraction =
+                (dt.hour as f64 + dt.minute as f64 / 60.0 + dt.second as f64 / 3600.0) / 24.0;
+            let jd_ut = julian_date(dt.year, dt.month, dt.day) + time_fraction;
+            let effective_mag_limit = (mag_limit * mag_scale.max(0.1)) as f64;
+
+            for planet in all_positions(jd_ut) {
+                if planet.body == Body::Earth || planet.magnitude > effective_mag_limit {
+                    continue;
+                }
+
+                let [x, y, z] = planet.unit_vector;
+                if let Some((px, py)) = project_point(x as f32, y as f32, z as f32) {
+                    let slug = planet_name(planet.body);
+                    let label = planet_label(planet.body);
+                    let r = planet_radius(&planet, mag_scale);
+                    let color = planet_color(planet.body);
+
                     svg.push_str(&format!(
-                        r##"<circle cx="{:.2}" cy="{:.2}" r="15" fill="none" stroke="#FF6B6B" stroke-width="2.0" opacity="0.9" />"##,
-                        px, py
+                        r##"<circle id="planet-{}" data-planet="{}" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{}" stroke="#0008" stroke-width="0.5" />"##,
+                        slug, slug, px, py, r, color
                     ));
-                    svg.push_str(&format!(
-                        r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
-                        px - 20.0, py, px + 20.0, py
-                    ));
-                    svg.push_str(&format!(
-                        r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
-                        px, py - 20.0, px, py + 20.0
-                    ));
+
+                    if config.layers.constellation_names {
+                        svg.push_str(&format!(
+                            r##"<text data-planet-label="{}" x="{:.2}" y="{:.2}" fill="{}" font-family="{}" font-size="10" text-anchor="start">{}</text>"##,
+                            slug,
+                            px + r + 4.0,
+                            py - r - 2.0,
+                            color,
+                            font_family,
+                            label
+                        ));
+                    }
                 }
             }
         }
 
+        // 4. Подсветка Звезды ( highlight_star_hip )
+        if let Some(hip_id) = highlight_star_hip
+            && let Some(star) = hip_catalog
+                .get_stars(7.5, None)
+                .iter()
+                .find(|s| s.hip_id == hip_id)
+            && let Some((px, py)) = project_point(star.x, star.y, star.z)
+        {
+            svg.push_str(&format!(
+                r##"<circle cx="{:.2}" cy="{:.2}" r="15" fill="none" stroke="#FF6B6B" stroke-width="2.0" opacity="0.9" />"##,
+                px, py
+            ));
+            svg.push_str(&format!(
+                r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
+                px - 20.0, py, px + 20.0, py
+            ));
+            svg.push_str(&format!(
+                r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
+                px, py - 20.0, px, py + 20.0
+            ));
+        }
+
         // 5. Подсветка Объекта Мессье ( highlight_messier )
-        if let Some(m_num) = highlight_messier {
-            if let Some(obj) = messier_catalog.get_object_by_number(m_num) {
-                if let Some((px, py)) = project_point(obj.x, obj.y, obj.z) {
-                    let type_names = [
-                        (1, "Галактика"),
-                        (2, "Шаровое скопление"),
-                        (3, "Рассеянное скопление"),
-                        (4, "Туманность"),
-                        (5, "Остаток сверхновой"),
-                        (6, "Звёздное облако"),
-                        (7, "Двойная звезда"),
-                    ];
-                    let mut type_name = "Объект";
-                    for &(t_id, t_name) in &type_names {
-                        if t_id == obj.obj_type {
-                            type_name = t_name;
-                            break;
-                        }
-                    }
-
-                    let color = obj.type_color();
-                    let size_px = (obj.size * 3.0).clamp(15.0, 150.0);
-
-                    // Отрисовываем красивый маркер
-                    svg.push_str(&format!(
-                        r##"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="none" stroke="{}" stroke-width="2.5" opacity="0.9" />"##,
-                        px, py, size_px, color
-                    ));
-                    svg.push_str(&format!(
-                        r##"<circle cx="{:.2}" cy="{:.2}" r="3" fill="{}" opacity="1.0" />"##,
-                        px, py, color
-                    ));
-
-                    // Красивый информационный заголовок сверху
-                    let title_text = format!(
-                        "Тип: {}  |  Зв. вел.: {:.1}m  |  Угл. р-р: {:.1}'",
-                        type_name, obj.v_mag, obj.size
-                    );
-                    svg.push_str(&format!(
-                        r##"<text x="{}" y="30" fill="#FFFFFF" font-family="{}" font-size="12" font-weight="500" text-anchor="middle">{}</text>"##,
-                        width as f32 / 2.0, font_family, title_text
-                    ));
+        if let Some(m_num) = highlight_messier
+            && let Some(obj) = messier_catalog.get_object_by_number(m_num)
+            && let Some((px, py)) = project_point(obj.x, obj.y, obj.z)
+        {
+            let type_names = [
+                (1, "Галактика"),
+                (2, "Шаровое скопление"),
+                (3, "Рассеянное скопление"),
+                (4, "Туманность"),
+                (5, "Остаток сверхновой"),
+                (6, "Звёздное облако"),
+                (7, "Двойная звезда"),
+            ];
+            let mut type_name = "Объект";
+            for &(t_id, t_name) in &type_names {
+                if t_id == obj.obj_type {
+                    type_name = t_name;
+                    break;
                 }
             }
+
+            let color = obj.type_color();
+            let size_px = (obj.size * 3.0).clamp(15.0, 150.0);
+
+            // Отрисовываем красивый маркер
+            svg.push_str(&format!(
+                r##"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="none" stroke="{}" stroke-width="2.5" opacity="0.9" />"##,
+                px, py, size_px, color
+            ));
+            svg.push_str(&format!(
+                r##"<circle cx="{:.2}" cy="{:.2}" r="3" fill="{}" opacity="1.0" />"##,
+                px, py, color
+            ));
+
+            // Красивый информационный заголовок сверху
+            let title_text = format!(
+                "Тип: {}  |  Зв. вел.: {:.1}m  |  Угл. р-р: {:.1}'",
+                type_name, obj.v_mag, obj.size
+            );
+            svg.push_str(&format!(
+                r##"<text x="{}" y="30" fill="#FFFFFF" font-family="{}" font-size="12" font-weight="500" text-anchor="middle">{}</text>"##,
+                width as f32 / 2.0,
+                font_family,
+                title_text
+            ));
         }
 
         // 6. Названия созвездий
@@ -348,16 +503,28 @@ impl SvgGenerator {
         if config.print_info.unwrap_or(false) {
             let lat_deg = config.latitude;
             let lon_deg = config.longitude;
-            let lat_str = format!("{:.2}° {}", lat_deg.abs(), if lat_deg >= 0.0 { "N" } else { "S" });
-            let lon_str = format!("{:.2}° {}", lon_deg.abs(), if lon_deg >= 0.0 { "E" } else { "W" });
+            let lat_str = format!(
+                "{:.2}° {}",
+                lat_deg.abs(),
+                if lat_deg >= 0.0 { "N" } else { "S" }
+            );
+            let lon_str = format!(
+                "{:.2}° {}",
+                lon_deg.abs(),
+                if lon_deg >= 0.0 { "E" } else { "W" }
+            );
             let info_y = height as f32 - 40.0;
 
             svg.push_str(&format!(
                 r##"<text x="25" y="{}" fill="#A0A0A0" font-family="{}" font-size="11" opacity="0.8">Lat: {} | Lon: {}</text>"##,
                 info_y, font_family, lat_str, lon_str
             ));
-            
-            let dt_display = format!("{}", config.datetime.as_deref().unwrap_or("2024-06-14 06:10:00"));
+
+            let dt_display = config
+                .datetime
+                .as_deref()
+                .unwrap_or("2024-06-14 06:10:00")
+                .to_string();
             svg.push_str(&format!(
                 r##"<text x="25" y="{}" fill="#A0A0A0" font-family="{}" font-size="11" opacity="0.8">Time: {} UTC</text>"##,
                 info_y + 16.0, font_family, dt_display
@@ -381,7 +548,11 @@ impl SvgGenerator {
 mod tests {
     use super::*;
     use crate::models::{LayersConfig, RenderConfig, StyleConfig};
-    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use rust_core::{
+        catalog::{HipCatalog, MessierCatalog},
+        julian_date,
+        planets::{Body, all_positions},
+    };
     use std::sync::OnceLock;
 
     fn baseline_config() -> RenderConfig {
@@ -400,7 +571,7 @@ mod tests {
                 ecliptic: false,
                 equator: false,
                 galactic_equator: false,
-                planets: false,
+                planets: false, // intentional baseline fixture: layer disabled by default in generator tests
                 horizontal_grid: false,
                 equatorial_grid: false,
                 constellations: false,
@@ -539,5 +710,65 @@ mod tests {
         assert!(svg.contains("Lon:"));
         assert!(svg.contains("Time:"));
         assert!(svg.contains("Unit test footer"));
+    }
+
+    #[test]
+    fn test_planets_layer_off_no_circles() {
+        let mut cfg = baseline_config();
+        cfg.layers.planets = false;
+
+        let svg = render(&cfg);
+        assert!(
+            !svg.contains("data-planet="),
+            "no planet markers should be emitted when layer is off"
+        );
+    }
+
+    #[test]
+    fn test_planets_layer_on_renders_visible() {
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.fov_deg = Some(170.0);
+        cfg.aspect_ratio = Some(1.0);
+        cfg.center_direction = Some([1.0, 0.0, 0.0]);
+        cfg.layers.planets = true;
+        cfg.layers.constellation_names = true;
+        cfg.datetime = Some("2024-01-01 00:00:00".to_string());
+        cfg.magnitude_limit = Some(8.0);
+
+        let svg = render(&cfg);
+        let _ = std::fs::write("/tmp/svg_with_planets.svg", &svg);
+        let count = count_occurrences(&svg, "data-planet=");
+        assert!(
+            count >= 4,
+            "expected at least 4 visible planets, got {count}"
+        );
+    }
+
+    #[test]
+    fn test_planets_in_pinhole() {
+        let jd = julian_date(2024, 1, 1);
+        let jupiter = all_positions(jd)
+            .into_iter()
+            .find(|p| p.body == Body::Jupiter)
+            .expect("Jupiter must exist in planet batch");
+
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.fov_deg = Some(45.0);
+        cfg.aspect_ratio = Some(1.0);
+        cfg.datetime = Some("2024-01-01 00:00:00".to_string());
+        cfg.center_direction = Some([
+            jupiter.unit_vector[0] as f32,
+            jupiter.unit_vector[1] as f32,
+            jupiter.unit_vector[2] as f32,
+        ]);
+        cfg.layers.planets = true;
+
+        let svg = render(&cfg);
+        assert!(
+            svg.contains("data-planet=\"jupiter\""),
+            "expected Jupiter marker in pinhole projection"
+        );
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::models::RenderConfig;
 use rust_core::Star;
 
-use super::{localize_constellation, ConstellationJson};
+use super::{ConstellationJson, localize_constellation};
 
 pub(super) fn draw_constellation_lines<F>(
     svg: &mut String,
@@ -21,10 +21,10 @@ pub(super) fn draw_constellation_lines<F>(
     }
 
     for (abbr, const_data) in constellations {
-        if let Some(target) = target_constellation {
-            if target != abbr {
-                continue;
-            }
+        if let Some(target) = target_constellation
+            && target != abbr
+        {
+            continue;
         }
 
         for line in &const_data.lines {
@@ -32,16 +32,16 @@ pub(super) fn draw_constellation_lines<F>(
                 let id1 = line[i];
                 let id2 = line[i + 1];
 
-                if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2)) {
-                    if let (Some((p1_x, p1_y)), Some((p2_x, p2_y))) = (
+                if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2))
+                    && let (Some((p1_x, p1_y)), Some((p2_x, p2_y))) = (
                         project_point(s1.x, s1.y, s1.z),
                         project_point(s2.x, s2.y, s2.z),
-                    ) {
-                        svg.push_str(&format!(
-                            r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="0.8" opacity="0.6" />"##,
-                            p1_x, p1_y, p2_x, p2_y, const_color
-                        ));
-                    }
+                    )
+                {
+                    svg.push_str(&format!(
+                        r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="0.8" opacity="0.6" />"##,
+                        p1_x, p1_y, p2_x, p2_y, const_color
+                    ));
                 }
             }
         }
@@ -63,10 +63,10 @@ pub(super) fn draw_constellation_names<F>(
     }
 
     for (abbr, const_data) in constellations {
-        if let Some(target) = target_constellation {
-            if target != abbr {
-                continue;
-            }
+        if let Some(target) = target_constellation
+            && target != abbr
+        {
+            continue;
         }
 
         let cx = const_data.center[0];

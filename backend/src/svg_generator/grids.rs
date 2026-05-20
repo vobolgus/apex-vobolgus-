@@ -21,14 +21,13 @@ pub(super) fn draw_coordinate_grids<F>(
     }
 }
 
-pub(super) fn draw_equatorial_grid<F>(
-    svg: &mut String,
-    grid_color: &str,
-    project_point: &F,
-) where
+pub(super) fn draw_equatorial_grid<F>(svg: &mut String, grid_color: &str, project_point: &F)
+where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
-    let decs = [-75.0f32, -60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0];
+    let decs = [
+        -75.0f32, -60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0,
+    ];
     for &dec_deg in &decs {
         let dec_rad = dec_deg.to_radians();
         let cos_d = dec_rad.cos();
@@ -97,11 +96,8 @@ pub(super) fn draw_equatorial_grid<F>(
     }
 }
 
-pub(super) fn draw_celestial_equator<F>(
-    svg: &mut String,
-    grid_color: &str,
-    project_point: &F,
-) where
+pub(super) fn draw_celestial_equator<F>(svg: &mut String, grid_color: &str, project_point: &F)
+where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
     let mut path = String::with_capacity(4096);
@@ -136,7 +132,7 @@ pub(super) fn draw_ecliptic<F>(svg: &mut String, project_point: &F)
 where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
-    let epsilon = 23.4392911f32.to_radians();
+    let epsilon = 23.439_291_f32.to_radians();
     let cos_eps = epsilon.cos();
     let sin_eps = epsilon.sin();
     let mut path = String::with_capacity(4096);

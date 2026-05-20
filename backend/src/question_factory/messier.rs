@@ -1,10 +1,12 @@
-use super::{QuestionData, QuestionFactory, MESSIER_FACTS};
+use super::{MESSIER_FACTS, QuestionData, QuestionFactory};
 use crate::models::{LayersConfig, QuestionResponse, RenderConfig, StyleConfig};
 use crate::svg_generator::SvgGenerator;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use rand::seq::SliceRandom;
 use rust_core::catalog::{HipCatalog, MessierCatalog, MessierObject};
 use std::collections::HashSet;
+
+const GAME_QUESTION_PLANETS_ENABLED: bool = false;
 
 pub(super) fn generate(
     difficulty: &str,
@@ -49,7 +51,8 @@ pub(super) fn generate(
             ecliptic: false,
             equator: false,
             galactic_equator: false,
-            planets: false,
+            // intentional: game question images render without planets for deterministic visuals
+            planets: GAME_QUESTION_PLANETS_ENABLED,
             horizontal_grid: false,
             equatorial_grid: false,
             constellations: true,
@@ -69,7 +72,8 @@ pub(super) fn generate(
         footer_text: None,
     };
 
-    let image_svg = SvgGenerator::render_map(&config, hip_catalog, messier_catalog, None, Some(m_num));
+    let image_svg =
+        SvgGenerator::render_map(&config, hip_catalog, messier_catalog, None, Some(m_num));
 
     let _type_name = correct_obj.type_name();
     let ru_type = match correct_obj.obj_type {
@@ -117,7 +121,12 @@ pub(super) fn generate(
         .iter()
         .find(|&&(num, _)| num == m_num)
         .map(|&(_, f)| f.to_string())
-        .unwrap_or_else(|| format!("M{} — {} в созвездии {}.", m_num, ru_type, correct_obj.constellation));
+        .unwrap_or_else(|| {
+            format!(
+                "M{} — {} в созвездии {}.",
+                m_num, ru_type, correct_obj.constellation
+            )
+        });
 
     let question_text = format!(
         "Объект типа «{}» в созвездии {}. Что это за объект Мессье?",
@@ -132,7 +141,11 @@ pub(super) fn generate(
         ),
         options: Some(options.clone()),
         correct_answer,
-        hint: format!("Это {} с видимой звёздной величиной {:.1}m", ru_type.to_lowercase(), correct_obj.v_mag),
+        hint: format!(
+            "Это {} с видимой звёздной величиной {:.1}m",
+            ru_type.to_lowercase(),
+            correct_obj.v_mag
+        ),
         fun_fact: fact,
         hint_used: false,
         correct_abbr: None,
@@ -194,7 +207,9 @@ mod tests {
         let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
             .expect("must generate messier question");
 
-        let m_num = data.correct_m_num.expect("messier question should include m number");
+        let m_num = data
+            .correct_m_num
+            .expect("messier question should include m number");
         assert!(
             data.used_objects.contains(&m_num.to_string()),
             "used_objects should include used Messier number"
@@ -210,7 +225,12 @@ mod tests {
         let (_, data) = generate("hard", &mut used, &hip_catalog, &messier_catalog)
             .expect("must generate messier question");
 
-        let m_num = data.correct_m_num.expect("messier question should include m number");
-        assert!((1..=110).contains(&m_num), "Messier number should be in [1,110], got {m_num}");
+        let m_num = data
+            .correct_m_num
+            .expect("messier question should include m number");
+        assert!(
+            (1..=110).contains(&m_num),
+            "Messier number should be in [1,110], got {m_num}"
+        );
     }
 }

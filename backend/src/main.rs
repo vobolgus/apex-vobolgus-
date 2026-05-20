@@ -1,8 +1,8 @@
-use axum::{
-    routing::{get, post},
-    Router,
-};
 use anyhow::Context;
+use axum::{
+    Router,
+    routing::{get, post},
+};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,9 +15,9 @@ mod question_factory;
 mod svg_generator;
 mod handlers {
     pub mod catalog;
-    pub mod simulation;
-    pub mod game;
     pub mod export;
+    pub mod game;
+    pub mod simulation;
 }
 
 #[derive(Clone)]
@@ -44,7 +44,10 @@ fn build_app(state: AppState) -> Router {
         .route("/", get(|| async { "Apex Backend is running!" }))
         .nest_service("/images", ServeDir::new(images_dir))
         // Catalog endpoints
-        .route("/api/catalog/bright", get(handlers::catalog::get_bright_stars))
+        .route(
+            "/api/catalog/bright",
+            get(handlers::catalog::get_bright_stars),
+        )
         .route("/api/catalog/full", get(handlers::catalog::get_full_stars))
         // Orbit simulation (spec uses GET, keep POST for compatibility)
         .route(
@@ -72,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
     println!("Catalogs loaded successfully.");
 
     println!("Initializing database...");
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://apex.db".to_string());
+    let database_url =
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://apex.db".to_string());
     let db_pool = db::init_db(&database_url).await?;
     println!("Database initialized successfully.");
 
@@ -99,11 +103,11 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::{to_bytes, Body};
-    use axum::http::{Request, StatusCode};
+    use axum::body::{Body, to_bytes};
     use axum::http::header;
-    use serde_json::json;
+    use axum::http::{Request, StatusCode};
     use serde_json::Value;
+    use serde_json::json;
     use tower::ServiceExt;
 
     async fn test_app() -> Router {
@@ -142,7 +146,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(bright_response.status(), StatusCode::OK);
-        let bright_body = to_bytes(bright_response.into_body(), usize::MAX).await.unwrap();
+        let bright_body = to_bytes(bright_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let bright_stars: Vec<Value> = serde_json::from_slice(&bright_body).unwrap();
         assert!(!bright_stars.is_empty());
         assert!(bright_stars.iter().all(|s| {
@@ -162,7 +168,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(full_response.status(), StatusCode::OK);
-        let full_body = to_bytes(full_response.into_body(), usize::MAX).await.unwrap();
+        let full_body = to_bytes(full_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let full_stars: Vec<Value> = serde_json::from_slice(&full_body).unwrap();
         assert!(full_stars.len() > bright_stars.len());
     }
@@ -283,9 +291,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(start_response.status(), StatusCode::OK);
-        let start_payload: Value =
-            serde_json::from_slice(&to_bytes(start_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let start_payload: Value = serde_json::from_slice(
+            &to_bytes(start_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         let session_id = start_payload
             .get("session_id")
             .and_then(Value::as_str)
@@ -334,9 +345,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(answer_response.status(), StatusCode::OK);
-        let answer_payload: Value =
-            serde_json::from_slice(&to_bytes(answer_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
+        let answer_payload: Value = serde_json::from_slice(
+            &to_bytes(answer_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert!(answer_payload.get("correct").is_some());
         assert!(answer_payload.get("current_score").is_some());
 
@@ -355,15 +369,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(finish_response.status(), StatusCode::OK);
-        let finish_payload: Value =
-            serde_json::from_slice(&to_bytes(finish_response.into_body(), usize::MAX).await.unwrap())
-                .unwrap();
-        assert_eq!(
+        let finish_payload: Value = serde_json::from_slice(
+            &to_bytes(finish_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
             finish_payload
                 .get("is_finished")
                 .and_then(Value::as_bool)
-                .unwrap_or(false),
-            true
+                .unwrap_or(false)
         );
     }
 

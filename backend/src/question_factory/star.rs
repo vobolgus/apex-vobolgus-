@@ -1,10 +1,12 @@
-use super::{localize_star, QuestionData, QuestionFactory, NAMED_STARS, STAR_FACTS};
+use super::{NAMED_STARS, QuestionData, QuestionFactory, STAR_FACTS, localize_star};
 use crate::models::{LayersConfig, QuestionResponse, RenderConfig, StyleConfig};
 use crate::svg_generator::SvgGenerator;
 use anyhow::Result;
-use rand::{seq::SliceRandom, Rng};
+use rand::{Rng, seq::SliceRandom};
 use rust_core::catalog::{HipCatalog, MessierCatalog};
 use std::collections::HashSet;
+
+const GAME_QUESTION_PLANETS_ENABLED: bool = false;
 
 pub(super) fn generate(
     difficulty: &str,
@@ -79,7 +81,8 @@ pub(super) fn generate(
             ecliptic: false,
             equator: false,
             galactic_equator: false,
-            planets: false,
+            // intentional: game question images render without planets for deterministic visuals
+            planets: GAME_QUESTION_PLANETS_ENABLED,
             horizontal_grid: false,
             equatorial_grid: false,
             constellations: true,
@@ -99,7 +102,13 @@ pub(super) fn generate(
         footer_text: None,
     };
 
-    let image_svg = SvgGenerator::render_map(&config, hip_catalog, messier_catalog, Some(correct_hip), None);
+    let image_svg = SvgGenerator::render_map(
+        &config,
+        hip_catalog,
+        messier_catalog,
+        Some(correct_hip),
+        None,
+    );
 
     let mut other_names: Vec<String> = NAMED_STARS
         .iter()
@@ -115,7 +124,9 @@ pub(super) fn generate(
     let question_text = match difficulty {
         "easy" => "Как называется звезда, отмеченная красным?".to_string(),
         "medium" => "Введите название звезды, отмеченной красным".to_string(),
-        _ => "Введите название звезды и её экваториальные координаты с точностью до ±10°".to_string(),
+        _ => {
+            "Введите название звезды и её экваториальные координаты с точностью до ±10°".to_string()
+        }
     };
 
     let hint = match difficulty {
@@ -149,7 +160,8 @@ pub(super) fn generate(
         question_text: match difficulty {
             "easy" => "Как называется звезда, отмеченная красным?".to_string(),
             "medium" => "Введите название звезды, отмеченной красным".to_string(),
-            _ => "Введите название звезды и её экваториальные координаты с точностью до ±10°".to_string(),
+            _ => "Введите название звезды и её экваториальные координаты с точностью до ±10°"
+                .to_string(),
         },
         options: if difficulty == "easy" {
             Some(options.clone())
@@ -176,7 +188,11 @@ pub(super) fn generate(
         total_rounds: 10,
         question_type: "star".to_string(),
         question_text,
-        options: if difficulty == "easy" { Some(options) } else { None },
+        options: if difficulty == "easy" {
+            Some(options)
+        } else {
+            None
+        },
         image_svg: Some(image_svg),
         draw_stars: None,
         has_hint: true,
@@ -197,8 +213,8 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (resp, data) =
-            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate star question");
+        let (resp, data) = generate("easy", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate star question");
 
         assert_eq!(resp.question_type, "star");
         assert_eq!(data.question_type, "star");
@@ -216,10 +232,12 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (_, data) =
-            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate star question");
+        let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate star question");
 
-        let hip = data.correct_hip.expect("star question should include HIP id");
+        let hip = data
+            .correct_hip
+            .expect("star question should include HIP id");
         assert!(
             data.used_objects.contains(&hip.to_string()),
             "used_objects should include used HIP id"
@@ -237,7 +255,13 @@ mod tests {
 
         let ra = data.correct_ra_deg.expect("hard mode should include RA");
         let dec = data.correct_dec_deg.expect("hard mode should include Dec");
-        assert!((0.0..=360.0).contains(&ra), "RA should be within [0, 360], got {ra}");
-        assert!((-90.0..=90.0).contains(&dec), "Dec should be within [-90, 90], got {dec}");
+        assert!(
+            (0.0..=360.0).contains(&ra),
+            "RA should be within [0, 360], got {ra}"
+        );
+        assert!(
+            (-90.0..=90.0).contains(&dec),
+            "Dec should be within [-90, 90], got {dec}"
+        );
     }
 }
