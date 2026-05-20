@@ -24,6 +24,8 @@
 !astrageek/**
 !web/
 !web/**
+!frontend/
+!frontend/**
 !tools/
 !tools/**
 !sphinx/
@@ -60,6 +62,10 @@ target/
 build/
 dist/
 *.log
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vercel/
 
 # Generated docs/artifacts
 sphinx/_build/

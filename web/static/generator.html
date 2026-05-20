@@ -577,46 +577,6 @@
         }
         .info-box strong { color: var(--cyan); }
 
-        /* ── LIVE PREVIEW ── */
-        .preview-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 24px;
-            margin-bottom: 24px;
-            position: relative;
-            z-index: 2;
-        }
-        .preview-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .preview-title {
-            font-size: 1rem;
-            font-weight: 700;
-            color: var(--text);
-        }
-        .preview-hint {
-            font-size: .82rem;
-            color: var(--text-dim);
-        }
-        #preview-stage {
-            font-size: .8rem;
-            color: var(--cyan);
-            font-weight: 600;
-        }
-        #live-preview-canvas {
-            width: 100%;
-            aspect-ratio: 16 / 9;
-            background: radial-gradient(circle at center, #101827 0%, #060912 70%);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            display: block;
-        }
-
         /* ── FOOTER ── */
         footer {
             border-top: 1px solid var(--border);
@@ -667,17 +627,6 @@
 
 <!-- Main Form -->
 <div class="container">
-    <!-- Live preview -->
-    <div class="preview-card">
-        <div class="preview-header">
-            <div>
-                <div class="preview-title">Live preview</div>
-                <div class="preview-hint">Сначала загружается bright-каталог, затем в фоне полный каталог.</div>
-            </div>
-            <div id="preview-stage">Загрузка bright-каталога…</div>
-        </div>
-        <canvas id="live-preview-canvas" width="1280" height="720"></canvas>
-    </div>
 
     <!-- Режим проекции -->
     <div class="form-card">
@@ -978,11 +927,6 @@ window.addEventListener('scroll', () => {
 
 // ── MODE SWITCHER ─────────────────────────────────────────────────────────
 let currentMode = 'stereo';
-let previewCenter = { ra: Math.PI, dec: 0.0 };
-let brightStars = [];
-let fullStars = [];
-let fullCatalogLoaded = false;
-const API_BASE = window.location.port === '8080' ? '' : 'http://localhost:8080';
 
 function updateStereoOnlyFlags(mode) {
     document.querySelectorAll('.stereo-only').forEach(el => {
@@ -1009,7 +953,6 @@ function setMode(mode) {
 
     updateStereoOnlyFlags(mode);
     updateGridStepsRow();
-    renderLivePreview();
 }
 
 // Подписываемся на чекбоксы сетки для показа шага
@@ -1017,131 +960,6 @@ function setMode(mode) {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', updateGridStepsRow);
 });
-
-// ── LIVE PREVIEW DATA LAYERS ──────────────────────────────────────────────
-function setPreviewStage(text) {
-    const el = document.getElementById('preview-stage');
-    if (el) el.textContent = text;
-}
-
-async function loadLayeredCatalog() {
-    try {
-        setPreviewStage('Загрузка bright-каталога…');
-        const brightResp = await fetch(`${API_BASE}/api/catalog/bright?max_mag=4.0`);
-        brightStars = await brightResp.json();
-        renderLivePreview();
-        setPreviewStage(`Bright: ${brightStars.length} звёзд`);
-    } catch (e) {
-        console.error('Failed loading bright catalog', e);
-        setPreviewStage('Ошибка загрузки bright-каталога');
-        return;
-    }
-
-    try {
-        setPreviewStage('Фоновая загрузка полного каталога…');
-        const fullResp = await fetch(`${API_BASE}/api/catalog/full?max_mag=6.5`);
-        fullStars = await fullResp.json();
-        fullCatalogLoaded = true;
-        renderLivePreview();
-        setPreviewStage(`Full: ${fullStars.length} звёзд`);
-    } catch (e) {
-        console.error('Failed loading full catalog', e);
-        setPreviewStage('Bright загружен, full недоступен');
-    }
-}
-
-function angularWrap(x) {
-    while (x > Math.PI) x -= 2 * Math.PI;
-    while (x < -Math.PI) x += 2 * Math.PI;
-    return x;
-}
-
-function hashConstellationToCenter(constellationCode) {
-    let hash = 0;
-    for (let i = 0; i < constellationCode.length; i++) {
-        hash = ((hash << 5) - hash) + constellationCode.charCodeAt(i);
-        hash |= 0;
-    }
-    const ra = ((Math.abs(hash) % 360) / 180) * Math.PI;
-    const dec = ((((Math.abs(hash) / 360) % 160) - 80) / 180) * Math.PI;
-    return { ra, dec };
-}
-
-function pickPreviewCenter() {
-    if (currentMode === 'stereo') {
-        return { ra: Math.PI, dec: 0.0 };
-    }
-    const randomDirection = document.getElementById('random_direction')?.checked;
-    if (randomDirection) return previewCenter;
-
-    const code = (document.getElementById('constellation')?.value || '').trim().toUpperCase();
-    if (code.length === 3) {
-        return hashConstellationToCenter(code);
-    }
-    return { ra: Math.PI, dec: 0.0 };
-}
-
-function currentCatalog() {
-    return fullCatalogLoaded ? fullStars : brightStars;
-}
-
-function renderLivePreview() {
-    const canvas = document.getElementById('live-preview-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Background
-    const bg = ctx.createRadialGradient(w * 0.5, h * 0.5, 40, w * 0.5, h * 0.5, h * 0.6);
-    bg.addColorStop(0, '#121a2c');
-    bg.addColorStop(1, '#050812');
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, w, h);
-
-    const stars = currentCatalog();
-    if (!stars.length) return;
-
-    const magLimit = parseFloat(document.getElementById('v_mag_limit')?.value || '5.5');
-    const visible = stars.filter(s => Number.isFinite(s.v_mag) && s.v_mag <= magLimit);
-    const center = pickPreviewCenter();
-
-    if (currentMode === 'pinhole') {
-        previewCenter = center;
-    }
-
-    const fovDeg = parseFloat(document.getElementById('fov')?.value || '60');
-    const halfFov = (fovDeg * Math.PI / 180) / 2;
-
-    for (const s of visible) {
-        const ra = s.ra;
-        const dec = s.dec;
-        let x, y;
-
-        if (currentMode === 'stereo') {
-            x = ((ra / (2 * Math.PI)) + 0.5) % 1.0;
-            y = 1.0 - ((dec + Math.PI / 2) / Math.PI);
-            x *= w;
-            y *= h;
-        } else {
-            const dra = angularWrap(ra - center.ra);
-            const ddec = dec - center.dec;
-            if (Math.abs(dra) > halfFov || Math.abs(ddec) > halfFov) continue;
-            x = ((dra / halfFov) * 0.5 + 0.5) * w;
-            y = ((-ddec / halfFov) * 0.5 + 0.5) * h;
-        }
-
-        if (x < 0 || x > w || y < 0 || y > h) continue;
-        const r = Math.max(0.6, 3.8 - (s.v_mag * 0.45));
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#f8fafc';
-        ctx.globalAlpha = Math.max(0.35, 1.0 - (s.v_mag / 8.0));
-        ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-}
 
 // ── RANDOM DIRECTION (pinhole) ────────────────────────────────────────────
 function toggleRandomDirection(enabled) {
@@ -1287,52 +1105,62 @@ async function generate() {
     const datetimeVal = document.getElementById(datetimeId).value;
 
     // ── Общие флаги ───────────────────────────────────────────────────────
-    const fmtDateTime = datetimeVal ? `${datetimeVal.replace('T', ' ')}:00` : null;
-    const stereoLat = parseFloat(document.getElementById('latitude').value);
-    const stereoLon = parseFloat(document.getElementById('longitude').value);
-    const randomDir = document.getElementById('random_direction')?.checked;
-    const randomTilt = document.getElementById('random_tilt')?.checked;
-
     const payload = {
-        projection: currentMode,
-        datetime: fmtDateTime,
-        latitude: currentMode === 'stereo' ? stereoLat : 45.0,
-        longitude: currentMode === 'stereo' ? stereoLon : 19.0,
-        magnitude_limit: parseFloat(document.getElementById('v_mag_limit').value),
-        fov_deg: currentMode === 'pinhole' ? parseFloat(document.getElementById('fov').value || '60') : 120.0,
-        aspect_ratio: currentMode === 'pinhole' ? parseFloat(document.getElementById('aspect_ratio').value || '1.5') : 1.0,
-        constellation: currentMode === 'pinhole' && !randomDir
-            ? document.getElementById('constellation').value.trim().toUpperCase()
-            : null,
-        tilt_angle: currentMode === 'pinhole'
-            ? (randomTilt ? Math.floor(Math.random() * 360) : parseFloat(document.getElementById('tilt_angle').value || '0'))
-            : 0.0,
-        layers: {
-            ecliptic: document.getElementById('add_ecliptic').checked,
-            equator: document.getElementById('add_equator').checked,
-            galactic_equator: document.getElementById('add_galactic_equator').checked,
-            planets: document.getElementById('add_planets').checked,
-            horizontal_grid: currentMode === 'stereo' ? document.getElementById('add_horizontal_grid').checked : false,
-            equatorial_grid: document.getElementById('add_equatorial_grid').checked,
-            constellations: document.getElementById('add_constellations').checked,
-            constellation_names: document.getElementById('add_constellations_names').checked,
-            zenith: currentMode === 'stereo' ? document.getElementById('add_zenith').checked : false,
-            poles: currentMode === 'stereo' ? document.getElementById('add_poles').checked : false
-        },
-        style: {
-            star_color: "#FFFFFF",
-            constellation_line_color: "#808080",
-            grid_color: "#404040",
-            background_color: "#05050A",
-            font_family: "sans-serif",
-            magnitude_scale: 1.0
-        },
-        print_info: currentMode === 'stereo' ? document.getElementById('print_skychart_info').checked : false,
-        footer_text: "apex-skychart.ru"
+        mode:                 currentMode,
+        datetime:             datetimeVal || null,
+        v_mag_limit:          parseFloat(document.getElementById('v_mag_limit').value),
+
+        // Флаги общие для обоих режимов
+        add_ecliptic:            document.getElementById('add_ecliptic').checked,
+        add_equator:             document.getElementById('add_equator').checked,
+        add_galactic_equator:    document.getElementById('add_galactic_equator').checked,
+        add_planets:             document.getElementById('add_planets').checked,
+        add_equatorial_grid:     document.getElementById('add_equatorial_grid').checked,
+        add_constellations:      document.getElementById('add_constellations').checked,
+        add_constellations_names: document.getElementById('add_constellations_names').checked,
+
+        // Шаг сетки
+        grid_theta_step: parseFloat(document.getElementById('grid_theta_step').value) || 15.0,
+        grid_phi_step:   parseFloat(document.getElementById('grid_phi_step').value)   || 15.0,
+
+        // Флаги только для stereo (false для pinhole)
+        add_horizontal_grid: currentMode === 'stereo'
+            ? document.getElementById('add_horizontal_grid').checked : false,
+        add_ticks:           currentMode === 'stereo'
+            ? document.getElementById('add_ticks').checked           : false,
+        add_zenith:          currentMode === 'stereo'
+            ? document.getElementById('add_zenith').checked          : false,
+        add_poles:           currentMode === 'stereo'
+            ? document.getElementById('add_poles').checked           : false,
+        random_origin:       currentMode === 'stereo'
+            ? document.getElementById('random_origin').checked       : false,
+
+        // Только для stereo
+        print_skychart_info: currentMode === 'stereo'
+            ? document.getElementById('print_skychart_info').checked : false,
     };
 
+    // ── Специфичные поля по режиму ────────────────────────────────────────
+    if (currentMode === 'stereo') {
+        payload.latitude  = parseFloat(document.getElementById('latitude').value);
+        payload.longitude = parseFloat(document.getElementById('longitude').value);
+    } else {
+        const randomDir = document.getElementById('random_direction').checked;
+        payload.random_direction = randomDir;
+        if (!randomDir) {
+            payload.constellation = document.getElementById('constellation').value.trim().toUpperCase();
+        }
+        payload.fov          = parseFloat(document.getElementById('fov').value);
+        const randomTilt = document.getElementById('random_tilt').checked;
+        payload.tilt_angle = randomTilt
+            ? Math.floor(Math.random() * 360)
+            : parseFloat(document.getElementById('tilt_angle').value) || 0;
+        payload.aspect_ratio = parseFloat(document.getElementById('aspect_ratio').value);
+        payload.height_pix   = 1200;
+    }
+
     try {
-        const resp = await fetch(`${API_BASE}/api/export`, {
+        const resp = await fetch('/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1363,20 +1191,6 @@ async function generate() {
         btn.disabled = false;
     }
 }
-
-// ── PREVIEW INITIALIZATION ────────────────────────────────────────────────
-[
-    'v_mag_limit', 'constellation', 'fov', 'tilt_angle', 'aspect_ratio',
-    'random_direction', 'random_tilt', 'datetime-stereo', 'datetime-pinhole'
-].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('input', renderLivePreview);
-    el.addEventListener('change', renderLivePreview);
-});
-
-setMode('stereo');
-loadLayeredCatalog();
 </script>
 
 </body>
