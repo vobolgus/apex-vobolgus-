@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "flubber": "^0.4.2"
+  },
+  "devDependencies": {
+    "@types/flubber": "^0.4.0"
+  }
+}

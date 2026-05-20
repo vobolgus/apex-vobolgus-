@@ -11,25 +11,14 @@
 !.github/
 !.github/**
 !README.md
-!README.ru.md
 !CHANGELOG.md
 !LICENSE
-!MANIFEST.in
 !SPEC.md
-!pyproject.toml
-!.pre-commit-config.yaml
+!AGENTS.md
 
-# Python project structure
-!astrageek/
-!astrageek/**
-!web/
-!web/**
+# Frontend (SvelteKit)
 !frontend/
 !frontend/**
-!tools/
-!tools/**
-!sphinx/
-!sphinx/**
 
 # Rust workspace structure
 !Cargo.toml
@@ -39,18 +28,14 @@
 !rust-core/
 !rust-core/**
 
+# Top-level Node tooling
+!package.json
+!package-lock.json
+
 # Explicitly keep local/editor/generated artifacts ignored
 .cursor/
 .vscode/
 .idea/
-__pycache__/
-*.py[cod]
-*.pyd
-*.so
-*.tmp
-*.bak
-*~
-*.swp
 .DS_Store
 Thumbs.db
 ehthumbs.db
@@ -66,12 +51,9 @@ frontend/node_modules/
 frontend/.svelte-kit/
 frontend/build/
 frontend/.vercel/
+node_modules/
 
 # Playwright runtime artifacts (keep baselines under e2e/)
 frontend/e2e-results/
 frontend/playwright-report/
 frontend/test-results/
-
-# Generated docs/artifacts
-sphinx/_build/
-README_PYPI.md
