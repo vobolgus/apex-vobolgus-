@@ -2,7 +2,7 @@
 	import { PROJECTION_TRANSITION_MIN_MS, PROJECTION_TRANSITION_MS } from '$lib/constants';
 	import { CanvasRenderer, getProjectionBlend } from '$lib/renderer/canvas-renderer';
 	import { InputController } from '$lib/renderer/input-handlers';
-	import type { MorphInterpolatorFactory, ProjectionAnimationState } from '$lib/renderer/types';
+	import type { MorphInterpolatorFactory } from '$lib/renderer/types';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { onMount } from 'svelte';
 
@@ -19,12 +19,22 @@
 	const projectionOptions = ['stereographic', 'pinhole'] as const;
 	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
 	let flubberInterpolate: MorphInterpolatorFactory | null = null;
-	let projectionBlend = 0;
-	let projectionBlendAnimating = false;
-	let projectionBlendFrom = 0;
-	let projectionBlendTo = 0;
-	let projectionBlendStartMs = 0;
-	let projectionBlendDurationMs = PROJECTION_TRANSITION_MS;
+	type ProjectionBlendState = {
+		blend: number;
+		animating: boolean;
+		from: number;
+		to: number;
+		startMs: number;
+		durationMs: number;
+	};
+	let projection = $state<ProjectionBlendState>({
+		blend: 0,
+		animating: false,
+		from: 0,
+		to: 0,
+		startMs: 0,
+		durationMs: PROJECTION_TRANSITION_MS
+	});
 	let renderer: CanvasRenderer | null = null;
 
 	onMount(() => {
@@ -103,57 +113,50 @@
 		if (rafId) return;
 		rafId = requestAnimationFrame((frameTimeMs) => {
 			rafId = 0;
-			if (!renderDirty && !projectionBlendAnimating) return;
+			if (!renderDirty && !projection.animating) return;
 			renderDirty = false;
-			const tick = getProjectionBlend(frameTimeMs, getProjectionAnimationState(), projectionBlend);
-			projectionBlend = tick.blend;
-			projectionBlendAnimating = tick.animating;
+			const tick = getProjectionBlend(frameTimeMs, projection, projection.blend);
+			projection.blend = tick.blend;
+			projection.animating = tick.animating;
 			renderer?.render({
 				orientation: view.orientation,
 				fovDeg: view.fovDeg,
 				starVectors: catalog.starVectors,
-				projectionBlend
+				projectionBlend: projection.blend
 			});
-			if (projectionBlendAnimating) {
+			if (projection.animating) {
 				markRenderDirty();
 			}
 		});
 	}
 
-	function getProjectionAnimationState(): ProjectionAnimationState {
-		return {
-			animating: projectionBlendAnimating,
-			from: projectionBlendFrom,
-			to: projectionBlendTo,
-			startMs: projectionBlendStartMs,
-			durationMs: projectionBlendDurationMs
-		};
-	}
-
 	function startProjectionTransition(nextProjection: (typeof projectionOptions)[number]) {
 		const targetBlend = nextProjection === 'pinhole' ? 1 : 0;
 		const nowMs = performance.now();
-		const tick = getProjectionBlend(nowMs, getProjectionAnimationState(), projectionBlend);
-		projectionBlend = tick.blend;
-		projectionBlendAnimating = tick.animating;
-		const currentBlend = projectionBlend;
+		const tick = getProjectionBlend(nowMs, projection, projection.blend);
+		projection.blend = tick.blend;
+		projection.animating = tick.animating;
+		const currentBlend = projection.blend;
 		selectedProjection = nextProjection;
 		projectionMenuOpen = false;
 		if (Math.abs(targetBlend - currentBlend) <= 0.001) {
-			projectionBlendAnimating = false;
-			projectionBlend = targetBlend;
+			projection.animating = false;
+			projection.blend = targetBlend;
 			markRenderDirty();
 			return;
 		}
-		projectionBlendFrom = currentBlend;
-		projectionBlendTo = targetBlend;
-		projectionBlendStartMs = nowMs;
-		projectionBlendDurationMs = Math.max(
+		const durationMs = Math.max(
 			PROJECTION_TRANSITION_MIN_MS,
-			PROJECTION_TRANSITION_MS * Math.abs(projectionBlendTo - projectionBlendFrom)
+			PROJECTION_TRANSITION_MS * Math.abs(targetBlend - currentBlend)
 		);
-		projectionBlendAnimating = true;
-		projectionBlend = currentBlend;
+		Object.assign(projection, {
+			from: currentBlend,
+			to: targetBlend,
+			startMs: nowMs,
+			durationMs,
+			animating: true,
+			blend: currentBlend
+		});
 		markRenderDirty();
 	}
 
