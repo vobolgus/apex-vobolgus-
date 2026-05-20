@@ -1,18 +1,20 @@
+use anyhow::Context;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::fs;
 use std::path::Path;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-pub async fn init_db(database_url: &str) -> SqlitePool {
+pub async fn init_db(database_url: &str) -> anyhow::Result<SqlitePool> {
     // Если используется файловая база данных, создаем родительские директории, если их нет
     if database_url.starts_with("sqlite://") && database_url != "sqlite::memory:" {
         let path_str = database_url.trim_start_matches("sqlite://");
         let path = Path::new(path_str);
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent).unwrap();
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
         }
     }
 
@@ -22,12 +24,12 @@ pub async fn init_db(database_url: &str) -> SqlitePool {
         .max_connections(max_connections)
         .connect(database_url)
         .await
-        .expect("Failed to connect to SQLite");
+        .with_context(|| format!("failed to connect to SQLite at {database_url}"))?;
 
     MIGRATOR
         .run(&pool)
         .await
-        .expect("Failed to run migrations");
+        .context("failed to run sqlx migrations")?;
 
-    pool
+    Ok(pool)
 }

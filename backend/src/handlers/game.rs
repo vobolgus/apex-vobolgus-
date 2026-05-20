@@ -668,7 +668,7 @@ mod tests {
     #[tokio::test]
     async fn test_full_game_flow() {
         // 1. Инициализируем in-memory базу данных
-        let db = init_db("sqlite::memory:").await;
+        let db = init_db("sqlite::memory:").await.unwrap();
         
         let state = AppState {
             db,

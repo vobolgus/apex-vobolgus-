@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Initializing database...");
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://apex.db".to_string());
-    let db_pool = db::init_db(&database_url).await;
+    let db_pool = db::init_db(&database_url).await?;
     println!("Database initialized successfully.");
 
     let state = AppState {
@@ -114,7 +114,7 @@ mod tests {
     use tower::ServiceExt;
 
     async fn test_app() -> Router {
-        let db = db::init_db("sqlite::memory:").await;
+        let db = db::init_db("sqlite::memory:").await.unwrap();
         let state = AppState {
             db,
             hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
