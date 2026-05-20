@@ -1,106 +1,86 @@
-Switch language
+# Apex — Web service and mobile app for learning astronomy
 
-[![en](https://img.shields.io/badge/lang-en-red.svg)](https://github.com/04Maksimka/AstraGeek/blob/main/README.md)
-[![ru](https://img.shields.io/badge/lang-ru-green.svg)](https://github.com/04Maksimka/AstraGeek/blob/main/README.ru.md)
+Apex offers three independent tools under one brand:
 
-# 🌌 AstraGeek. Star maps
+1. **Star-map Generator**: Custom PDF and SVG maps for observations, Olympiads, and astronomy lessons. It features high-fidelity real-time previews with support for stereographic and pinhole projections.
+2. **Sky Quiz**: An educational gaming platform with five distinct modes for learning constellations, stars, and Messier objects. It implements engagement mechanics like streaks, ranks, and scoring bonuses.
+3. **AstraEtudes**: A suite of interactive physics simulators designed for educational purposes, covering orbital mechanics, lunar phases, and other astronomical phenomena.
 
-This is a project for AstraGeek astronomy online school.
-Here you can find some software for building star maps.
+The project is designed for students, educators, and astronomy enthusiasts, providing a modern dark-space UI experience.
 
-On the [website](https://skychart.astrageek.ru/) of this AstraGeek project you are able to create classic skycharts and star sky maps.
+## Stack
 
-Also visit [astrageek.ru](https://astrageek.ru/) for educational videos on astronomy and related topics.
+- **Rust Core**: The engine of the project, implemented as a shared library (`rust-core/`). It handles star catalogs (Hipparcos, Messier), coordinate projections, and orbital mechanics.
+- **Backend**: A high-performance Axum-based HTTP API (`backend/`) using SQLx for SQLite persistence. It handles server-side PDF/SVG export and game session management.
+- **Frontend**: A reactive SvelteKit web application (`frontend/`). It utilizes 2D Canvas for instantaneous local previews, ensuring a seamless user experience.
+- **Mobile (Planned)**: Cross-platform iOS and Android applications built with Flutter. It will leverage `flutter_rust_bridge` to execute the Rust core natively on the device for offline capabilities.
 
----
+## Architecture
 
-## Features
+```text
+┌─────────────────────────────────────────┐
+│             rust-core (lib)             │
+│   catalog · projections · mechanics     │
+│   scoring · constellation data         │
+└──────────┬──────────────────┬───────────┘
+           │                  │
+    ┌──────▼──────┐    ┌──────▼────────────────┐
+    │ Axum server │    │   Flutter (mobile)    │
+    │ PDF export  │    │   (planned)           │
+    │ Game API    │    │   FFI → rust-core     │
+    │ Sim API     │    └───────────────────────┘
+    └──────┬──────┘
+           │ HTTP
+    ┌──────▼──────────────────────────────┐
+    │           SvelteKit (web)           │
+    │  Landing · Generator · Quiz · Sims  │
+    │  Canvas preview — realtime (JS)     │
+    └─────────────────────────────────────┘
+```
 
-1. Stereographic projection of the entire sky available at specified location and time
-2. Pinhole projection for a specific small area of the sky at specified constellation direction
-3. You can add various additional reference elements, such as a coordinate grids, coordinate great circles (ecliptic, galactic and celestial equator), cardinal directions, zenith point, and celestial poles.
-4. You can add the outlines of all visible constellations, selected constellations, and the names of each visible constellation to the image.
+## Key Features
 
----
+- **High-Precision Astronomy**: Uses standard astronomical catalogs and rigorous projection algorithms.
+- **Real-Time Visualization**: Instant feedback in the generator UI using client-side Canvas rendering.
+- **Multi-Format Export**: Generate production-ready PDF and SVG maps for print and digital use.
+- **Gamified Learning**: Progressive difficulty levels and rank-based progression in Sky Quiz.
+- **Physical Simulations**: Numerical integrators (RK4) for realistic orbital mechanics modeling.
+- **Optimized Performance**: Layered catalog loading ensures the interface remains responsive even with large datasets.
 
-## Examples
+## How to develop
 
-Pinhole projection example (without a legend) with parameters: ...
+### Backend
 
-<img alt="image" src="https://github.com/user-attachments/assets/c73f3266-20ec-4617-b763-e1647df4d081" style="max-width: 100%; height: auto;" />
+From the repository root:
 
-Full: [pinhole.pdf](https://github.com/user-attachments/files/24474532/pinhole_local_logo.pdf)
+```bash
+cargo run -p backend
+```
 
+Configurable via `DATABASE_URL` (defaults to `sqlite://apex.db`).
 
-Stereographic projection example (without a legend) with parameters: ...
+### Frontend
 
-<img alt="image" src="https://github.com/user-attachments/assets/dfd66621-1e12-43cb-b6c1-06ad275bdd12" style="max-width: 100%; height: auto;" />
+From the `frontend/` directory:
 
-Full: [stereographic.pdf](https://github.com/user-attachments/files/24474544/polar_scatter_local_logo.pdf)
+```bash
+npm install
+npm run dev
+```
 
----
+### Tests
 
-## How to use
+- **Rust**: `cargo test --workspace`
+- **Frontend**: `cd frontend && npm run check && npm run test:unit && npx playwright test`
 
+## Project structure
 
-**If wou want to generate new maps by yourself, follow the documentation section below**
+- `rust-core/`: The core astronomy engine. Includes star catalog loaders, projection mathematics, and physical mechanics.
+- `backend/`: Axum server implementation. Handles API endpoints for catalogs, game sessions, and high-quality PDF/SVG generation using the `plotters` crate.
+- `frontend/`: The web frontend built with SvelteKit and Tailwind CSS. Contains the landing page, generator UI, and quiz game screens.
+- `SPEC.md`: The source of truth for the project's technical specification, architectural design, and UI/UX references.
+- `Cargo.toml`: Workspace configuration for the Rust ecosystem.
 
-You can use the ready-made sets of starry sky maps that we have already generated. To do this, you need:
+## License
 
-1. Follow the [link](https://drive.google.com/drive/folders/1AfBc7pkqLH_65TMAeXvpzzzqrLcVKNFO?usp=sharing)
-2. Download archives with pinhole camera mode maps and skycharts
-
-Inside each folder there are maps of the starry sky with tasks grouped by numbers. 
-
-There are two folders inside the **pinhole_samples** folder:
-
-1. **сonstellations** - maps with a specific central constellation, for each of the 88 constellations
-2. **random_sky** - maps with an arbitrary central constellation, 10 examples
-
-The 100 skycharts for random date and place are grouped inside the 
-**stereographic_samples** folder.
-
-Each group consists of three files:
-
-1. For a student without planets - _student.pdf_
-2. For a student with planets - _student_with_planets.pdf_
-3. For the teacher - _teacher.pdf_
-
-Each file consists of two pages: on the first there are tasks for the map, on the second there is the map itself.
-
-The student's file contains only assignments and a "bare" map. The file for the teacher contains all the answers and a completed map.
-
----
-
-## Documentation
-
-| Section           | Link                                                          |
-|-------------------|---------------------------------------------------------------|
-| Learn More        | [Usage documentation](https://04maksimka.github.io/AstraGeek/) |
-| Package on PyPI   | [PyPI](https://pypi.org/project/astrageek/)               |
-| Project on GitHub | [GitHub Repo](https://github.com/04Maksimka/AstraGeek)        |
-| Submit Issue      | [Report](https://github.com/04Maksimka/AstraGeek/issues/new)  |
-
----
-
-## Rust backend (workspace)
-
-The repository now includes a Rust workspace with `rust-core` and an Axum-based `backend`.
-
-Project structure:
-
-- `Cargo.toml` (workspace root) - defines members and shared Cargo settings.
-- `rust-core/` - domain logic and reusable astronomy engine:
-  - star/Messier catalogs and loaders,
-  - projection math (stereographic and pinhole),
-  - scoring/time utilities and core tests.
-- `backend/` - HTTP API service (Axum + SQLx + SQLite):
-  - `src/main.rs` - app bootstrap, shared state, route registration,
-  - `src/handlers/` - API endpoints (`catalog`, `simulation`, `game`, `export`),
-  - `src/db.rs` - database initialization and schema bootstrap,
-  - `src/question_factory.rs` and `src/svg_generator.rs` - game logic and render/export helpers.
-
-Runtime defaults:
-
-- backend port: `8080`
-- database URL: `sqlite://apex.db` (project root)
+Refer to the [LICENSE](LICENSE) file for details.
