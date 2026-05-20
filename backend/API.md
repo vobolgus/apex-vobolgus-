@@ -9,7 +9,6 @@ Base URL (local): `http://localhost:8080`
 
 ## Static assets
 
-- `GET /static/*` - web static files
 - `GET /images/m31.jpeg` - Messier image assets (`m1..m110`)
 
 ## Catalog

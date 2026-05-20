@@ -4,7 +4,7 @@ use axum::{
 };
 use anyhow::Context;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
@@ -27,17 +27,12 @@ pub struct AppState {
     pub messier_catalog: Arc<rust_core::catalog::MessierCatalog>,
 }
 
+fn messier_assets_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/messier")
+}
+
 fn build_app(state: AppState) -> Router {
-    let static_dir = if Path::new("web/static").exists() {
-        "web/static"
-    } else {
-        "../web/static"
-    };
-    let images_dir = if Path::new("web/images").exists() {
-        "web/images"
-    } else {
-        "../web/images"
-    };
+    let images_dir = messier_assets_dir();
 
     // Настройка CORS
     let cors = CorsLayer::new()
@@ -47,7 +42,6 @@ fn build_app(state: AppState) -> Router {
 
     Router::new()
         .route("/", get(|| async { "Apex Backend is running!" }))
-        .nest_service("/static", ServeDir::new(static_dir))
         .nest_service("/images", ServeDir::new(images_dir))
         // Catalog endpoints
         .route("/api/catalog/bright", get(handlers::catalog::get_bright_stars))
@@ -110,7 +104,6 @@ mod tests {
     use axum::http::header;
     use serde_json::json;
     use serde_json::Value;
-    use std::path::Path;
     use tower::ServiceExt;
 
     async fn test_app() -> Router {
@@ -243,30 +236,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn smoke_static_assets_served() {
-        let app = test_app().await;
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/static/index.html")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
     async fn smoke_messier_images_available() {
-        let local_images = if Path::new("web/images").exists() {
-            "web/images"
-        } else {
-            "../web/images"
-        };
-
-        let messier_count = std::fs::read_dir(local_images)
+        let messier_count = std::fs::read_dir(messier_assets_dir())
             .unwrap()
             .flatten()
             .filter(|e| {
