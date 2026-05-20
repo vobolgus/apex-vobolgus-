@@ -43,7 +43,7 @@ pub fn julian_date(year: i32, month: u32, day: u32) -> f64 {
 }
 
 pub fn get_sidereal_time(_longitude: f64, date_time: DateTime) -> f64 {
-    // В оригинальной реализации astrageek параметр longitude объявлен, но не используется.
+    // Параметр longitude объявлен, но пока не используется.
     // Мы повторяем это поведение для 100% математической идентичности.
     
     // jd на 0 January (31 декабря предыдущего года)
