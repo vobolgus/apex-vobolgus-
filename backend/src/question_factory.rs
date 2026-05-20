@@ -244,7 +244,7 @@ impl QuestionFactory {
     pub fn make_question(
         mode: &str,
         difficulty: &str,
-        mut used_objects: HashSet<String>,
+        used_objects: &mut HashSet<String>,
         hip_catalog: &HipCatalog,
         messier_catalog: &MessierCatalog,
     ) -> Result<(QuestionResponse, QuestionData)> {
@@ -353,7 +353,7 @@ impl QuestionFactory {
                     correct_m_num: None,
                     ref_edges: None,
                     predrawn_edges: None,
-                    used_objects: used_objects.clone(),
+                    used_objects: std::mem::take(used_objects),
                 };
 
                 let q_resp = QuestionResponse {
@@ -508,7 +508,7 @@ impl QuestionFactory {
                     correct_m_num: None,
                     ref_edges: None,
                     predrawn_edges: None,
-                    used_objects: used_objects.clone(),
+                    used_objects: std::mem::take(used_objects),
                 };
 
                 let q_resp = QuestionResponse {
@@ -653,7 +653,7 @@ impl QuestionFactory {
                     correct_m_num: Some(m_num),
                     ref_edges: None,
                     predrawn_edges: None,
-                    used_objects: used_objects.clone(),
+                    used_objects: std::mem::take(used_objects),
                 };
 
                 let q_resp = QuestionResponse {
@@ -857,7 +857,7 @@ impl QuestionFactory {
                     correct_m_num: None,
                     ref_edges: Some(ref_edges),
                     predrawn_edges: Some(predrawn_edges),
-                    used_objects: used_objects.clone(),
+                    used_objects: std::mem::take(used_objects),
                 };
 
                 let q_resp = QuestionResponse {
@@ -984,7 +984,7 @@ impl QuestionFactory {
                     correct_m_num: None,
                     ref_edges: None,
                     predrawn_edges: None,
-                    used_objects: used_objects.clone(),
+                    used_objects: std::mem::take(used_objects),
                 };
 
                 let q_resp = QuestionResponse {
@@ -1014,14 +1014,14 @@ mod tests {
 
     #[test]
     fn test_make_question_unknown_mode_returns_error() {
-        let used = HashSet::new();
+        let mut used = HashSet::new();
         let hip_catalog = HipCatalog::new();
         let messier_catalog = MessierCatalog::new();
 
         let result = QuestionFactory::make_question(
             "definitely_not_a_real_mode",
             "easy",
-            used,
+            &mut used,
             &hip_catalog,
             &messier_catalog,
         );

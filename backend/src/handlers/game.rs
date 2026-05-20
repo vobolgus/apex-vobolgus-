@@ -149,7 +149,7 @@ pub async fn get_question(
     }
 
     // Сбор использованных объектов из предыдущих вопросов
-    let used_objects = if let Some(ref data_str) = session_current_question_data {
+    let mut used_objects = if let Some(ref data_str) = session_current_question_data {
         if let Ok(q_data) = serde_json::from_str::<QuestionData>(data_str) {
             q_data.used_objects
         } else {
@@ -163,7 +163,7 @@ pub async fn get_question(
     let (mut q_resp, q_data) = QuestionFactory::make_question(
         &session_mode,
         &session_difficulty,
-        used_objects,
+        &mut used_objects,
         &state.hip_catalog,
         &state.messier_catalog,
     )
@@ -370,7 +370,7 @@ fn rebuild_question_response(
         let temp_resp = QuestionFactory::make_question(
             "draw",
             "medium", // дефолтная сложность
-            HashSet::new(),
+            &mut HashSet::new(),
             &state.hip_catalog,
             &state.messier_catalog,
         )
