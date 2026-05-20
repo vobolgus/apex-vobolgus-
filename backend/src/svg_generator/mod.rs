@@ -376,3 +376,168 @@ impl SvgGenerator {
         svg
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{LayersConfig, RenderConfig, StyleConfig};
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::sync::OnceLock;
+
+    fn baseline_config() -> RenderConfig {
+        RenderConfig {
+            projection: "stereo".to_string(),
+            datetime: Some("2024-06-14 06:10:00".to_string()),
+            latitude: 55.75,
+            longitude: 37.62,
+            magnitude_limit: Some(6.0),
+            fov_deg: Some(60.0),
+            aspect_ratio: Some(1.5),
+            constellation: None,
+            center_direction: None,
+            tilt_angle: Some(0.0),
+            layers: LayersConfig {
+                ecliptic: false,
+                equator: false,
+                galactic_equator: false,
+                planets: false,
+                horizontal_grid: false,
+                equatorial_grid: false,
+                constellations: false,
+                constellation_names: false,
+                zenith: false,
+                poles: false,
+            },
+            style: StyleConfig {
+                star_color: "#FFFFFF".to_string(),
+                constellation_line_color: "#808080".to_string(),
+                grid_color: "#404040".to_string(),
+                background_color: "#05050A".to_string(),
+                font_family: "sans-serif".to_string(),
+                magnitude_scale: 1.0,
+            },
+            print_info: Some(false),
+            footer_text: None,
+        }
+    }
+
+    fn catalogs() -> (&'static HipCatalog, &'static MessierCatalog) {
+        static HIP: OnceLock<HipCatalog> = OnceLock::new();
+        static MESSIER: OnceLock<MessierCatalog> = OnceLock::new();
+        (
+            HIP.get_or_init(HipCatalog::new),
+            MESSIER.get_or_init(MessierCatalog::new),
+        )
+    }
+
+    fn render(cfg: &RenderConfig) -> String {
+        let (hip, messier) = catalogs();
+        SvgGenerator::render_map(cfg, hip, messier, None, None)
+    }
+
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.match_indices(needle).count()
+    }
+
+    #[test]
+    fn render_stereo_produces_svg_envelope() {
+        let cfg = baseline_config();
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<svg"), "must contain <svg>");
+        assert!(svg.contains("</svg>"), "must contain </svg>");
+    }
+
+    #[test]
+    fn render_stereo_adds_clip_mask_and_border_elements() {
+        let cfg = baseline_config();
+        let svg = render(&cfg);
+
+        assert!(svg.contains("clipPath id=\"sky-mask\""));
+        assert!(svg.contains("<circle cx=\"400\" cy=\"400\" r=\"380\""));
+        assert!(svg.contains(">N</text>"));
+        assert!(svg.contains(">S</text>"));
+    }
+
+    #[test]
+    fn render_pinhole_produces_svg_without_stereo_mask() {
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.fov_deg = Some(60.0);
+        cfg.aspect_ratio = Some(1.5);
+        cfg.constellation = Some("ORI".to_string());
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<svg"));
+        assert!(!svg.contains("sky-mask"));
+    }
+
+    #[test]
+    fn render_respects_magnitude_limit() {
+        let mut cfg = baseline_config();
+
+        cfg.magnitude_limit = Some(0.0);
+        let svg_bright = render(&cfg);
+
+        cfg.magnitude_limit = Some(6.0);
+        let svg_full = render(&cfg);
+
+        let bright_circles = count_occurrences(&svg_bright, "<circle cx=");
+        let full_circles = count_occurrences(&svg_full, "<circle cx=");
+        assert!(
+            full_circles > bright_circles,
+            "magnitude 6.0 should render more stars than 0.0"
+        );
+    }
+
+    #[test]
+    fn render_with_equatorial_grid_layer_adds_paths() {
+        let mut cfg = baseline_config();
+        cfg.layers.equatorial_grid = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("stroke-width=\"0.5\" opacity=\"0.25\""));
+        assert!(count_occurrences(&svg, "<path d=") > 0);
+    }
+
+    #[test]
+    fn render_with_ecliptic_layer_adds_dashed_path() {
+        let mut cfg = baseline_config();
+        cfg.layers.ecliptic = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("stroke=\"#FFD700\""));
+        assert!(svg.contains("stroke-dasharray=\"4,4\""));
+    }
+
+    #[test]
+    fn render_with_constellation_layers_draws_lines_and_names() {
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.constellation = Some("ORI".to_string());
+        cfg.layers.constellations = true;
+        cfg.layers.constellation_names = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<line x1="));
+        assert!(svg.contains("Орион"));
+    }
+
+    #[test]
+    fn render_with_info_and_footer_prints_labels() {
+        let mut cfg = baseline_config();
+        cfg.print_info = Some(true);
+        cfg.footer_text = Some("Unit test footer".to_string());
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("Lat:"));
+        assert!(svg.contains("Lon:"));
+        assert!(svg.contains("Time:"));
+        assert!(svg.contains("Unit test footer"));
+    }
+}
