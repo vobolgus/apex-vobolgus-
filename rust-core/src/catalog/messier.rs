@@ -47,6 +47,12 @@ pub struct MessierCatalog {
     objects: Vec<MessierObject>,
 }
 
+impl Default for MessierCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessierCatalog {
     pub fn new() -> Self {
         let binary_data = include_bytes!("messier_data.bin");
@@ -63,7 +69,10 @@ impl MessierCatalog {
     }
 
     pub fn get_object_by_number(&self, m_number: i32) -> Option<MessierObject> {
-        self.objects.iter().find(|o| o.m_number == m_number).cloned()
+        self.objects
+            .iter()
+            .find(|o| o.m_number == m_number)
+            .cloned()
     }
 
     pub fn get_objects_by_type(&self, obj_type: i32) -> Vec<MessierObject> {

@@ -53,7 +53,10 @@ impl PinholeProjection {
         let star = [star_x as f64, star_y as f64, star_z as f64];
 
         // 1. Z-axis: -center_direction normalized
-        let z_norm = (center_direction[0].powi(2) + center_direction[1].powi(2) + center_direction[2].powi(2)).sqrt();
+        let z_norm = (center_direction[0].powi(2)
+            + center_direction[1].powi(2)
+            + center_direction[2].powi(2))
+        .sqrt();
         if z_norm == 0.0 {
             return None;
         }
@@ -62,9 +65,13 @@ impl PinholeProjection {
             -center_direction[1] / z_norm,
             -center_direction[2] / z_norm,
         ];
-        
+
         let z_axis_norm = (z_axis[0].powi(2) + z_axis[1].powi(2) + z_axis[2].powi(2)).sqrt();
-        z_axis = [z_axis[0] / z_axis_norm, z_axis[1] / z_axis_norm, z_axis[2] / z_axis_norm];
+        z_axis = [
+            z_axis[0] / z_axis_norm,
+            z_axis[1] / z_axis_norm,
+            z_axis[2] / z_axis_norm,
+        ];
 
         // Define ECI z-axis
         let mut up_vec = [0.0, 0.0, 1.0];

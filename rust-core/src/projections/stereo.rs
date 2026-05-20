@@ -1,4 +1,4 @@
-use crate::time::{vequinox_hour_angle, DateTime};
+use crate::time::{DateTime, vequinox_hour_angle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

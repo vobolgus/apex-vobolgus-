@@ -15,6 +15,12 @@ pub struct HipCatalog {
     stars: Vec<Star>,
 }
 
+impl Default for HipCatalog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HipCatalog {
     pub fn new() -> Self {
         let binary_data = include_bytes!("hip_data.bin");
@@ -25,7 +31,7 @@ impl HipCatalog {
     pub fn get_stars(&self, max_mag: f32, min_mag: Option<f32>) -> Vec<Star> {
         self.stars
             .iter()
-            .filter(|s| s.v_mag <= max_mag && min_mag.map_or(true, |min| s.v_mag >= min))
+            .filter(|s| s.v_mag <= max_mag && min_mag.is_none_or(|min| s.v_mag >= min))
             .cloned()
             .collect()
     }
@@ -35,7 +41,7 @@ impl HipCatalog {
     pub fn iter_stars(&self, max_mag: f32, min_mag: Option<f32>) -> impl Iterator<Item = &Star> {
         self.stars
             .iter()
-            .filter(move |s| s.v_mag <= max_mag && min_mag.map_or(true, |min| s.v_mag >= min))
+            .filter(move |s| s.v_mag <= max_mag && min_mag.is_none_or(|min| s.v_mag >= min))
     }
 }
 
