@@ -1,5 +1,19 @@
 <script lang="ts">
+	import { projectPointerToArcball } from '$lib/math/arcball';
+	import { clamp, easeInOutCubic, lerp, smoothstep } from '$lib/math/easing';
 	import { onMount } from 'svelte';
+	import {
+		multiplyQuaternions,
+		normalizeQuaternion,
+		quaternionConjugate,
+		quaternionBetweenVectors,
+		rotateVectorByQuaternion,
+		dot,
+		cross,
+		normalizeVec3,
+		type Quaternion,
+		type Vec3
+	} from '$lib/math/quaternion';
 
 	type Star = {
 		ra: number;
@@ -12,19 +26,6 @@
 		y: number;
 		z: number;
 		v_mag: number;
-	};
-
-	type Vec3 = {
-		x: number;
-		y: number;
-		z: number;
-	};
-
-	type Quaternion = {
-		x: number;
-		y: number;
-		z: number;
-		w: number;
 	};
 
 	type MorphInterpolatorFactory = (
@@ -182,101 +183,6 @@
 				markRenderDirty();
 			}
 		});
-	}
-
-	function dot(a: Vec3, b: Vec3) {
-		return a.x * b.x + a.y * b.y + a.z * b.z;
-	}
-
-	function cross(a: Vec3, b: Vec3): Vec3 {
-		return {
-			x: a.y * b.z - a.z * b.y,
-			y: a.z * b.x - a.x * b.z,
-			z: a.x * b.y - a.y * b.x
-		};
-	}
-
-	function normalizeVec3(v: Vec3): Vec3 {
-		const len = Math.hypot(v.x, v.y, v.z);
-		if (len < EPSILON) return { x: 0, y: 0, z: 0 };
-		return { x: v.x / len, y: v.y / len, z: v.z / len };
-	}
-
-	function normalizeQuaternion(q: Quaternion): Quaternion {
-		const len = Math.hypot(q.x, q.y, q.z, q.w);
-		if (len < EPSILON) return { x: 0, y: 0, z: 0, w: 1 };
-		return { x: q.x / len, y: q.y / len, z: q.z / len, w: q.w / len };
-	}
-
-	function multiplyQuaternions(a: Quaternion, b: Quaternion): Quaternion {
-		return {
-			x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-			y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-			z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-			w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
-		};
-	}
-
-	function quaternionFromAxisAngle(axis: Vec3, angle: number): Quaternion {
-		const halfAngle = angle * 0.5;
-		const sinHalf = Math.sin(halfAngle);
-		return normalizeQuaternion({
-			x: axis.x * sinHalf,
-			y: axis.y * sinHalf,
-			z: axis.z * sinHalf,
-			w: Math.cos(halfAngle)
-		});
-	}
-
-	function quaternionBetweenVectors(from: Vec3, to: Vec3): Quaternion {
-		const axis = cross(from, to);
-		const axisLen = Math.hypot(axis.x, axis.y, axis.z);
-		const alignment = Math.max(-1, Math.min(1, dot(from, to)));
-		if (axisLen < EPSILON) {
-			// Near parallel/opposite vectors: pick a stable fallback axis.
-			if (alignment > 0) return { x: 0, y: 0, z: 0, w: 1 };
-			const fallbackAxis = Math.abs(from.x) < 0.9 ? cross(from, { x: 1, y: 0, z: 0 }) : cross(from, { x: 0, y: 1, z: 0 });
-			const normalizedFallback = normalizeVec3(fallbackAxis);
-			return quaternionFromAxisAngle(normalizedFallback, Math.PI * ARCBALL_ROTATION_GAIN);
-		}
-		const normalizedAxis = { x: axis.x / axisLen, y: axis.y / axisLen, z: axis.z / axisLen };
-		const angle = Math.acos(alignment) * ARCBALL_ROTATION_GAIN;
-		return quaternionFromAxisAngle(normalizedAxis, angle);
-	}
-
-	function projectPointerToArcball(clientX: number, clientY: number, rect: DOMRect): Vec3 {
-		const cx = rect.left + rect.width * 0.5;
-		const cy = rect.top + rect.height * 0.5;
-		const radius = Math.max(1, Math.min(rect.width, rect.height) * 0.5);
-		// Keep interaction axes in sync with camera/view handedness.
-		const x = (cx - clientX) / radius;
-		const y = (cy - clientY) / radius;
-		const squaredLength = x * x + y * y;
-		if (squaredLength <= 1) {
-			return { x, y, z: Math.sqrt(1 - squaredLength) };
-		}
-		const invLength = 1 / Math.sqrt(squaredLength);
-		return { x: x * invLength, y: y * invLength, z: 0 };
-	}
-
-	function clamp(value: number, min: number, max: number) {
-		return Math.min(max, Math.max(min, value));
-	}
-
-	function lerp(from: number, to: number, t: number) {
-		return from + (to - from) * t;
-	}
-
-	function easeInOutCubic(t: number) {
-		return 0.5 - Math.cos(Math.PI * clamp(t, 0, 1)) * 0.5;
-	}
-
-	function smoothstep(edge0: number, edge1: number, x: number) {
-		if (Math.abs(edge1 - edge0) < EPSILON) {
-			return x < edge0 ? 0 : 1;
-		}
-		const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-		return t * t * (3 - 2 * t);
 	}
 
 	function getProjectionFrameParams(width: number, height: number, scaleT: number) {
@@ -632,30 +538,6 @@
 		} catch (error) {
 			console.error(error);
 		}
-	}
-
-	function quaternionConjugate(q: Quaternion): Quaternion {
-		return { x: -q.x, y: -q.y, z: -q.z, w: q.w };
-	}
-
-	function rotateVectorByQuaternion(
-		x: number,
-		y: number,
-		z: number,
-		q: Quaternion
-	): [number, number, number] {
-		const qx = q.x;
-		const qy = q.y;
-		const qz = q.z;
-		const qw = q.w;
-		const uvx = qy * z - qz * y;
-		const uvy = qz * x - qx * z;
-		const uvz = qx * y - qy * x;
-		const uuvx = qy * uvz - qz * uvy;
-		const uuvy = qz * uvx - qx * uvz;
-		const uuvz = qx * uvy - qy * uvx;
-		const scale = 2 * qw;
-		return [x + uvx * scale + uuvx * 2, y + uvy * scale + uuvy * 2, z + uvz * scale + uuvz * 2];
 	}
 
 	function rotateVector(x: number, y: number, z: number): [number, number, number] {
