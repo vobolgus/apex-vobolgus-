@@ -8,6 +8,12 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use chrono::{Datelike, Timelike};
 
+mod grids;
+mod constellation_renderer;
+
+use self::constellation_renderer::{draw_constellation_lines, draw_constellation_names};
+use self::grids::draw_coordinate_grids;
+
 #[derive(Debug, Deserialize)]
 pub struct ConstellationJson {
     pub name: String,
@@ -19,8 +25,9 @@ pub struct ConstellationJson {
 pub fn get_constellations_data() -> &'static HashMap<String, ConstellationJson> {
     static CONSTELLATIONS: OnceLock<HashMap<String, ConstellationJson>> = OnceLock::new();
     CONSTELLATIONS.get_or_init(|| {
-        let json_str = include_str!("../../astrageek/catalogs/constellations/constellations_data.json");
-        serde_json::from_str(json_str).expect("Failed to parse constellations_data.json")
+        let json_str = include_str!("../../../astrageek/catalogs/constellations/constellations_data.json");
+        serde_json::from_str(json_str)
+            .expect("invariant violation: embedded astrageek/catalogs/constellations/constellations_data.json is malformed; this indicates checked-in data corruption")
     })
 }
 
@@ -81,7 +88,9 @@ impl SvgGenerator {
         let grid_color = &config.style.grid_color;
         let font_family = &config.style.font_family;
 
-        let mut svg = String::new();
+        // Pre-allocate to avoid O(n²) reallocations during SVG build.
+        // Empirically derived from full-sky maps ~200KB; round to power-of-2.
+        let mut svg = String::with_capacity(256 * 1024);
         svg.push_str(&format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="100%" height="100%">"##,
             width, height
@@ -179,142 +188,14 @@ impl SvgGenerator {
                 let svg_y = center_y - res.y * scale;
                 Some((svg_x, svg_y))
             } else {
-                let res = PinholeProjection::project(x, y, z, center_dir, tilt_angle, camera_config.as_ref().unwrap())?;
+                let camera = camera_config.as_ref()?;
+                let res = PinholeProjection::project(x, y, z, center_dir, tilt_angle, camera)?;
                 Some((res.x_pix, res.y_pix))
             }
         };
 
         // 1. Отрисовка координатных сеток
-        if config.layers.equatorial_grid {
-            let decs = [-75.0f32, -60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0];
-            for &dec_deg in &decs {
-                let dec_rad = dec_deg.to_radians();
-                let cos_d = dec_rad.cos();
-                let sin_d = dec_rad.sin();
-                let mut path = String::new();
-                let mut first = true;
-
-                for i in 0..=72 {
-                    let ra_deg = (i as f32) * 5.0;
-                    let ra_rad = ra_deg.to_radians();
-                    let x = cos_d * ra_rad.cos();
-                    let y = cos_d * ra_rad.sin();
-                    let z = sin_d;
-
-                    if let Some((px, py)) = project_point(x, y, z) {
-                        if first {
-                            path.push_str(&format!("M {} {}", px, py));
-                            first = false;
-                        } else {
-                            path.push_str(&format!(" L {} {}", px, py));
-                        }
-                    } else {
-                        first = true;
-                    }
-                }
-                if !path.is_empty() {
-                    svg.push_str(&format!(
-                        r##"<path d="{}" fill="none" stroke="{}" stroke-width="0.5" opacity="0.25" />"##,
-                        path, grid_color
-                    ));
-                }
-            }
-
-            for h in 0..24 {
-                let ra_deg = (h as f32) * 15.0;
-                let ra_rad = ra_deg.to_radians();
-                let cos_r = ra_rad.cos();
-                let sin_r = ra_rad.sin();
-                let mut path = String::new();
-                let mut first = true;
-
-                for i in 0..=36 {
-                    let dec_deg = -90.0 + (i as f32) * 5.0;
-                    let dec_rad = dec_deg.to_radians();
-                    let x = dec_rad.cos() * cos_r;
-                    let y = dec_rad.cos() * sin_r;
-                    let z = dec_rad.sin();
-
-                    if let Some((px, py)) = project_point(x, y, z) {
-                        if first {
-                            path.push_str(&format!("M {} {}", px, py));
-                            first = false;
-                        } else {
-                            path.push_str(&format!(" L {} {}", px, py));
-                        }
-                    } else {
-                        first = true;
-                    }
-                }
-                if !path.is_empty() {
-                    svg.push_str(&format!(
-                        r##"<path d="{}" fill="none" stroke="{}" stroke-width="0.5" opacity="0.25" />"##,
-                        path, grid_color
-                    ));
-                }
-            }
-        }
-
-        if config.layers.equator {
-            let mut path = String::new();
-            let mut first = true;
-            for i in 0..=72 {
-                let ra_deg = (i as f32) * 5.0;
-                let ra_rad = ra_deg.to_radians();
-                let x = ra_rad.cos();
-                let y = ra_rad.sin();
-                let z = 0.0;
-
-                if let Some((px, py)) = project_point(x, y, z) {
-                    if first {
-                        path.push_str(&format!("M {} {}", px, py));
-                        first = false;
-                    } else {
-                        path.push_str(&format!(" L {} {}", px, py));
-                    }
-                } else {
-                    first = true;
-                }
-            }
-            if !path.is_empty() {
-                svg.push_str(&format!(
-                    r##"<path d="{}" fill="none" stroke="{}" stroke-width="1.0" opacity="0.45" />"##,
-                    path, grid_color
-                ));
-            }
-        }
-
-        if config.layers.ecliptic {
-            let epsilon = 23.4392911f32.to_radians();
-            let cos_eps = epsilon.cos();
-            let sin_eps = epsilon.sin();
-            let mut path = String::new();
-            let mut first = true;
-
-            for i in 0..=72 {
-                let lambda = (i as f32 * 5.0).to_radians();
-                let x = lambda.cos();
-                let y = lambda.sin() * cos_eps;
-                let z = lambda.sin() * sin_eps;
-
-                if let Some((px, py)) = project_point(x, y, z) {
-                    if first {
-                        path.push_str(&format!("M {} {}", px, py));
-                        first = false;
-                    } else {
-                        path.push_str(&format!(" L {} {}", px, py));
-                    }
-                } else {
-                    first = true;
-                }
-            }
-            if !path.is_empty() {
-                svg.push_str(&format!(
-                    r##"<path d="{}" fill="none" stroke="#FFD700" stroke-width="1.0" stroke-dasharray="4,4" opacity="0.6" />"##,
-                    path,
-                ));
-            }
-        }
+        draw_coordinate_grids(&mut svg, config, grid_color, &project_point);
 
         // 2. Линии созвездий
         let constellations = get_constellations_data();
@@ -324,34 +205,15 @@ impl SvgGenerator {
         let stars = hip_catalog.get_stars(mag_limit, None);
         let star_map: HashMap<i32, &Star> = stars.iter().map(|s| (s.hip_id, s)).collect();
 
-        if config.layers.constellations {
-            for (abbr, const_data) in constellations {
-                if let Some(target) = target_constellation {
-                    if target != abbr {
-                        continue;
-                    }
-                }
-
-                for line in &const_data.lines {
-                    for i in 0..(line.len() - 1) {
-                        let id1 = line[i];
-                        let id2 = line[i + 1];
-
-                        if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2)) {
-                            if let (Some((p1_x, p1_y)), Some((p2_x, p2_y))) = (
-                                project_point(s1.x, s1.y, s1.z),
-                                project_point(s2.x, s2.y, s2.z)
-                            ) {
-                                svg.push_str(&format!(
-                                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="0.8" opacity="0.6" />"##,
-                                    p1_x, p1_y, p2_x, p2_y, const_color
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        draw_constellation_lines(
+            &mut svg,
+            config,
+            constellations,
+            target_constellation,
+            &star_map,
+            const_color,
+            &project_point,
+        );
 
         // 3. Звезды
         let mag_scale = config.style.magnitude_scale;
@@ -434,27 +296,14 @@ impl SvgGenerator {
         }
 
         // 6. Названия созвездий
-        if config.layers.constellation_names {
-            for (abbr, const_data) in constellations {
-                if let Some(target) = target_constellation {
-                    if target != abbr {
-                        continue;
-                    }
-                }
-
-                let cx = const_data.center[0];
-                let cy = const_data.center[1];
-                let cz = const_data.center[2];
-
-                if let Some((px, py)) = project_point(cx, cy, cz) {
-                    let ru_name = localize_constellation(abbr, &const_data.name);
-                    svg.push_str(&format!(
-                        r##"<text x="{:.2}" y="{:.2}" fill="#FFFFFF" font-family="{}" font-size="10" opacity="0.75" text-anchor="middle" dominant-baseline="middle">{}</text>"##,
-                        px, py + 12.0, font_family, ru_name
-                    ));
-                }
-            }
-        }
+        draw_constellation_names(
+            &mut svg,
+            config,
+            constellations,
+            target_constellation,
+            font_family,
+            &project_point,
+        );
 
         svg.push_str("</g>");
 
@@ -525,5 +374,170 @@ impl SvgGenerator {
 
         svg.push_str("</svg>");
         svg
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{LayersConfig, RenderConfig, StyleConfig};
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::sync::OnceLock;
+
+    fn baseline_config() -> RenderConfig {
+        RenderConfig {
+            projection: "stereo".to_string(),
+            datetime: Some("2024-06-14 06:10:00".to_string()),
+            latitude: 55.75,
+            longitude: 37.62,
+            magnitude_limit: Some(6.0),
+            fov_deg: Some(60.0),
+            aspect_ratio: Some(1.5),
+            constellation: None,
+            center_direction: None,
+            tilt_angle: Some(0.0),
+            layers: LayersConfig {
+                ecliptic: false,
+                equator: false,
+                galactic_equator: false,
+                planets: false,
+                horizontal_grid: false,
+                equatorial_grid: false,
+                constellations: false,
+                constellation_names: false,
+                zenith: false,
+                poles: false,
+            },
+            style: StyleConfig {
+                star_color: "#FFFFFF".to_string(),
+                constellation_line_color: "#808080".to_string(),
+                grid_color: "#404040".to_string(),
+                background_color: "#05050A".to_string(),
+                font_family: "sans-serif".to_string(),
+                magnitude_scale: 1.0,
+            },
+            print_info: Some(false),
+            footer_text: None,
+        }
+    }
+
+    fn catalogs() -> (&'static HipCatalog, &'static MessierCatalog) {
+        static HIP: OnceLock<HipCatalog> = OnceLock::new();
+        static MESSIER: OnceLock<MessierCatalog> = OnceLock::new();
+        (
+            HIP.get_or_init(HipCatalog::new),
+            MESSIER.get_or_init(MessierCatalog::new),
+        )
+    }
+
+    fn render(cfg: &RenderConfig) -> String {
+        let (hip, messier) = catalogs();
+        SvgGenerator::render_map(cfg, hip, messier, None, None)
+    }
+
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.match_indices(needle).count()
+    }
+
+    #[test]
+    fn render_stereo_produces_svg_envelope() {
+        let cfg = baseline_config();
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<svg"), "must contain <svg>");
+        assert!(svg.contains("</svg>"), "must contain </svg>");
+    }
+
+    #[test]
+    fn render_stereo_adds_clip_mask_and_border_elements() {
+        let cfg = baseline_config();
+        let svg = render(&cfg);
+
+        assert!(svg.contains("clipPath id=\"sky-mask\""));
+        assert!(svg.contains("<circle cx=\"400\" cy=\"400\" r=\"380\""));
+        assert!(svg.contains(">N</text>"));
+        assert!(svg.contains(">S</text>"));
+    }
+
+    #[test]
+    fn render_pinhole_produces_svg_without_stereo_mask() {
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.fov_deg = Some(60.0);
+        cfg.aspect_ratio = Some(1.5);
+        cfg.constellation = Some("ORI".to_string());
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<svg"));
+        assert!(!svg.contains("sky-mask"));
+    }
+
+    #[test]
+    fn render_respects_magnitude_limit() {
+        let mut cfg = baseline_config();
+
+        cfg.magnitude_limit = Some(0.0);
+        let svg_bright = render(&cfg);
+
+        cfg.magnitude_limit = Some(6.0);
+        let svg_full = render(&cfg);
+
+        let bright_circles = count_occurrences(&svg_bright, "<circle cx=");
+        let full_circles = count_occurrences(&svg_full, "<circle cx=");
+        assert!(
+            full_circles > bright_circles,
+            "magnitude 6.0 should render more stars than 0.0"
+        );
+    }
+
+    #[test]
+    fn render_with_equatorial_grid_layer_adds_paths() {
+        let mut cfg = baseline_config();
+        cfg.layers.equatorial_grid = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("stroke-width=\"0.5\" opacity=\"0.25\""));
+        assert!(count_occurrences(&svg, "<path d=") > 0);
+    }
+
+    #[test]
+    fn render_with_ecliptic_layer_adds_dashed_path() {
+        let mut cfg = baseline_config();
+        cfg.layers.ecliptic = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("stroke=\"#FFD700\""));
+        assert!(svg.contains("stroke-dasharray=\"4,4\""));
+    }
+
+    #[test]
+    fn render_with_constellation_layers_draws_lines_and_names() {
+        let mut cfg = baseline_config();
+        cfg.projection = "pinhole".to_string();
+        cfg.constellation = Some("ORI".to_string());
+        cfg.layers.constellations = true;
+        cfg.layers.constellation_names = true;
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("<line x1="));
+        assert!(svg.contains("Орион"));
+    }
+
+    #[test]
+    fn render_with_info_and_footer_prints_labels() {
+        let mut cfg = baseline_config();
+        cfg.print_info = Some(true);
+        cfg.footer_text = Some("Unit test footer".to_string());
+
+        let svg = render(&cfg);
+
+        assert!(svg.contains("Lat:"));
+        assert!(svg.contains("Lon:"));
+        assert!(svg.contains("Time:"));
+        assert!(svg.contains("Unit test footer"));
     }
 }
