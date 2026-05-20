@@ -9,7 +9,9 @@ use serde::Deserialize;
 use chrono::{Datelike, Timelike};
 
 mod grids;
+mod constellation_renderer;
 
+use self::constellation_renderer::{draw_constellation_lines, draw_constellation_names};
 use self::grids::draw_coordinate_grids;
 
 #[derive(Debug, Deserialize)]
@@ -203,34 +205,15 @@ impl SvgGenerator {
         let stars = hip_catalog.get_stars(mag_limit, None);
         let star_map: HashMap<i32, &Star> = stars.iter().map(|s| (s.hip_id, s)).collect();
 
-        if config.layers.constellations {
-            for (abbr, const_data) in constellations {
-                if let Some(target) = target_constellation {
-                    if target != abbr {
-                        continue;
-                    }
-                }
-
-                for line in &const_data.lines {
-                    for i in 0..(line.len() - 1) {
-                        let id1 = line[i];
-                        let id2 = line[i + 1];
-
-                        if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2)) {
-                            if let (Some((p1_x, p1_y)), Some((p2_x, p2_y))) = (
-                                project_point(s1.x, s1.y, s1.z),
-                                project_point(s2.x, s2.y, s2.z)
-                            ) {
-                                svg.push_str(&format!(
-                                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="0.8" opacity="0.6" />"##,
-                                    p1_x, p1_y, p2_x, p2_y, const_color
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        draw_constellation_lines(
+            &mut svg,
+            config,
+            constellations,
+            target_constellation,
+            &star_map,
+            const_color,
+            &project_point,
+        );
 
         // 3. Звезды
         let mag_scale = config.style.magnitude_scale;
@@ -313,27 +296,14 @@ impl SvgGenerator {
         }
 
         // 6. Названия созвездий
-        if config.layers.constellation_names {
-            for (abbr, const_data) in constellations {
-                if let Some(target) = target_constellation {
-                    if target != abbr {
-                        continue;
-                    }
-                }
-
-                let cx = const_data.center[0];
-                let cy = const_data.center[1];
-                let cz = const_data.center[2];
-
-                if let Some((px, py)) = project_point(cx, cy, cz) {
-                    let ru_name = localize_constellation(abbr, &const_data.name);
-                    svg.push_str(&format!(
-                        r##"<text x="{:.2}" y="{:.2}" fill="#FFFFFF" font-family="{}" font-size="10" opacity="0.75" text-anchor="middle" dominant-baseline="middle">{}</text>"##,
-                        px, py + 12.0, font_family, ru_name
-                    ));
-                }
-            }
-        }
+        draw_constellation_names(
+            &mut svg,
+            config,
+            constellations,
+            target_constellation,
+            font_family,
+            &project_point,
+        );
 
         svg.push_str("</g>");
 
