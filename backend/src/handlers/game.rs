@@ -141,7 +141,7 @@ pub async fn get_question(
                 &query.session_id,
                 session_current_round,
                 session_total_rounds,
-                &q_data,
+                q_data,
                 &state,
             );
             return Ok(Json(q_resp));
@@ -177,7 +177,6 @@ pub async fn get_question(
         (status, format!("Failed to generate question: {message}"))
     })?;
 
-    q_resp.session_id = query.session_id.clone();
     q_resp.current_round = session_current_round;
     q_resp.total_rounds = session_total_rounds;
 
@@ -196,6 +195,8 @@ pub async fn get_question(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
 
+    q_resp.session_id = query.session_id;
+
     Ok(Json(q_resp))
 }
 
@@ -203,13 +204,13 @@ fn rebuild_question_response(
     session_id: &str,
     current_round: i32,
     total_rounds: i32,
-    q_data: &QuestionData,
+    q_data: QuestionData,
     state: &AppState,
 ) -> QuestionResponse {
     // В зависимости от типа вопроса нам может потребоваться сгенерировать SVG
     let image_svg = match q_data.question_type.as_str() {
         "constellation" => {
-            let correct_abbr = q_data.correct_abbr.clone().unwrap_or_else(|| "ORI".to_string());
+            let correct_abbr = q_data.correct_abbr.as_deref().unwrap_or("ORI");
             let config = crate::models::RenderConfig {
                 projection: "pinhole".to_string(),
                 datetime: None,
@@ -218,7 +219,7 @@ fn rebuild_question_response(
                 magnitude_limit: Some(5.5),
                 fov_deg: Some(60.0),
                 aspect_ratio: Some(1.0),
-                constellation: Some(correct_abbr),
+                constellation: Some(correct_abbr.to_string()),
                 center_direction: None,
                 tilt_angle: Some(0.0),
                 layers: crate::models::LayersConfig {
@@ -323,7 +324,7 @@ fn rebuild_question_response(
             Some(crate::svg_generator::SvgGenerator::render_map(&config, &state.hip_catalog, &state.messier_catalog, None, Some(correct_m_num)))
         }
         "trivia" => {
-            let correct_abbr = q_data.correct_abbr.clone().unwrap_or_else(|| "ORI".to_string());
+            let correct_abbr = q_data.correct_abbr.as_deref().unwrap_or("ORI");
             let config = crate::models::RenderConfig {
                 projection: "pinhole".to_string(),
                 datetime: None,
@@ -332,7 +333,7 @@ fn rebuild_question_response(
                 magnitude_limit: Some(5.5),
                 fov_deg: Some(110.0),
                 aspect_ratio: Some(1.0),
-                constellation: Some(correct_abbr),
+                constellation: Some(correct_abbr.to_string()),
                 center_direction: None,
                 tilt_angle: Some(0.0),
                 layers: crate::models::LayersConfig {
@@ -384,9 +385,9 @@ fn rebuild_question_response(
         session_id: session_id.to_string(),
         current_round,
         total_rounds,
-        question_type: q_data.question_type.clone(),
-        question_text: q_data.question_text.clone(),
-        options: q_data.options.clone(),
+        question_type: q_data.question_type,
+        question_text: q_data.question_text,
+        options: q_data.options,
         image_svg,
         draw_stars: draw_stars_rebuilt,
         has_hint: true,
@@ -556,9 +557,15 @@ pub async fn submit_answer(
 
     let rank = PlayerRank::from_score(next_score as u32);
 
+    let QuestionData {
+        correct_answer,
+        fun_fact,
+        ..
+    } = q_data;
+
     Ok(Json(AnswerResponse {
         correct: is_correct,
-        correct_answer: q_data.correct_answer.clone(),
+        correct_answer,
         points_earned: score_res.final_score as i32,
         current_score: next_score,
         streak: next_streak,
@@ -570,7 +577,7 @@ pub async fn submit_answer(
             hint_mult: score_res.hint_multiplier,
         },
         is_finished,
-        fun_fact: Some(q_data.fun_fact.clone()),
+        fun_fact: Some(fun_fact),
     }))
 }
 
