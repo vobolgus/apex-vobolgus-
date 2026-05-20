@@ -82,3 +82,25 @@ The student's file contains only assignments and a "bare" map. The file for the 
 | Submit Issue      | [Report](https://github.com/04Maksimka/AstraGeek/issues/new)  |
 
 ---
+
+## Rust backend (workspace)
+
+The repository now includes a Rust workspace with `rust-core` and an Axum-based `backend`.
+
+Project structure:
+
+- `Cargo.toml` (workspace root) - defines members and shared Cargo settings.
+- `rust-core/` - domain logic and reusable astronomy engine:
+  - star/Messier catalogs and loaders,
+  - projection math (stereographic and pinhole),
+  - scoring/time utilities and core tests.
+- `backend/` - HTTP API service (Axum + SQLx + SQLite):
+  - `src/main.rs` - app bootstrap, shared state, route registration,
+  - `src/handlers/` - API endpoints (`catalog`, `simulation`, `game`, `export`),
+  - `src/db.rs` - database initialization and schema bootstrap,
+  - `src/question_factory.rs` and `src/svg_generator.rs` - game logic and render/export helpers.
+
+Runtime defaults:
+
+- backend port: `8080`
+- database URL: `sqlite://apex.db` (project root)
