@@ -323,7 +323,13 @@ impl QuestionFactory {
                 distractors.shuffle(&mut rng);
                 let selected_distractors = &distractors[..3.min(distractors.len())];
 
-                let mut options = vec![correct_name_ru.clone()];
+                let fact = CONSTELLATION_FACTS.iter()
+                    .find(|&&(abbr, _)| abbr == correct_abbr)
+                    .map(|&(_, f)| f.to_string())
+                    .unwrap_or_else(|| format!("Созвездие {}.", correct_name_ru));
+
+                let correct_answer = correct_name_ru;
+                let mut options = vec![correct_answer.clone()];
                 for d in selected_distractors {
                     let d_json = get_constellations_data()
                         .get(d)
@@ -332,16 +338,11 @@ impl QuestionFactory {
                 }
                 options.shuffle(&mut rng);
 
-                let fact = CONSTELLATION_FACTS.iter()
-                    .find(|&&(abbr, _)| abbr == correct_abbr)
-                    .map(|&(_, f)| f.to_string())
-                    .unwrap_or_else(|| format!("Созвездие {}.", correct_name_ru));
-
                 let q_data = QuestionData {
                     question_type: "constellation".to_string(),
                     question_text: "Какое созвездие изображено на снимке?".to_string(),
                     options: Some(options.clone()),
-                    correct_answer: correct_name_ru.clone(),
+                    correct_answer,
                     hint: format!("Аббревиатура этого созвездия: {}", correct_abbr),
                     fun_fact: fact,
                     hint_used: false,
@@ -360,7 +361,7 @@ impl QuestionFactory {
                     current_round: 1,
                     total_rounds: 10,
                     question_type: "constellation".to_string(),
-                    question_text: q_data.question_text.clone(),
+                    question_text: "Какое созвездие изображено на снимке?".to_string(),
                     options: Some(options),
                     image_svg: Some(image_svg),
                     draw_stars: None,
@@ -486,11 +487,17 @@ impl QuestionFactory {
                     .map(|&(_, f)| f.to_string())
                     .unwrap_or_else(|| format!("{} — именная звезда каталога Hipparcos (HIP {}).", correct_name_ru, correct_hip));
 
+                let correct_answer = correct_name_ru;
+
                 let q_data = QuestionData {
                     question_type: "star".to_string(),
-                    question_text: question_text.clone(),
+                    question_text: match difficulty {
+                        "easy" => "Как называется звезда, отмеченная красным?".to_string(),
+                        "medium" => "Введите название звезды, отмеченной красным".to_string(),
+                        _ => "Введите название звезды и её экваториальные координаты с точностью до ±10°".to_string(),
+                    },
                     options: if difficulty == "easy" { Some(options.clone()) } else { None },
-                    correct_answer: correct_name_ru.clone(),
+                    correct_answer,
                     hint,
                     fun_fact: fact,
                     hint_used: false,
@@ -613,8 +620,8 @@ impl QuestionFactory {
                     i += 1;
                 }
 
-                let correct_label = format!("M{}", m_num);
-                let mut options = vec![correct_label.clone()];
+                let correct_answer = format!("M{}", m_num);
+                let mut options = vec![correct_answer.clone()];
                 for d in selected_distractors {
                     options.push(format!("M{}", d.m_number));
                 }
@@ -629,9 +636,13 @@ impl QuestionFactory {
 
                 let q_data = QuestionData {
                     question_type: "messier".to_string(),
-                    question_text: question_text.clone(),
+                    question_text: format!(
+                        "Объект типа «{}» в созвездии {}. Что это за объект Мессье?",
+                        ru_type,
+                        correct_obj.constellation
+                    ),
                     options: Some(options.clone()),
-                    correct_answer: correct_label.clone(),
+                    correct_answer,
                     hint: format!("Это {} с видимой звёздной величиной {:.1}m", ru_type.to_lowercase(), correct_obj.v_mag),
                     fun_fact: fact,
                     hint_used: false,
@@ -828,12 +839,15 @@ impl QuestionFactory {
                     .map(|&(_, f)| f.to_string())
                     .unwrap_or_else(|| format!("Созвездие {}.", constellation_name));
 
+                let correct_answer = constellation_name;
+                let hint = format!("В рисунке этого созвездия {} линий", ref_edges.len());
+
                 let q_data = QuestionData {
                     question_type: "draw".to_string(),
                     question_text: "Соедините звёзды созвездия линиями так, как они соединены на официальных картах.".to_string(),
                     options: None,
-                    correct_answer: constellation_name.clone(),
-                    hint: format!("В рисунке этого созвездия {} линий", ref_edges.len()),
+                    correct_answer,
+                    hint,
                     fun_fact: fact,
                     hint_used: false,
                     correct_abbr: Some(correct_abbr),
@@ -841,8 +855,8 @@ impl QuestionFactory {
                     correct_ra_deg: None,
                     correct_dec_deg: None,
                     correct_m_num: None,
-                    ref_edges: Some(ref_edges.clone()),
-                    predrawn_edges: Some(predrawn_edges.clone()),
+                    ref_edges: Some(ref_edges),
+                    predrawn_edges: Some(predrawn_edges),
                     used_objects: used_objects.clone(),
                 };
 
@@ -851,7 +865,7 @@ impl QuestionFactory {
                     current_round: 1,
                     total_rounds: 10,
                     question_type: "draw".to_string(),
-                    question_text: q_data.question_text.clone(),
+                    question_text: "Соедините звёзды созвездия линиями так, как они соединены на официальных картах.".to_string(),
                     options: None,
                     image_svg: None, // в Draw режиме рендерим на Canvas
                     draw_stars: Some(stars_list),
@@ -953,11 +967,13 @@ impl QuestionFactory {
                     .map(|&(_, f)| f.to_string())
                     .unwrap_or_else(|| format!("Созвездие {}.", correct_name));
 
+                let correct_answer = correct_name;
+
                 let q_data = QuestionData {
                     question_type: "trivia".to_string(),
                     question_text: trivia.question.to_string(),
                     options: Some(options.clone()),
-                    correct_answer: correct_name.clone(),
+                    correct_answer,
                     hint: trivia.hint.to_string(),
                     fun_fact: fact,
                     hint_used: false,
@@ -976,7 +992,7 @@ impl QuestionFactory {
                     current_round: 1,
                     total_rounds: 10,
                     question_type: "trivia".to_string(),
-                    question_text: q_data.question_text.clone(),
+                    question_text: trivia.question.to_string(),
                     options: Some(options),
                     image_svg: Some(image_svg),
                     draw_stars: None,
