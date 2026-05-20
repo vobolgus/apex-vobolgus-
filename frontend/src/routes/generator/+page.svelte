@@ -4,6 +4,7 @@
 	import { InputController } from '$lib/renderer/input-handlers';
 	import type { MorphInterpolatorFactory } from '$lib/renderer/types';
 	import { catalog, view } from '$lib/stores.svelte';
+	import PlanetsToggle from '$lib/components/PlanetsToggle.svelte';
 	import { onMount } from 'svelte';
 
 	let canvasEl: HTMLCanvasElement | null = null;
@@ -18,6 +19,7 @@
 	const exportFormats = ['PNG', 'SVG', 'PDF'] as const;
 	const projectionOptions = ['stereographic', 'pinhole'] as const;
 	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
+	let showPlanets = $state(false);
 	let flubberInterpolate: MorphInterpolatorFactory | null = null;
 	type ProjectionBlendState = {
 		blend: number;
@@ -189,7 +191,29 @@ function exportChart(format: 'PNG' | 'SVG' | 'PDF') {
 		link.click();
 		return;
 	}
-	console.info(`TODO: implement ${format} export`);
+	
+	fetch('/api/export', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			format: format.toLowerCase(),
+			projection: selectedProjection,
+			layers: { planets: showPlanets }
+		})
+	})
+		.then((res) => {
+			if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+			return res.blob();
+		})
+		.then((blob) => {
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.download = `skychart-${Date.now()}.${format.toLowerCase()}`;
+			link.href = url;
+			link.click();
+			URL.revokeObjectURL(url);
+		})
+		.catch((err) => console.error(err));
 }
 
 function handleExportPrimaryClick() {
@@ -318,6 +342,11 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 						</div>
 					{/if}
 				</div>
+			</div>
+			<div class="control-divider"></div>
+			<div class="control-group">
+				<label class="control-label control-label-no-caps">Layers</label>
+				<PlanetsToggle bind:showPlanets />
 			</div>
 		</div>
 	</div>
