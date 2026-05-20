@@ -153,6 +153,7 @@ dependencies = [
  "sqlx",
  "svg2pdf",
  "tokio",
+ "tower",
  "tower-http",
  "uuid",
 ]
