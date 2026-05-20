@@ -2,6 +2,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use anyhow::Context;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -70,7 +71,7 @@ fn build_app(state: AppState) -> Router {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     println!("Initializing catalogs (it may take a few seconds)...");
     let hip_catalog = Arc::new(rust_core::catalog::HipCatalog::new());
     let messier_catalog = Arc::new(rust_core::catalog::MessierCatalog::new());
@@ -91,9 +92,14 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     println!("Listening on {}", addr);
-    
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("failed to bind to {addr}"))?;
+    axum::serve(listener, app)
+        .await
+        .context("axum server failed")?;
+    Ok(())
 }
 
 #[cfg(test)]
