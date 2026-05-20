@@ -52,7 +52,6 @@
 	const exportFormats = ['PNG', 'SVG', 'PDF'] as const;
 	const projectionOptions = ['stereographic', 'pinhole'] as const;
 	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
-	const ARCBALL_ROTATION_GAIN = 1.2;
 	const EPSILON = 1e-7;
 	const MIN_FOV_DEG = 20;
 	const MAX_FOV_DEG = 120;
