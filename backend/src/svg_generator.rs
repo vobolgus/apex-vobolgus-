@@ -133,9 +133,21 @@ impl SvgGenerator {
         // Направление камеры для Pinhole
         let center_dir = if !is_stereo {
             let mut dir = [1.0, 0.0, 0.0];
-            if let Some(ref const_abbr) = config.constellation {
-                if let Some(c_data) = get_constellations_data().get(const_abbr) {
-                    dir = [c_data.center[0] as f64, c_data.center[1] as f64, c_data.center[2] as f64];
+            if let Some(custom_dir) = config.center_direction {
+                let norm = ((custom_dir[0] as f64).powi(2) + (custom_dir[1] as f64).powi(2) + (custom_dir[2] as f64).powi(2)).sqrt();
+                if norm > 1e-7 {
+                    dir = [
+                        custom_dir[0] as f64 / norm,
+                        custom_dir[1] as f64 / norm,
+                        custom_dir[2] as f64 / norm,
+                    ];
+                }
+            }
+            if config.center_direction.is_none() {
+                if let Some(ref const_abbr) = config.constellation {
+                    if let Some(c_data) = get_constellations_data().get(const_abbr) {
+                        dir = [c_data.center[0] as f64, c_data.center[1] as f64, c_data.center[2] as f64];
+                    }
                 }
             }
             // Если мы подсвечиваем звезду, камера должна смотреть ровно на неё!

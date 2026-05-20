@@ -284,6 +284,7 @@ impl QuestionFactory {
                     fov_deg: Some(60.0),
                     aspect_ratio: Some(1.0),
                     constellation: Some(correct_abbr.clone()),
+                    center_direction: None,
                     tilt_angle,
                     layers: LayersConfig {
                         ecliptic: false,
@@ -417,6 +418,7 @@ impl QuestionFactory {
                     fov_deg: Some(60.0),
                     aspect_ratio: Some(1.0),
                     constellation: None,
+                    center_direction: None,
                     tilt_angle,
                     layers: LayersConfig {
                         ecliptic: false,
@@ -539,6 +541,7 @@ impl QuestionFactory {
                     fov_deg: Some(60.0),
                     aspect_ratio: Some(1.0),
                     constellation: None,
+                    center_direction: None,
                     tilt_angle: Some(0.0),
                     layers: LayersConfig {
                         ecliptic: false,
@@ -900,6 +903,7 @@ impl QuestionFactory {
                     fov_deg: Some(110.0), // широкий угол
                     aspect_ratio: Some(1.0),
                     constellation: Some(correct_abbr.clone()),
+                    center_direction: None,
                     tilt_angle,
                     layers: LayersConfig {
                         ecliptic: false,

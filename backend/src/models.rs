@@ -10,6 +10,7 @@ pub struct RenderConfig {
     pub fov_deg: Option<f32>,
     pub aspect_ratio: Option<f32>,
     pub constellation: Option<String>,
+    pub center_direction: Option<[f32; 3]>,
     pub tilt_angle: Option<f32>,
     pub layers: LayersConfig,
     pub style: StyleConfig,

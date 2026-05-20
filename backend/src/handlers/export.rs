@@ -1,4 +1,5 @@
 use axum::{
+    extract::Query,
     extract::State,
     http::{header, HeaderMap, HeaderValue, StatusCode},
     Json,
@@ -6,9 +7,16 @@ use axum::{
 use crate::AppState;
 use crate::models::RenderConfig;
 use crate::svg_generator::SvgGenerator;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ExportQuery {
+    pub format: Option<String>,
+}
 
 pub async fn export_pdf(
     State(state): State<AppState>,
+    Query(query): Query<ExportQuery>,
     Json(config): Json<RenderConfig>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
     if config.projection != "stereo" && config.projection != "pinhole" {
@@ -34,6 +42,12 @@ pub async fn export_pdf(
         None,
         None,
     );
+
+    if query.format.as_deref() == Some("svg") {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/svg+xml; charset=utf-8"));
+        return Ok((headers, svg_str.into_bytes()));
+    }
 
     // 2. Конвертируем в PDF через svg2pdf
     let mut options = svg2pdf::usvg::Options::default();
@@ -82,6 +96,7 @@ mod tests {
             fov_deg: Some(120.0),
             aspect_ratio: Some(1.0),
             constellation: None,
+            center_direction: None,
             tilt_angle: Some(0.0),
             layers: LayersConfig {
                 ecliptic: true,
@@ -107,7 +122,7 @@ mod tests {
             footer_text: Some("Test Sky Map".to_string()),
         };
 
-        let res = export_pdf(State(state), Json(config)).await;
+        let res = export_pdf(State(state), Query(ExportQuery::default()), Json(config)).await;
         assert!(res.is_ok());
         let (headers, pdf_bytes) = res.unwrap();
         assert_eq!(headers.get("content-type").unwrap().to_str().unwrap(), "application/pdf");
@@ -132,6 +147,7 @@ mod tests {
             fov_deg: Some(60.0),
             aspect_ratio: Some(1.0),
             constellation: Some("ORI".to_string()),
+            center_direction: None,
             tilt_angle: Some(0.0),
             layers: LayersConfig {
                 ecliptic: false,
@@ -157,7 +173,7 @@ mod tests {
             footer_text: None,
         };
 
-        let res = export_pdf(State(state), Json(config)).await;
+        let res = export_pdf(State(state), Query(ExportQuery::default()), Json(config)).await;
         assert!(res.is_ok());
         let (headers, pdf_bytes) = res.unwrap();
         assert_eq!(headers.get("content-type").unwrap().to_str().unwrap(), "application/pdf");
