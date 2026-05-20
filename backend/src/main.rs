@@ -211,6 +211,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn smoke_compute_post_endpoint() {
+        let app = test_app().await;
+        let body = json!({
+            "r_x": 7000.0,
+            "r_y": 0.0,
+            "v_x": 0.0,
+            "v_y": 7.546049108166282,
+            "mu": 398600.44,
+            "dt": 10.0,
+            "steps": 25
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/compute")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn smoke_static_assets_served() {
         let app = test_app().await;
         let response = app
@@ -385,5 +411,74 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn smoke_export_validation_errors() {
+        let app = test_app().await;
+        let base_payload = json!({
+            "projection": "stereo",
+            "datetime": "2026-05-20T12:00:00Z",
+            "latitude": 55.75,
+            "longitude": 37.62,
+            "magnitude_limit": 6.0,
+            "fov_deg": 120.0,
+            "aspect_ratio": 1.0,
+            "constellation": null,
+            "tilt_angle": 0.0,
+            "layers": {
+                "ecliptic": true,
+                "equator": false,
+                "galactic_equator": false,
+                "planets": false,
+                "horizontal_grid": false,
+                "equatorial_grid": false,
+                "constellations": true,
+                "constellation_names": false,
+                "zenith": false,
+                "poles": false
+            },
+            "style": {
+                "star_color": "#FFFFFF",
+                "constellation_line_color": "#808080",
+                "grid_color": "#404040",
+                "background_color": "#05050A",
+                "font_family": "sans-serif",
+                "magnitude_scale": 1.0
+            },
+            "print_info": false,
+            "footer_text": null
+        });
+
+        let mut invalid_projection = base_payload.clone();
+        invalid_projection["projection"] = json!("cylindric");
+        let projection_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/export")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(invalid_projection.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(projection_response.status(), StatusCode::BAD_REQUEST);
+
+        let mut invalid_latitude = base_payload.clone();
+        invalid_latitude["latitude"] = json!(123.0);
+        let latitude_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/export")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(invalid_latitude.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(latitude_response.status(), StatusCode::BAD_REQUEST);
     }
 }
