@@ -11,6 +11,21 @@ pub async fn export_pdf(
     State(state): State<AppState>,
     Json(config): Json<RenderConfig>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
+    if config.projection != "stereo" && config.projection != "pinhole" {
+        return Err((StatusCode::BAD_REQUEST, "projection must be 'stereo' or 'pinhole'".to_string()));
+    }
+    if !(-90.0..=90.0).contains(&config.latitude) {
+        return Err((StatusCode::BAD_REQUEST, "latitude must be in -90..=90".to_string()));
+    }
+    if !(-180.0..=180.0).contains(&config.longitude) {
+        return Err((StatusCode::BAD_REQUEST, "longitude must be in -180..=180".to_string()));
+    }
+    if let Some(max_mag) = config.magnitude_limit {
+        if !(0.0..=10.0).contains(&max_mag) {
+            return Err((StatusCode::BAD_REQUEST, "magnitude_limit must be in 0..=10".to_string()));
+        }
+    }
+
     // 1. Генерируем SVG
     let svg_str = SvgGenerator::render_map(
         &config,

@@ -77,6 +77,9 @@ pub async fn start_game(
     if !valid_diffs.contains(&difficulty.as_str()) {
         return Err((StatusCode::BAD_REQUEST, format!("Invalid difficulty: {}", difficulty)));
     }
+    if !(1..=50).contains(&total_rounds) {
+        return Err((StatusCode::BAD_REQUEST, "total_rounds must be in 1..=50".to_string()));
+    }
 
     let session_id = Uuid::new_v4().to_string();
 

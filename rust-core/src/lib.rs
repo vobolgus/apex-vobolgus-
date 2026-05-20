@@ -1,9 +1,11 @@
 pub mod catalog;
+pub mod mechanics;
 pub mod projections;
 pub mod scoring;
 pub mod time;
 
 pub use catalog::{Star, HipCatalog, MessierObject, MessierCatalog};
+pub use mechanics::{OrbitPoint, OrbitSolution, OrbitState, compute_orbit};
 pub use projections::{CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection, StereoProjectionResult};
 pub use scoring::{Difficulty, GameMode, PlayerRank, ScoreCalculationResult, calculate_score};
 pub use time::{DateTime, julian_date, get_sidereal_time, vequinox_hour_angle};
