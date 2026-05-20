@@ -585,3 +585,219 @@ pub async fn get_hint(
         hint: q_data.hint,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_db;
+    use std::sync::Arc;
+
+    async fn make_test_state() -> AppState {
+        let db = init_db("sqlite::memory:").await.unwrap();
+        AppState {
+            db,
+            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
+            messier_catalog: Arc::new(rust_core::catalog::MessierCatalog::new()),
+        }
+    }
+
+    fn sample_question_data(hint_used: bool) -> QuestionData {
+        let mut used_objects = HashSet::new();
+        used_objects.insert("ORI".to_string());
+
+        QuestionData {
+            question_type: "trivia".to_string(),
+            question_text: "Тестовый вопрос".to_string(),
+            options: Some(vec![
+                "ORI".to_string(),
+                "UMA".to_string(),
+                "CAS".to_string(),
+                "CYG".to_string(),
+            ]),
+            correct_answer: "ORI".to_string(),
+            hint: "Зимнее созвездие".to_string(),
+            fun_fact: "Тестовый факт".to_string(),
+            hint_used,
+            correct_abbr: Some("ORI".to_string()),
+            correct_hip: None,
+            correct_ra_deg: None,
+            correct_dec_deg: None,
+            correct_m_num: None,
+            ref_edges: None,
+            predrawn_edges: None,
+            used_objects,
+        }
+    }
+
+    async fn insert_session(
+        state: &AppState,
+        session_id: &str,
+        score: i32,
+        streak: i32,
+        q_data: &QuestionData,
+    ) {
+        let q_data_str = serde_json::to_string(q_data).unwrap();
+        sqlx::query(
+            "INSERT INTO game_sessions (
+                id, mode, difficulty, current_round, total_rounds, score, streak, is_finished,
+                current_question_answer, current_question_data
+            ) VALUES (?, 'trivia', 'easy', 1, 3, ?, ?, 0, ?, ?)",
+        )
+        .bind(session_id)
+        .bind(score)
+        .bind(streak)
+        .bind(&q_data.correct_answer)
+        .bind(q_data_str)
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn parse_coords_parses_last_two_numbers() {
+        let parsed = parse_coords("prefix, 15.5, -10.25");
+        assert_eq!(parsed, Some((15.5, -10.25)));
+    }
+
+    #[test]
+    fn parse_coords_returns_none_for_invalid_input() {
+        assert_eq!(parse_coords("not,a,float"), None);
+        assert_eq!(parse_coords("42"), None);
+    }
+
+    #[tokio::test]
+    async fn submit_answer_correct_increments_streak_and_applies_hint_penalty() {
+        let state = make_test_state().await;
+        let session_id = "session_correct_hint";
+        let q_data = sample_question_data(true);
+        insert_session(&state, session_id, 10, 2, &q_data).await;
+
+        let req = AnswerRequest {
+            session_id: session_id.to_string(),
+            answer: "  o r i  ".to_string(),
+            time_spent: 5.0,
+        };
+        let resp = submit_answer(State(state.clone()), Json(req)).await.unwrap().0;
+
+        let expected = calculate_score(
+            Difficulty::Easy,
+            GameMode::Trivia,
+            3,
+            5.0,
+            true,
+        );
+
+        assert!(resp.correct);
+        assert_eq!(resp.streak, 3);
+        assert_eq!(resp.points_earned, expected.final_score as i32);
+        assert_eq!(resp.current_score, 10 + expected.final_score as i32);
+        assert!(resp.multiplier_breakdown.hint_mult < 1.0);
+
+        let row = sqlx::query(
+            "SELECT score, streak, current_round, is_finished, current_question_data
+             FROM game_sessions WHERE id = ?",
+        )
+        .bind(session_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+
+        let db_score: i32 = row.try_get("score").unwrap();
+        let db_streak: i32 = row.try_get("streak").unwrap();
+        let db_round: i32 = row.try_get("current_round").unwrap();
+        let db_finished: i32 = row.try_get("is_finished").unwrap();
+        let db_q_data: Option<String> = row.try_get("current_question_data").unwrap();
+
+        assert_eq!(db_score, 10 + expected.final_score as i32);
+        assert_eq!(db_streak, 3);
+        assert_eq!(db_round, 2);
+        assert_eq!(db_finished, 0);
+        assert!(db_q_data.is_none());
+    }
+
+    #[tokio::test]
+    async fn submit_answer_wrong_resets_streak_and_awards_zero_points() {
+        let state = make_test_state().await;
+        let session_id = "session_wrong";
+        let q_data = sample_question_data(false);
+        insert_session(&state, session_id, 25, 4, &q_data).await;
+
+        let req = AnswerRequest {
+            session_id: session_id.to_string(),
+            answer: "definitely_wrong".to_string(),
+            time_spent: 4.0,
+        };
+        let resp = submit_answer(State(state.clone()), Json(req)).await.unwrap().0;
+
+        assert!(!resp.correct);
+        assert_eq!(resp.points_earned, 0);
+        assert_eq!(resp.streak, 0);
+        assert_eq!(resp.current_score, 25);
+
+        let row = sqlx::query("SELECT score, streak, current_round FROM game_sessions WHERE id = ?")
+            .bind(session_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let db_score: i32 = row.try_get("score").unwrap();
+        let db_streak: i32 = row.try_get("streak").unwrap();
+        let db_round: i32 = row.try_get("current_round").unwrap();
+
+        assert_eq!(db_score, 25);
+        assert_eq!(db_streak, 0);
+        assert_eq!(db_round, 2);
+    }
+
+    #[tokio::test]
+    async fn get_hint_sets_hint_used_flag_in_session_question_data() {
+        let state = make_test_state().await;
+        let session_id = "session_hint";
+        let q_data = sample_question_data(false);
+        insert_session(&state, session_id, 0, 0, &q_data).await;
+
+        let resp = get_hint(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: session_id.to_string(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(resp.hint, "Зимнее созвездие");
+
+        let row = sqlx::query("SELECT current_question_data FROM game_sessions WHERE id = ?")
+            .bind(session_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        let q_data_str: String = row.try_get("current_question_data").unwrap();
+        let updated: QuestionData = serde_json::from_str(&q_data_str).unwrap();
+        assert!(updated.hint_used);
+    }
+
+    #[tokio::test]
+    async fn get_question_reuses_existing_serialized_question_data() {
+        let state = make_test_state().await;
+        let session_id = "session_existing_question";
+        let q_data = sample_question_data(false);
+        insert_session(&state, session_id, 0, 0, &q_data).await;
+
+        let resp = get_question(
+            State(state.clone()),
+            Query(SessionQuery {
+                session_id: session_id.to_string(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(resp.session_id, session_id);
+        assert_eq!(resp.current_round, 1);
+        assert_eq!(resp.question_type, "trivia");
+        assert_eq!(resp.question_text, "Тестовый вопрос");
+        assert_eq!(resp.options.unwrap().len(), 4);
+    }
+}
