@@ -67,6 +67,11 @@ frontend/.svelte-kit/
 frontend/build/
 frontend/.vercel/
 
+# Playwright runtime artifacts (keep baselines under e2e/)
+frontend/e2e-results/
+frontend/playwright-report/
+frontend/test-results/
+
 # Generated docs/artifacts
 sphinx/_build/
 README_PYPI.md
