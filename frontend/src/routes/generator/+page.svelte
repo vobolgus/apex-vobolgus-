@@ -311,7 +311,15 @@
 		star: StarVector,
 		blend: number,
 		params: ReturnType<typeof getProjectionFrameParams>
-	): { px: number; py: number; visibility: number } {
+	): {
+		px: number;
+		py: number;
+		visibility: number;
+		stereoAlpha: number;
+		stereoRadius: number;
+		pinholeAlpha: number;
+		pinholeRadius: number;
+	} {
 		const [vx, vy, vz] = rotateVector(star.x, star.y, star.z);
 		const denom = 1 + vz;
 		const stereoFinite = denom > PROJECTION_FINITE_EPSILON;
@@ -321,6 +329,8 @@
 		const stereoNormY = clamp(stereoNormYRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
 		const stereoInsideDisk = stereoFinite && vz >= 0 && Math.hypot(stereoNormXRaw, stereoNormYRaw) <= 1;
 		const stereoSdf = stereoInsideDisk ? Math.hypot(stereoNormXRaw, stereoNormYRaw) - 1 : PROJECTION_INFINITE_SDF;
+		const stereoAlpha = Math.max(STEREO_STAR_MIN_ALPHA, 1 - star.v_mag / STEREO_STAR_ALPHA_MAG_DIVISOR);
+		const stereoRadius = Math.max(STEREO_STAR_MIN_RADIUS_PX, STEREO_STAR_BASE_RADIUS_PX - star.v_mag * STEREO_STAR_MAG_RADIUS_COEFF);
 
 		const pinholeFinite = vz > PROJECTION_FINITE_EPSILON;
 		const pinholeNormXRaw = pinholeFinite ? (vx / vz) / params.tanHalfHorizontalFov : 0;
@@ -328,6 +338,8 @@
 		const pinholeNormX = clamp(pinholeNormXRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
 		const pinholeNormY = clamp(pinholeNormYRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
 		const pinholeSdf = pinholeFinite ? Math.max(Math.abs(pinholeNormXRaw), Math.abs(pinholeNormYRaw)) - 1 : PROJECTION_INFINITE_SDF;
+		const pinholeAlpha = Math.max(PINHOLE_STAR_MIN_ALPHA, 1 - star.v_mag / PINHOLE_STAR_ALPHA_MAG_DIVISOR);
+		const pinholeRadius = Math.max(PINHOLE_STAR_MIN_RADIUS_PX, PINHOLE_STAR_BASE_RADIUS_PX - star.v_mag * PINHOLE_STAR_MAG_RADIUS_COEFF);
 
 		const morphNormX = lerp(stereoNormX, pinholeNormX, blend);
 		const morphNormY = lerp(stereoNormY, pinholeNormY, blend);
@@ -336,7 +348,11 @@
 		return {
 			px: morphNormX * params.morphHalfWidth,
 			py: -morphNormY * params.morphHalfHeight,
-			visibility
+			visibility,
+			stereoAlpha,
+			stereoRadius,
+			pinholeAlpha,
+			pinholeRadius
 		};
 	}
 
@@ -693,46 +709,15 @@
 		ctx.fillStyle = '#000000';
 
 		for (const star of starVectors) {
-			const [vx, vy, vz] = rotateVector(star.x, star.y, star.z);
-			const denom = 1 + vz;
-			const stereoFinite = denom > PROJECTION_FINITE_EPSILON;
-			const stereoNormXRaw = stereoFinite ? vx / denom : 0;
-			const stereoNormYRaw = stereoFinite ? vy / denom : 0;
-			const stereoNormX = clamp(stereoNormXRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
-			const stereoNormY = clamp(stereoNormYRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
-			const stereoInsideDisk = stereoFinite && vz >= 0 && Math.hypot(stereoNormXRaw, stereoNormYRaw) <= 1;
-			const stereoSdf = stereoInsideDisk ? Math.hypot(stereoNormXRaw, stereoNormYRaw) - 1 : PROJECTION_INFINITE_SDF;
-			const stereoAlpha = Math.max(STEREO_STAR_MIN_ALPHA, 1 - star.v_mag / STEREO_STAR_ALPHA_MAG_DIVISOR);
-			const stereoRadius = Math.max(STEREO_STAR_MIN_RADIUS_PX, STEREO_STAR_BASE_RADIUS_PX - star.v_mag * STEREO_STAR_MAG_RADIUS_COEFF);
+			const sample = sampleStarMorphFrame(star, visualBlend, params);
+			if (sample.visibility <= VISIBILITY_CULL_THRESHOLD) continue;
 
-			const pinholeFinite = vz > PROJECTION_FINITE_EPSILON;
-			const pinholeNormXRaw = pinholeFinite ? (vx / vz) / params.tanHalfHorizontalFov : 0;
-			const pinholeNormYRaw = pinholeFinite ? (vy / vz) / params.tanHalfVerticalFov : 0;
-			const pinholeNormX = clamp(pinholeNormXRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
-			const pinholeNormY = clamp(pinholeNormYRaw, -PROJECTION_NORM_CLAMP, PROJECTION_NORM_CLAMP);
-			const pinholeSdf = pinholeFinite
-				? Math.max(Math.abs(pinholeNormXRaw), Math.abs(pinholeNormYRaw)) - 1
-				: PROJECTION_INFINITE_SDF;
-			const pinholeAlpha = Math.max(PINHOLE_STAR_MIN_ALPHA, 1 - star.v_mag / PINHOLE_STAR_ALPHA_MAG_DIVISOR);
-			const pinholeRadius = Math.max(PINHOLE_STAR_MIN_RADIUS_PX, PINHOLE_STAR_BASE_RADIUS_PX - star.v_mag * PINHOLE_STAR_MAG_RADIUS_COEFF);
+			const pointRadius = lerp(sample.stereoRadius, sample.pinholeRadius, visualBlend);
+			const pointAlpha = lerp(sample.stereoAlpha, sample.pinholeAlpha, visualBlend);
 
-			// Use one normalized morph space to avoid projection-density jumps.
-			const morphNormX = lerp(stereoNormX, pinholeNormX, visualBlend);
-			const morphNormY = lerp(stereoNormY, pinholeNormY, visualBlend);
-			const px = cx + morphNormX * params.morphHalfWidth;
-			const py = cy - morphNormY * params.morphHalfHeight;
-
-			// Blend shape membership via SDF for smooth in/out near boundaries.
-			const morphSdf = lerp(stereoSdf, pinholeSdf, visualBlend);
-			const visibility = 1 - smoothstep(VISIBILITY_SMOOTHSTEP_INNER, VISIBILITY_SMOOTHSTEP_OUTER, morphSdf);
-			if (visibility <= VISIBILITY_CULL_THRESHOLD) continue;
-
-			const pointRadius = lerp(stereoRadius, pinholeRadius, visualBlend);
-			const pointAlpha = lerp(stereoAlpha, pinholeAlpha, visualBlend);
-
-			ctx.globalAlpha = pointAlpha * visibility;
+			ctx.globalAlpha = pointAlpha * sample.visibility;
 			ctx.beginPath();
-			ctx.arc(px, py, pointRadius, 0, Math.PI * 2);
+			ctx.arc(cx + sample.px, cy + sample.py, pointRadius, 0, Math.PI * 2);
 			ctx.fill();
 		}
 		ctx.restore();
