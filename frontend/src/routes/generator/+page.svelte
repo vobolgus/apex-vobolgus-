@@ -317,7 +317,13 @@
 	}
 
 	function getPerceptualBlendCumulative(width: number, height: number) {
-		const key = `${width}:${height}:${fovDeg.toFixed(3)}:${starVectors.length}`;
+		// Cache key includes orientation: energy depends on which stars are visible
+		// at each blend step, which changes when the user rotates the sky. Without
+		// orientation in the key, the LUT goes stale after any drag/rotation.
+		const orientationKey =
+			`${orientation.x.toFixed(3)}:${orientation.y.toFixed(3)}:` +
+			`${orientation.z.toFixed(3)}:${orientation.w.toFixed(3)}`;
+		const key = `${width}:${height}:${fovDeg.toFixed(3)}:${starVectors.length}:${orientationKey}`;
 		if (cachedPerceptualCumulative && cachedPerceptualKey === key) {
 			return cachedPerceptualCumulative;
 		}
@@ -404,6 +410,12 @@
 		if (normalizedRawBlend <= 0) return 0;
 		if (normalizedRawBlend >= 1) return 1;
 		const cumulative = getPerceptualBlendCumulative(width, height);
+		// Forward (rawBlend < 0.5) or backward (rawBlend >= 0.5): traverse the
+		// cumulative LUT once via binary search. The lookup itself is direction-
+		// agnostic: R(rawBlend) is a deterministic function, so backward animation
+		// is the exact time-reverse of forward. The only requirement is that R is
+		// smooth — see the blend with the linear identity below.
+		let perceptual = 1;
 		for (let i = 1; i < cumulative.length; i += 1) {
 			if (cumulative[i] < normalizedRawBlend) continue;
 			const prev = cumulative[i - 1];
@@ -412,9 +424,17 @@
 				Math.abs(next - prev) <= EPSILON ? 0 : (normalizedRawBlend - prev) / (next - prev);
 			const prevBlend = (i - 1) / (cumulative.length - 1);
 			const nextBlend = i / (cumulative.length - 1);
-			return lerp(prevBlend, nextBlend, localT);
+			perceptual = lerp(prevBlend, nextBlend, localT);
+			break;
 		}
-		return 1;
+		// The raw cumulative-energy remap has heavy peaks (visibility changes
+		// dominate via the 42x weight) which makes the transition feel jumpy in
+		// concentrated regions. Blend the perceptual remap with the linear
+		// identity to soften extreme remapping. Mix factor controls how much of
+		// the perceptual remap is applied (0 = pure linear, 1 = pure perceptual).
+		// 0.5 keeps motion-aware pacing while preventing visible discontinuities.
+		const PERCEPTUAL_MIX = 0.5;
+		return lerp(normalizedRawBlend, perceptual, PERCEPTUAL_MIX);
 	}
 
 	function buildCirclePath(cx: number, cy: number, radius: number) {
@@ -613,12 +633,15 @@
 		const height = canvasEl.height;
 		const cx = width / 2;
 		const cy = height / 2;
-		const projectionProgressRaw = getProjectionBlend(nowMs);
-		const projectionProgress = getPerceptualProjectionBlend(projectionProgressRaw, width, height);
-		// Canonical scale timeline: viewport width/height always use raw blend.
-		// Reverse transition follows this exact path backwards with no stage remap.
-		const scaleT = clamp(projectionProgressRaw, 0, 1);
-		const params = getProjectionFrameParams(width, height, scaleT);
+		// One blend drives ALL projection-dependent visuals.
+		// rawBlend is the linear/eased time-domain driver (0..1 between start and end).
+		// visualBlend is the perceptually-remapped blend used uniformly for viewport
+		// size, viewport shape morph, and star positions. Driving all visuals from a
+		// single scalar keeps forward (stereo->pinhole) and backward (pinhole->stereo)
+		// transitions symmetric — each is the time-reverse of the other.
+		const rawBlend = getProjectionBlend(nowMs);
+		const visualBlend = getPerceptualProjectionBlend(rawBlend, width, height);
+		const params = getProjectionFrameParams(width, height, visualBlend);
 		const viewportInterpolator = getViewportMorphInterpolator(
 			cx,
 			cy,
@@ -627,7 +650,7 @@
 			params.pinholeViewportHeight,
 			PINHOLE_CORNER_RADIUS
 		);
-		const { path2D: morphViewportPath2D } = getMorphViewportPath2D(projectionProgress, viewportInterpolator);
+		const { path2D: morphViewportPath2D } = getMorphViewportPath2D(visualBlend, viewportInterpolator);
 
 		// Keep outer canvas dark; white should be only inside active viewport.
 		ctx.fillStyle = '#0a0a0b';
@@ -636,8 +659,8 @@
 		// Flubber path morph: one interpolated path per frame for fill/stroke/clip.
 		ctx.fillStyle = '#ffffff';
 		ctx.fill(morphViewportPath2D);
-		ctx.strokeStyle = projectionProgress > 0.5 ? '#d7dbe3' : '#ffffff';
-		ctx.lineWidth = lerp(2.8, 2.2, projectionProgress);
+		ctx.strokeStyle = visualBlend > 0.5 ? '#d7dbe3' : '#ffffff';
+		ctx.lineWidth = lerp(2.8, 2.2, visualBlend);
 		ctx.stroke(morphViewportPath2D);
 
 		if (!starVectors.length) return;
@@ -671,18 +694,18 @@
 			const pinholeRadius = Math.max(0.4, 3.4 - star.v_mag * 0.38);
 
 			// Use one normalized morph space to avoid projection-density jumps.
-			const morphNormX = lerp(stereoNormX, pinholeNormX, projectionProgress);
-			const morphNormY = lerp(stereoNormY, pinholeNormY, projectionProgress);
+			const morphNormX = lerp(stereoNormX, pinholeNormX, visualBlend);
+			const morphNormY = lerp(stereoNormY, pinholeNormY, visualBlend);
 			const px = cx + morphNormX * params.morphHalfWidth;
 			const py = cy - morphNormY * params.morphHalfHeight;
 
 			// Blend shape membership via SDF for smooth in/out near boundaries.
-			const morphSdf = lerp(stereoSdf, pinholeSdf, projectionProgress);
+			const morphSdf = lerp(stereoSdf, pinholeSdf, visualBlend);
 			const visibility = 1 - smoothstep(-0.08, 0.08, morphSdf);
 			if (visibility <= 0.001) continue;
 
-			const pointRadius = lerp(stereoRadius, pinholeRadius, projectionProgress);
-			const pointAlpha = lerp(stereoAlpha, pinholeAlpha, projectionProgress);
+			const pointRadius = lerp(stereoRadius, pinholeRadius, visualBlend);
+			const pointAlpha = lerp(stereoAlpha, pinholeAlpha, visualBlend);
 
 			ctx.globalAlpha = pointAlpha * visibility;
 			ctx.beginPath();
