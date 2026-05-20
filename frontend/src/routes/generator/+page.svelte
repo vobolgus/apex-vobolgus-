@@ -1,5 +1,21 @@
 <script lang="ts">
 	import { projectPointerToArcball } from '$lib/math/arcball';
+	import {
+		EPSILON,
+		MAX_FOV_DEG,
+		MIN_FOV_DEG,
+		PERCEPTUAL_AREA_WEIGHT,
+		PERCEPTUAL_BLEND_MIX,
+		PERCEPTUAL_LUT_POINTS,
+		PERCEPTUAL_SAMPLE_TARGET,
+		PERCEPTUAL_VISIBILITY_WEIGHT,
+		PINHOLE_CORNER_RADIUS,
+		PROJECTION_TRANSITION_MIN_MS,
+		PROJECTION_TRANSITION_MS,
+		VIEWPORT_STROKE_WIDTH_PINHOLE,
+		VIEWPORT_STROKE_WIDTH_STEREO,
+		VISIBILITY_CULL_THRESHOLD
+	} from '$lib/constants';
 	import { clamp, easeInOutCubic, lerp } from '$lib/math/easing';
 	import { getProjectionFrameParams, sampleStarMorphFrame } from '$lib/math/projection';
 	import { onMount } from 'svelte';
@@ -53,22 +69,7 @@
 	const exportFormats = ['PNG', 'SVG', 'PDF'] as const;
 	const projectionOptions = ['stereographic', 'pinhole'] as const;
 	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
-	const EPSILON = 1e-7;
-	const MIN_FOV_DEG = 20;
-	const MAX_FOV_DEG = 120;
-	const PINHOLE_CORNER_RADIUS = 22;
-	const PROJECTION_TRANSITION_MS = 620;
-	const PROJECTION_TRANSITION_MIN_MS = 220;
 	const FLUBBER_MAX_SEGMENT_LENGTH = 5;
-	const PERCEPTUAL_LUT_POINTS = 72;
-	const PERCEPTUAL_SAMPLE_TARGET = 1600;
-	const PERCEPTUAL_VISIBILITY_WEIGHT = 42;
-	const PERCEPTUAL_AREA_WEIGHT = 0.0045;
-	const PERCEPTUAL_BLEND_MIX = 0.5;
-	const VISIBILITY_CULL_THRESHOLD = 0.001;
-	// === Viewport stroke ===
-	const VIEWPORT_STROKE_WIDTH_STEREO = 2.8;
-	const VIEWPORT_STROKE_WIDTH_PINHOLE = 2.2;
 	let flubberInterpolate: MorphInterpolatorFactory | null = null;
 	let fovDeg = $state(100);
 	let projectionBlend = 0;
