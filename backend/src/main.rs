@@ -196,6 +196,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn smoke_compute_get_validation_errors() {
+        let app = test_app().await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/compute?r_x=7000&r_y=0&v_x=0&v_y=7.5&mu=398600.44&dt=0&steps=25")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn smoke_static_assets_served() {
         let app = test_app().await;
         let response = app
@@ -347,5 +362,28 @@ mod tests {
                 .unwrap_or(false),
             true
         );
+    }
+
+    #[tokio::test]
+    async fn smoke_game_start_validation_errors() {
+        let app = test_app().await;
+
+        let start_body = json!({
+            "mode": "trivia",
+            "difficulty": "easy",
+            "total_rounds": 0
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/game/api/start")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(start_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

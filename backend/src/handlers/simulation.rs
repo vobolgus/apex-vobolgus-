@@ -1,9 +1,25 @@
 use axum::{extract::{Query, State}, Json};
 use crate::AppState;
+use axum::http::StatusCode;
 use crate::models::{OrbitComputeRequest, OrbitComputeResponse, OrbitPoint};
 use rust_core::mechanics::OrbitState;
 
-fn compute_orbit_from_request(req: OrbitComputeRequest) -> OrbitComputeResponse {
+fn validate_request(req: &OrbitComputeRequest) -> Result<(), (StatusCode, String)> {
+    if req.mu <= 0.0 {
+        return Err((StatusCode::BAD_REQUEST, "mu must be > 0".to_string()));
+    }
+    if req.dt <= 0.0 {
+        return Err((StatusCode::BAD_REQUEST, "dt must be > 0".to_string()));
+    }
+    if req.steps == 0 || req.steps > 100_000 {
+        return Err((StatusCode::BAD_REQUEST, "steps must be in 1..=100000".to_string()));
+    }
+    Ok(())
+}
+
+fn compute_orbit_from_request(req: OrbitComputeRequest) -> Result<OrbitComputeResponse, (StatusCode, String)> {
+    validate_request(&req)?;
+
     let solution = rust_core::mechanics::compute_orbit(
         OrbitState {
             x: req.r_x,
@@ -28,26 +44,26 @@ fn compute_orbit_from_request(req: OrbitComputeRequest) -> OrbitComputeResponse 
         })
         .collect();
 
-    OrbitComputeResponse {
+    Ok(OrbitComputeResponse {
         trajectory,
         semi_major_axis: solution.semi_major_axis,
         eccentricity: solution.eccentricity,
         specific_energy: solution.specific_energy,
-    }
+    })
 }
 
 pub async fn compute_orbit(
     State(_state): State<AppState>,
     Json(req): Json<OrbitComputeRequest>,
-) -> Json<OrbitComputeResponse> {
-    Json(compute_orbit_from_request(req))
+) -> Result<Json<OrbitComputeResponse>, (StatusCode, String)> {
+    Ok(Json(compute_orbit_from_request(req)?))
 }
 
 pub async fn compute_orbit_get(
     State(_state): State<AppState>,
     Query(req): Query<OrbitComputeRequest>,
-) -> Json<OrbitComputeResponse> {
-    Json(compute_orbit_from_request(req))
+) -> Result<Json<OrbitComputeResponse>, (StatusCode, String)> {
+    Ok(Json(compute_orbit_from_request(req)?))
 }
 
 #[cfg(test)]
@@ -83,7 +99,7 @@ mod tests {
             steps: 100,
         };
 
-        let response = compute_orbit(State(state), Json(req)).await;
+        let response = compute_orbit(State(state), Json(req)).await.unwrap().0;
 
         // Проверяем характеристики орбиты
         assert!(response.semi_major_axis > 6990.0 && response.semi_major_axis < 7010.0);
