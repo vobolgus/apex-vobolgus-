@@ -18,6 +18,7 @@
 	} from '$lib/constants';
 	import { clamp, easeInOutCubic, lerp } from '$lib/math/easing';
 	import { getProjectionFrameParams, sampleStarMorphFrame } from '$lib/math/projection';
+	import { catalog, view } from '$lib/stores.svelte';
 	import { onMount } from 'svelte';
 	import {
 		multiplyQuaternions,
@@ -32,30 +33,13 @@
 		type Vec3
 	} from '$lib/math/quaternion';
 
-	type Star = {
-		ra: number;
-		dec: number;
-		v_mag: number;
-	};
-
-	type StarVector = {
-		x: number;
-		y: number;
-		z: number;
-		v_mag: number;
-	};
-
 	type MorphInterpolatorFactory = (
 		fromShape: string,
 		toShape: string,
 		options?: { maxSegmentLength?: number }
 	) => (t: number) => string;
 
-	let stars = $state<Star[]>([]);
-	let orientation = $state<Quaternion>({ x: 0, y: 0, z: 0, w: 1 });
-
 	let canvasEl: HTMLCanvasElement | null = null;
-	let starVectors: StarVector[] = [];
 	let dragging = false;
 	let lastArcballVector: Vec3 | null = null;
 	let activePointerId: number | null = null;
@@ -71,7 +55,6 @@
 	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
 	const FLUBBER_MAX_SEGMENT_LENGTH = 5;
 	let flubberInterpolate: MorphInterpolatorFactory | null = null;
-	let fovDeg = $state(100);
 	let projectionBlend = 0;
 	let projectionBlendAnimating = false;
 	let projectionBlendFrom = 0;
@@ -173,14 +156,14 @@
 		// at each blend step, which changes when the user rotates the sky. Without
 		// orientation in the key, the LUT goes stale after any drag/rotation.
 		const orientationKey =
-			`${orientation.x.toFixed(3)}:${orientation.y.toFixed(3)}:` +
-			`${orientation.z.toFixed(3)}:${orientation.w.toFixed(3)}`;
-		const key = `${width}:${height}:${fovDeg.toFixed(3)}:${starVectors.length}:${orientationKey}`;
+			`${view.orientation.x.toFixed(3)}:${view.orientation.y.toFixed(3)}:` +
+			`${view.orientation.z.toFixed(3)}:${view.orientation.w.toFixed(3)}`;
+		const key = `${width}:${height}:${view.fovDeg.toFixed(3)}:${catalog.starVectors.length}:${orientationKey}`;
 		if (cachedPerceptualCumulative && cachedPerceptualKey === key) {
 			return cachedPerceptualCumulative;
 		}
 		const cumulative = new Array<number>(PERCEPTUAL_LUT_POINTS).fill(0);
-		if (starVectors.length < 2) {
+		if (catalog.starVectors.length < 2) {
 			for (let i = 1; i < PERCEPTUAL_LUT_POINTS; i += 1) {
 				cumulative[i] = i / (PERCEPTUAL_LUT_POINTS - 1);
 			}
@@ -189,9 +172,9 @@
 			return cumulative;
 		}
 
-		const step = Math.max(1, Math.ceil(starVectors.length / PERCEPTUAL_SAMPLE_TARGET));
+		const step = Math.max(1, Math.ceil(catalog.starVectors.length / PERCEPTUAL_SAMPLE_TARGET));
 		const sampledIndices: number[] = [];
-		for (let i = 0; i < starVectors.length; i += step) {
+		for (let i = 0; i < catalog.starVectors.length; i += step) {
 			sampledIndices.push(i);
 		}
 		const prevPx = new Array<number>(sampledIndices.length).fill(0);
@@ -201,11 +184,11 @@
 
 		for (let i = 0; i < PERCEPTUAL_LUT_POINTS; i += 1) {
 			const blend = i / (PERCEPTUAL_LUT_POINTS - 1);
-			const params = getProjectionFrameParams(width, height, blend, fovDeg);
+			const params = getProjectionFrameParams(width, height, blend, view.fovDeg);
 			const area = params.morphViewportWidth * params.morphViewportHeight;
 			if (i === 0) {
 				for (let sampleIndex = 0; sampleIndex < sampledIndices.length; sampleIndex += 1) {
-					const sample = sampleStarMorphFrame(starVectors[sampledIndices[sampleIndex]], blend, params, rotateVector);
+					const sample = sampleStarMorphFrame(catalog.starVectors[sampledIndices[sampleIndex]], blend, params, rotateVector);
 					prevPx[sampleIndex] = sample.px;
 					prevPy[sampleIndex] = sample.py;
 					prevVisibility[sampleIndex] = sample.visibility;
@@ -218,7 +201,7 @@
 			let motionWeight = 0;
 			let visibilityChangeSum = 0;
 			for (let sampleIndex = 0; sampleIndex < sampledIndices.length; sampleIndex += 1) {
-				const sample = sampleStarMorphFrame(starVectors[sampledIndices[sampleIndex]], blend, params, rotateVector);
+				const sample = sampleStarMorphFrame(catalog.starVectors[sampledIndices[sampleIndex]], blend, params, rotateVector);
 				const visibilityWeight = Math.min(prevVisibility[sampleIndex], sample.visibility);
 				if (visibilityWeight > VISIBILITY_CULL_THRESHOLD) {
 					const dx = sample.px - prevPx[sampleIndex];
@@ -405,8 +388,8 @@
 
 	function setFov(nextFovDeg: number) {
 		const clampedFovDeg = clamp(nextFovDeg, MIN_FOV_DEG, MAX_FOV_DEG);
-		if (Math.abs(clampedFovDeg - fovDeg) <= 0.01) return;
-		fovDeg = clampedFovDeg;
+		if (Math.abs(clampedFovDeg - view.fovDeg) <= 0.01) return;
+		view.fovDeg = clampedFovDeg;
 		markRenderDirty();
 	}
 
@@ -419,7 +402,7 @@
 	function startPinchIfReady() {
 		if (activeCanvasPointers.size !== 2) return;
 		pinchStartDistance = Math.max(getPointersDistance(), EPSILON);
-		pinchStartFovDeg = fovDeg;
+		pinchStartFovDeg = view.fovDeg;
 		dragging = false;
 		activePointerId = null;
 		lastArcballVector = null;
@@ -429,8 +412,8 @@
 		try {
 			const response = await fetch('/api/catalog/full?max_mag=6.5');
 			if (!response.ok) throw new Error(`catalog load failed: ${response.status}`);
-			stars = await response.json();
-			starVectors = stars.map((star) => {
+			catalog.stars = await response.json();
+			catalog.starVectors = catalog.stars.map((star) => {
 				const cosDec = Math.cos(star.dec);
 				return {
 					x: cosDec * Math.cos(star.ra),
@@ -446,7 +429,7 @@
 	}
 
 	function rotateVector(x: number, y: number, z: number): [number, number, number] {
-		const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, orientation);
+		const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, view.orientation);
 		// Convert to view-space convention shared by both projection branches.
 		return [-rx, ry, rz];
 	}
@@ -468,7 +451,7 @@
 		// transitions symmetric — each is the time-reverse of the other.
 		const rawBlend = getProjectionBlend(nowMs);
 		const visualBlend = getPerceptualProjectionBlend(rawBlend, width, height);
-		const params = getProjectionFrameParams(width, height, visualBlend, fovDeg);
+		const params = getProjectionFrameParams(width, height, visualBlend, view.fovDeg);
 		const viewportInterpolator = getViewportMorphInterpolator(
 			cx,
 			cy,
@@ -490,13 +473,13 @@
 		ctx.lineWidth = lerp(VIEWPORT_STROKE_WIDTH_STEREO, VIEWPORT_STROKE_WIDTH_PINHOLE, visualBlend);
 		ctx.stroke(morphViewportPath2D);
 
-		if (!starVectors.length) return;
+		if (!catalog.starVectors.length) return;
 
 		ctx.save();
 		ctx.clip(morphViewportPath2D);
 		ctx.fillStyle = '#000000';
 
-		for (const star of starVectors) {
+		for (const star of catalog.starVectors) {
 			const sample = sampleStarMorphFrame(star, visualBlend, params, rotateVector);
 			if (sample.visibility <= VISIBILITY_CULL_THRESHOLD) continue;
 
@@ -541,7 +524,7 @@
 		const rect = canvasEl.getBoundingClientRect();
 		const currentArcballVector = projectPointerToArcball(event.clientX, event.clientY, rect);
 		const deltaRotation = quaternionBetweenVectors(lastArcballVector, currentArcballVector);
-		orientation = normalizeQuaternion(multiplyQuaternions(deltaRotation, orientation));
+		view.orientation = normalizeQuaternion(multiplyQuaternions(deltaRotation, view.orientation));
 		lastArcballVector = currentArcballVector;
 		markRenderDirty();
 	}
@@ -574,12 +557,12 @@
 		if (!event.ctrlKey) return;
 		event.preventDefault();
 		const zoomFactor = Math.exp(event.deltaY * 0.0025);
-		setFov(fovDeg * zoomFactor);
+		setFov(view.fovDeg * zoomFactor);
 	}
 
 	function onCanvasGestureStart(event: Event) {
 		event.preventDefault();
-		gestureStartFovDeg = fovDeg;
+		gestureStartFovDeg = view.fovDeg;
 	}
 
 	function onCanvasGestureChange(event: Event) {
