@@ -1,7 +1,10 @@
-use axum::{extract::{Query, State}, Json};
 use crate::AppState;
-use axum::http::StatusCode;
 use crate::models::{OrbitComputeRequest, OrbitComputeResponse, OrbitPoint};
+use axum::http::StatusCode;
+use axum::{
+    Json,
+    extract::{Query, State},
+};
 use rust_core::mechanics::OrbitState;
 
 fn validate_request(req: &OrbitComputeRequest) -> Result<(), (StatusCode, String)> {
@@ -12,12 +15,17 @@ fn validate_request(req: &OrbitComputeRequest) -> Result<(), (StatusCode, String
         return Err((StatusCode::BAD_REQUEST, "dt must be > 0".to_string()));
     }
     if req.steps == 0 || req.steps > 100_000 {
-        return Err((StatusCode::BAD_REQUEST, "steps must be in 1..=100000".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "steps must be in 1..=100000".to_string(),
+        ));
     }
     Ok(())
 }
 
-fn compute_orbit_from_request(req: OrbitComputeRequest) -> Result<OrbitComputeResponse, (StatusCode, String)> {
+fn compute_orbit_from_request(
+    req: OrbitComputeRequest,
+) -> Result<OrbitComputeResponse, (StatusCode, String)> {
     validate_request(&req)?;
 
     let solution = rust_core::mechanics::compute_orbit(
@@ -69,8 +77,8 @@ pub async fn compute_orbit_get(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::extract::State;
     use crate::AppState;
+    use axum::extract::State;
     use sqlx::SqlitePool;
     use std::sync::Arc;
 
@@ -111,8 +119,10 @@ mod tests {
         let first = &response.trajectory[0];
         let last = &response.trajectory[100];
 
-        let e_first = (first.vx * first.vx + first.vy * first.vy) / 2.0 - mu / (first.x * first.x + first.y * first.y).sqrt();
-        let e_last = (last.vx * last.vx + last.vy * last.vy) / 2.0 - mu / (last.x * last.x + last.y * last.y).sqrt();
+        let e_first = (first.vx * first.vx + first.vy * first.vy) / 2.0
+            - mu / (first.x * first.x + first.y * first.y).sqrt();
+        let e_last = (last.vx * last.vx + last.vy * last.vy) / 2.0
+            - mu / (last.x * last.x + last.y * last.y).sqrt();
 
         // Погрешность RK4 за 100 шагов должна быть крайне мала
         assert!((e_first - e_last).abs() < 1e-5);

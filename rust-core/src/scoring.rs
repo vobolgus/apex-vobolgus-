@@ -105,13 +105,10 @@ pub fn calculate_score(
         }
     };
 
-    let hint_multiplier = if used_hint {
-        0.5
-    } else {
-        1.0
-    };
+    let hint_multiplier = if used_hint { 0.5 } else { 1.0 };
 
-    let final_score = (base_score as f32 * streak_multiplier * speed_multiplier * hint_multiplier).round() as u32;
+    let final_score =
+        (base_score as f32 * streak_multiplier * speed_multiplier * hint_multiplier).round() as u32;
 
     ScoreCalculationResult {
         final_score,

@@ -1,12 +1,12 @@
-use axum::{
-    extract::Query,
-    extract::State,
-    http::{header, HeaderMap, HeaderValue, StatusCode},
-    Json,
-};
 use crate::AppState;
 use crate::models::RenderConfig;
 use crate::svg_generator::SvgGenerator;
+use axum::{
+    Json,
+    extract::Query,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Default)]
@@ -20,18 +20,30 @@ pub async fn export_pdf(
     Json(config): Json<RenderConfig>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
     if config.projection != "stereo" && config.projection != "pinhole" {
-        return Err((StatusCode::BAD_REQUEST, "projection must be 'stereo' or 'pinhole'".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "projection must be 'stereo' or 'pinhole'".to_string(),
+        ));
     }
     if !(-90.0..=90.0).contains(&config.latitude) {
-        return Err((StatusCode::BAD_REQUEST, "latitude must be in -90..=90".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "latitude must be in -90..=90".to_string(),
+        ));
     }
     if !(-180.0..=180.0).contains(&config.longitude) {
-        return Err((StatusCode::BAD_REQUEST, "longitude must be in -180..=180".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "longitude must be in -180..=180".to_string(),
+        ));
     }
-    if let Some(max_mag) = config.magnitude_limit {
-        if !(0.0..=10.0).contains(&max_mag) {
-            return Err((StatusCode::BAD_REQUEST, "magnitude_limit must be in 0..=10".to_string()));
-        }
+    if let Some(max_mag) = config.magnitude_limit
+        && !(0.0..=10.0).contains(&max_mag)
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "magnitude_limit must be in 0..=10".to_string(),
+        ));
     }
 
     // 1. Генерируем SVG
@@ -45,7 +57,10 @@ pub async fn export_pdf(
 
     if query.format.as_deref() == Some("svg") {
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/svg+xml; charset=utf-8"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("image/svg+xml; charset=utf-8"),
+        );
         return Ok((headers, svg_str.into_bytes()));
     }
 
@@ -53,15 +68,31 @@ pub async fn export_pdf(
     let mut options = svg2pdf::usvg::Options::default();
     options.fontdb_mut().load_system_fonts();
 
-    let tree = svg2pdf::usvg::Tree::from_str(&svg_str, &options)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("SVG parsing error: {}", e)))?;
+    let tree = svg2pdf::usvg::Tree::from_str(&svg_str, &options).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("SVG parsing error: {}", e),
+        )
+    })?;
 
-    let pdf_bytes = svg2pdf::to_pdf(&tree, svg2pdf::ConversionOptions::default(), svg2pdf::PageOptions::default())
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("PDF conversion error: {}", e)))?;
+    let pdf_bytes = svg2pdf::to_pdf(
+        &tree,
+        svg2pdf::ConversionOptions::default(),
+        svg2pdf::PageOptions::default(),
+    )
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("PDF conversion error: {}", e),
+        )
+    })?;
 
     // 3. Формируем заголовки ответа
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/pdf"));
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/pdf"),
+    );
     headers.insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_static("attachment; filename=\"sky_chart.pdf\""),
@@ -74,9 +105,9 @@ pub async fn export_pdf(
 mod tests {
     use super::*;
     use crate::AppState;
+    use crate::models::{LayersConfig, RenderConfig, StyleConfig};
     use sqlx::SqlitePool;
     use std::sync::Arc;
-    use crate::models::{RenderConfig, LayersConfig, StyleConfig};
 
     #[tokio::test]
     async fn test_export_pdf_stereo() {
@@ -125,7 +156,10 @@ mod tests {
         let res = export_pdf(State(state), Query(ExportQuery::default()), Json(config)).await;
         assert!(res.is_ok());
         let (headers, pdf_bytes) = res.unwrap();
-        assert_eq!(headers.get("content-type").unwrap().to_str().unwrap(), "application/pdf");
+        assert_eq!(
+            headers.get("content-type").unwrap().to_str().unwrap(),
+            "application/pdf"
+        );
         assert!(pdf_bytes.starts_with(b"%PDF-"));
     }
 
@@ -153,7 +187,7 @@ mod tests {
                 ecliptic: false,
                 equator: false,
                 galactic_equator: false,
-                planets: false,
+                planets: false, // intentional test fixture: verifies export path with planets layer disabled
                 horizontal_grid: false,
                 equatorial_grid: false,
                 constellations: true,
@@ -176,7 +210,10 @@ mod tests {
         let res = export_pdf(State(state), Query(ExportQuery::default()), Json(config)).await;
         assert!(res.is_ok());
         let (headers, pdf_bytes) = res.unwrap();
-        assert_eq!(headers.get("content-type").unwrap().to_str().unwrap(), "application/pdf");
+        assert_eq!(
+            headers.get("content-type").unwrap().to_str().unwrap(),
+            "application/pdf"
+        );
         assert!(pdf_bytes.starts_with(b"%PDF-"));
     }
 }

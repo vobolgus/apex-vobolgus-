@@ -1,8 +1,0 @@
-include README_PYPI.md
-include LICENSE
-recursive-include astrageek *.py *.tsv *.json *.png *.jpg
-prune sphinx
-prune tools
-prune web
-prune .github
-prune .idea

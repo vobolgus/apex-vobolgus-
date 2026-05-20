@@ -1,10 +1,12 @@
-use super::{QuestionData, QuestionFactory, CONSTELLATION_FACTS};
+use super::{CONSTELLATION_FACTS, QuestionData, QuestionFactory};
 use crate::models::{LayersConfig, QuestionResponse, RenderConfig, StyleConfig};
-use crate::svg_generator::{get_constellations_data, localize_constellation, SvgGenerator};
-use anyhow::{anyhow, Result};
-use rand::{seq::SliceRandom, Rng};
+use crate::svg_generator::{SvgGenerator, get_constellations_data, localize_constellation};
+use anyhow::{Result, anyhow};
+use rand::{Rng, seq::SliceRandom};
 use rust_core::catalog::{HipCatalog, MessierCatalog};
 use std::collections::HashSet;
+
+const GAME_QUESTION_PLANETS_ENABLED: bool = false;
 
 pub(super) fn generate(
     difficulty: &str,
@@ -33,7 +35,12 @@ pub(super) fn generate(
 
     let const_json = get_constellations_data()
         .get(&correct_abbr)
-        .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "constellation '{}' not found in embedded data",
+                correct_abbr
+            )
+        })?;
     let correct_name_en = &const_json.name;
     let correct_name_ru = localize_constellation(&correct_abbr, correct_name_en);
 
@@ -61,7 +68,8 @@ pub(super) fn generate(
             ecliptic: false,
             equator: false,
             galactic_equator: false,
-            planets: false,
+            // intentional: game question images render without planets for deterministic visuals
+            planets: GAME_QUESTION_PLANETS_ENABLED,
             horizontal_grid: false,
             equatorial_grid: false,
             constellations: show_const,
@@ -152,13 +160,19 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (resp, data) =
-            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate question");
+        let (resp, data) = generate("easy", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate question");
 
         assert_eq!(resp.question_type, "constellation");
         assert_eq!(data.question_type, "constellation");
-        let options = resp.options.expect("easy constellation should have options");
-        assert_eq!(options.len(), 4, "constellation mode should provide 4 options");
+        let options = resp
+            .options
+            .expect("easy constellation should have options");
+        assert_eq!(
+            options.len(),
+            4,
+            "constellation mode should provide 4 options"
+        );
         assert!(
             options.contains(&data.correct_answer),
             "correct answer must be present in options"
@@ -171,10 +185,13 @@ mod tests {
         let messier_catalog = MessierCatalog::new();
         let mut used = HashSet::new();
 
-        let (_, data) =
-            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate question");
+        let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate question");
 
-        let abbr = data.correct_abbr.clone().expect("constellation must include abbr");
+        let abbr = data
+            .correct_abbr
+            .clone()
+            .expect("constellation must include abbr");
         assert!(
             data.used_objects.contains(&abbr),
             "used_objects should include chosen constellation abbreviation"

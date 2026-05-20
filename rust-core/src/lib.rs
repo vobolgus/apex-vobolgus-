@@ -1,14 +1,18 @@
 pub mod catalog;
 pub mod mechanics;
+pub mod planets;
 pub mod projections;
 pub mod scoring;
 pub mod time;
 
-pub use catalog::{Star, HipCatalog, MessierObject, MessierCatalog};
+pub use catalog::{HipCatalog, MessierCatalog, MessierObject, Star};
 pub use mechanics::{OrbitPoint, OrbitSolution, OrbitState, compute_orbit};
-pub use projections::{CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection, StereoProjectionResult};
+pub use projections::{
+    CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection,
+    StereoProjectionResult,
+};
 pub use scoring::{Difficulty, GameMode, PlayerRank, ScoreCalculationResult, calculate_score};
-pub use time::{DateTime, julian_date, get_sidereal_time, vequinox_hour_angle};
+pub use time::{DateTime, get_sidereal_time, julian_date, vequinox_hour_angle};
 
 #[cfg(test)]
 mod tests {
@@ -36,7 +40,7 @@ mod tests {
         let lst1 = get_sidereal_time(10.0, dt);
         let lst2 = get_sidereal_time(100.0, dt);
         assert_eq!(lst1, lst2);
-        assert!(lst1 >= 0.0 && lst1 < 24.0);
+        assert!((0.0..24.0).contains(&lst1));
     }
 
     #[test]
@@ -101,7 +105,7 @@ mod tests {
         // При наблюдении с Северного полюса (latitude = 90.0) в зените (zenith = 0.0),
         // она должна проецироваться близко к центру (0.0, 0.0).
         let dt = DateTime::new(2024, 1, 1, 0, 0, 0);
-        
+
         // Примерная звезда рядом с Северным полюсом мира (ra=0, dec=89)
         // ECI: x = cos(89)*cos(0), y = cos(89)*sin(0), z = sin(89)
         let dec_rad = 89.0f32.to_radians();
@@ -112,8 +116,7 @@ mod tests {
         let proj = StereoProjection::project(
             star_x, star_y, star_z,
             90.0, // Наблюдатель на Северном Полюсе
-            0.0,
-            dt
+            0.0, dt,
         );
 
         assert!(proj.is_some());
@@ -129,12 +132,8 @@ mod tests {
         let south_star_x = 0.0;
         let south_star_y = 0.0;
         let south_star_z = -1.0;
-        let proj_invisible = StereoProjection::project(
-            south_star_x, south_star_y, south_star_z,
-            90.0,
-            0.0,
-            dt
-        );
+        let proj_invisible =
+            StereoProjection::project(south_star_x, south_star_y, south_star_z, 90.0, 0.0, dt);
         // Должно быть отфильтровано ограничением zenith > pi / 1.9
         assert!(proj_invisible.is_none());
     }
@@ -147,16 +146,12 @@ mod tests {
         let center_direction = [1.0, 0.0, 0.0];
         let tilt_deg = 0.0;
 
-        let proj = PinholeProjection::project(
-            1.0, 0.0, 0.0,
-            center_direction,
-            tilt_deg,
-            &camera_config
-        );
+        let proj =
+            PinholeProjection::project(1.0, 0.0, 0.0, center_direction, tilt_deg, &camera_config);
 
         assert!(proj.is_some());
         let res = proj.unwrap();
-        
+
         let expected_x = camera_config.width as f32 / 2.0;
         let expected_y = camera_config.height as f32 / 2.0;
 
@@ -171,20 +166,18 @@ mod tests {
         let tilt_deg = 0.0;
 
         // Звезда за спиной камеры (в ECI: [-1, 0, 0] при взгляде на [1, 0, 0])
-        let proj_behind = PinholeProjection::project(
-            -1.0, 0.0, 0.0,
-            center_direction,
-            tilt_deg,
-            &camera_config
-        );
+        let proj_behind =
+            PinholeProjection::project(-1.0, 0.0, 0.0, center_direction, tilt_deg, &camera_config);
         assert!(proj_behind.is_none());
 
         // Звезда слишком сильно в стороне (вне границ с учетом 1/16 gap)
         let proj_far_side = PinholeProjection::project(
-            0.0, 1.0, 0.0, // ECI перпендикулярно взгляду
+            0.0,
+            1.0,
+            0.0, // ECI перпендикулярно взгляду
             center_direction,
             tilt_deg,
-            &camera_config
+            &camera_config,
         );
         assert!(proj_far_side.is_none());
     }
@@ -241,6 +234,9 @@ mod tests {
         assert_eq!(PlayerRank::from_score(10000), PlayerRank::GalacticExplorer);
 
         assert_eq!(PlayerRank::Beginner.display_name(), "🌑 Beginner");
-        assert_eq!(PlayerRank::GalacticExplorer.display_name(), "🌌 Galactic Explorer");
+        assert_eq!(
+            PlayerRank::GalacticExplorer.display_name(),
+            "🌌 Galactic Explorer"
+        );
     }
 }

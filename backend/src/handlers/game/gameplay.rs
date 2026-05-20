@@ -1,19 +1,21 @@
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
-    Json,
 };
 use sqlx::Row;
 use std::collections::HashSet;
 
+use crate::AppState;
 use crate::models::{
     AnswerRequest, AnswerResponse, HintResponse, MultiplierBreakdown, QuestionResponse,
 };
 use crate::question_factory::{QuestionData, QuestionFactory};
-use crate::AppState;
-use rust_core::{calculate_score, Difficulty, GameMode, PlayerRank};
+use rust_core::{Difficulty, GameMode, PlayerRank, calculate_score};
 
 use super::SessionQuery;
+
+const GAME_QUESTION_PLANETS_ENABLED: bool = false;
 
 pub async fn get_question(
     State(state): State<AppState>,
@@ -26,7 +28,12 @@ pub async fn get_question(
     .bind(&query.session_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+    })?
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
 
     let session_mode: String = row
@@ -55,17 +62,17 @@ pub async fn get_question(
         ));
     }
 
-    if let Some(ref data_str) = session_current_question_data {
-        if let Ok(q_data) = serde_json::from_str::<QuestionData>(data_str) {
-            let q_resp = rebuild_question_response(
-                &query.session_id,
-                session_current_round,
-                session_total_rounds,
-                q_data,
-                &state,
-            );
-            return Ok(Json(q_resp));
-        }
+    if let Some(ref data_str) = session_current_question_data
+        && let Ok(q_data) = serde_json::from_str::<QuestionData>(data_str)
+    {
+        let q_resp = rebuild_question_response(
+            &query.session_id,
+            session_current_round,
+            session_total_rounds,
+            q_data,
+            &state,
+        );
+        return Ok(Json(q_resp));
     }
 
     let mut used_objects = if let Some(ref data_str) = session_current_question_data {
@@ -115,7 +122,12 @@ pub async fn get_question(
     .bind(&query.session_id)
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+    })?;
 
     q_resp.session_id = query.session_id;
 
@@ -147,7 +159,8 @@ pub(super) fn rebuild_question_response(
                     ecliptic: false,
                     equator: false,
                     galactic_equator: false,
-                    planets: false,
+                    // intentional: game question images render without planets for deterministic visuals
+                    planets: GAME_QUESTION_PLANETS_ENABLED,
                     horizontal_grid: false,
                     equatorial_grid: false,
                     constellations: true,
@@ -191,7 +204,8 @@ pub(super) fn rebuild_question_response(
                     ecliptic: false,
                     equator: false,
                     galactic_equator: false,
-                    planets: false,
+                    // intentional: game question images render without planets for deterministic visuals
+                    planets: GAME_QUESTION_PLANETS_ENABLED,
                     horizontal_grid: false,
                     equatorial_grid: false,
                     constellations: true,
@@ -235,7 +249,8 @@ pub(super) fn rebuild_question_response(
                     ecliptic: false,
                     equator: false,
                     galactic_equator: false,
-                    planets: false,
+                    // intentional: game question images render without planets for deterministic visuals
+                    planets: GAME_QUESTION_PLANETS_ENABLED,
                     horizontal_grid: false,
                     equatorial_grid: false,
                     constellations: true,
@@ -279,7 +294,8 @@ pub(super) fn rebuild_question_response(
                     ecliptic: false,
                     equator: false,
                     galactic_equator: false,
-                    planets: false,
+                    // intentional: game question images render without planets for deterministic visuals
+                    planets: GAME_QUESTION_PLANETS_ENABLED,
                     horizontal_grid: false,
                     equatorial_grid: false,
                     constellations: true,
@@ -396,10 +412,18 @@ pub async fn submit_answer(
         ));
     }
 
-    let q_data_str = session_current_question_data
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Question has not been generated yet".to_string()))?;
-    let q_data: QuestionData = serde_json::from_str(&q_data_str)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON parsing error: {}", e)))?;
+    let q_data_str = session_current_question_data.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Question has not been generated yet".to_string(),
+        )
+    })?;
+    let q_data: QuestionData = serde_json::from_str(&q_data_str).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("JSON parsing error: {}", e),
+        )
+    })?;
 
     let is_correct = if q_data.question_type == "draw" {
         let user_edges: Vec<Vec<i32>> = serde_json::from_str(&req.answer).unwrap_or_default();
@@ -547,18 +571,31 @@ pub async fn get_hint(
         .bind(&query.session_id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", e),
+            )
+        })?
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
 
     let session_current_question_data: Option<String> = row
         .try_get("current_question_data")
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let q_data_str = session_current_question_data
-        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Question has not been generated yet".to_string()))?;
+    let q_data_str = session_current_question_data.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Question has not been generated yet".to_string(),
+        )
+    })?;
 
-    let mut q_data: QuestionData = serde_json::from_str(&q_data_str)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON parsing error: {}", e)))?;
+    let mut q_data: QuestionData = serde_json::from_str(&q_data_str).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("JSON parsing error: {}", e),
+        )
+    })?;
 
     q_data.hint_used = true;
 
@@ -578,7 +615,12 @@ pub async fn get_hint(
     .bind(&query.session_id)
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+    })?;
 
     Ok(Json(HintResponse {
         session_id: query.session_id,
@@ -677,15 +719,12 @@ mod tests {
             answer: "  o r i  ".to_string(),
             time_spent: 5.0,
         };
-        let resp = submit_answer(State(state.clone()), Json(req)).await.unwrap().0;
+        let resp = submit_answer(State(state.clone()), Json(req))
+            .await
+            .unwrap()
+            .0;
 
-        let expected = calculate_score(
-            Difficulty::Easy,
-            GameMode::Trivia,
-            3,
-            5.0,
-            true,
-        );
+        let expected = calculate_score(Difficulty::Easy, GameMode::Trivia, 3, 5.0, true);
 
         assert!(resp.correct);
         assert_eq!(resp.streak, 3);
@@ -727,18 +766,22 @@ mod tests {
             answer: "definitely_wrong".to_string(),
             time_spent: 4.0,
         };
-        let resp = submit_answer(State(state.clone()), Json(req)).await.unwrap().0;
+        let resp = submit_answer(State(state.clone()), Json(req))
+            .await
+            .unwrap()
+            .0;
 
         assert!(!resp.correct);
         assert_eq!(resp.points_earned, 0);
         assert_eq!(resp.streak, 0);
         assert_eq!(resp.current_score, 25);
 
-        let row = sqlx::query("SELECT score, streak, current_round FROM game_sessions WHERE id = ?")
-            .bind(session_id)
-            .fetch_one(&state.db)
-            .await
-            .unwrap();
+        let row =
+            sqlx::query("SELECT score, streak, current_round FROM game_sessions WHERE id = ?")
+                .bind(session_id)
+                .fetch_one(&state.db)
+                .await
+                .unwrap();
         let db_score: i32 = row.try_get("score").unwrap();
         let db_streak: i32 = row.try_get("streak").unwrap();
         let db_round: i32 = row.try_get("current_round").unwrap();

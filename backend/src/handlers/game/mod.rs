@@ -1,10 +1,10 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::models::{SessionScoreResponse, StartGameRequest, StartGameResponse};
 use crate::AppState;
+use crate::models::{SessionScoreResponse, StartGameRequest, StartGameResponse};
 
 pub mod gameplay;
 pub use gameplay::{get_hint, get_question, submit_answer};
@@ -65,13 +65,22 @@ pub async fn start_game(
     let valid_diffs = ["easy", "medium", "hard"];
 
     if !valid_modes.contains(&mode.as_str()) {
-        return Err((StatusCode::BAD_REQUEST, format!("Invalid game mode: {}", mode)));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Invalid game mode: {}", mode),
+        ));
     }
     if !valid_diffs.contains(&difficulty.as_str()) {
-        return Err((StatusCode::BAD_REQUEST, format!("Invalid difficulty: {}", difficulty)));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Invalid difficulty: {}", difficulty),
+        ));
     }
     if !(1..=50).contains(&total_rounds) {
-        return Err((StatusCode::BAD_REQUEST, "total_rounds must be in 1..=50".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "total_rounds must be in 1..=50".to_string(),
+        ));
     }
 
     let session_id = Uuid::new_v4().to_string();
@@ -112,28 +121,46 @@ pub async fn finish_game(
     Json(req): Json<FinishGameRequest>,
 ) -> Result<Json<SessionScoreResponse>, (StatusCode, String)> {
     let row = sqlx::query(
-        "SELECT current_round, total_rounds, score, streak FROM game_sessions WHERE id = ?"
+        "SELECT current_round, total_rounds, score, streak FROM game_sessions WHERE id = ?",
     )
     .bind(&req.session_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+    })?
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Session not found".to_string()))?;
 
-    let session_current_round: i32 = row.try_get("current_round").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let session_total_rounds: i32 = row.try_get("total_rounds").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let session_score: i32 = row.try_get("score").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    let session_streak: i32 = row.try_get("streak").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let session_current_round: i32 = row
+        .try_get("current_round")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let session_total_rounds: i32 = row
+        .try_get("total_rounds")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let session_score: i32 = row
+        .try_get("score")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let session_streak: i32 = row
+        .try_get("streak")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     sqlx::query(
         "UPDATE game_sessions
          SET is_finished = 1
-         WHERE id = ?"
+         WHERE id = ?",
     )
     .bind(&req.session_id)
     .execute(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Database error: {}", e),
+        )
+    })?;
 
     Ok(Json(SessionScoreResponse {
         session_id: req.session_id,
@@ -148,10 +175,10 @@ pub async fn finish_game(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::extract::Query;
     use crate::AppState;
-    use crate::models::AnswerRequest;
     use crate::db::init_db;
+    use crate::models::AnswerRequest;
+    use axum::extract::Query;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -165,7 +192,7 @@ mod tests {
     async fn test_full_game_flow() {
         // 1. Инициализируем in-memory базу данных
         let db = init_db("sqlite::memory:").await.unwrap();
-        
+
         let state = AppState {
             db,
             hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
@@ -188,7 +215,9 @@ mod tests {
         assert_eq!(start_data.total_rounds, 3);
 
         // 3. Получаем первый вопрос
-        let session_query = SessionQuery { session_id: session_id.clone() };
+        let session_query = SessionQuery {
+            session_id: session_id.clone(),
+        };
         let question_res = get_question(State(state.clone()), Query(session_query.clone())).await;
         assert!(question_res.is_ok());
         let question_data = question_res.unwrap().0;
