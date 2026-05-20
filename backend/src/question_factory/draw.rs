@@ -240,3 +240,41 @@ pub(super) fn generate(
 
     Ok((q_resp, q_data))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::collections::HashSet;
+
+    #[test]
+    fn easy_generate_returns_draw_payload_with_stars_and_edges() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (resp, data) =
+            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate draw question");
+
+        assert_eq!(resp.question_type, "draw");
+        assert_eq!(data.question_type, "draw");
+        assert!(resp.draw_stars.as_ref().is_some_and(|s| !s.is_empty()));
+        assert!(data.ref_edges.as_ref().is_some_and(|e| !e.is_empty()));
+    }
+
+    #[test]
+    fn generate_tracks_used_constellation_for_draw_mode() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) =
+            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate draw question");
+
+        let abbr = data.correct_abbr.clone().expect("draw question should include constellation abbr");
+        assert!(
+            data.used_objects.contains(&abbr),
+            "used_objects should include selected constellation"
+        );
+    }
+}

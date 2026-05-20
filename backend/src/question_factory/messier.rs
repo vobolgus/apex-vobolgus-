@@ -159,3 +159,58 @@ pub(super) fn generate(
 
     Ok((q_resp, q_data))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::collections::HashSet;
+
+    #[test]
+    fn easy_generate_returns_messier_question_with_4_options() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (resp, data) = generate("easy", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate messier question");
+
+        assert_eq!(resp.question_type, "messier");
+        assert_eq!(data.question_type, "messier");
+        let options = resp.options.expect("messier should have options");
+        assert_eq!(options.len(), 4, "messier mode should provide 4 options");
+        assert!(
+            options.contains(&data.correct_answer),
+            "correct messier answer must be in options"
+        );
+    }
+
+    #[test]
+    fn generate_tracks_used_m_number_in_question_data() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) = generate("medium", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate messier question");
+
+        let m_num = data.correct_m_num.expect("messier question should include m number");
+        assert!(
+            data.used_objects.contains(&m_num.to_string()),
+            "used_objects should include used Messier number"
+        );
+    }
+
+    #[test]
+    fn generated_messier_number_is_within_catalog_range() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) = generate("hard", &mut used, &hip_catalog, &messier_catalog)
+            .expect("must generate messier question");
+
+        let m_num = data.correct_m_num.expect("messier question should include m number");
+        assert!((1..=110).contains(&m_num), "Messier number should be in [1,110], got {m_num}");
+    }
+}

@@ -142,3 +142,59 @@ pub(super) fn generate(
 
     Ok((q_resp, q_data))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::collections::HashSet;
+
+    #[test]
+    fn easy_generate_returns_trivia_question_with_4_options() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (resp, data) =
+            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate trivia question");
+
+        assert_eq!(resp.question_type, "trivia");
+        assert_eq!(data.question_type, "trivia");
+        let options = resp.options.expect("trivia should provide options");
+        assert_eq!(options.len(), 4, "trivia mode should provide 4 options");
+        assert!(
+            options.contains(&data.correct_answer),
+            "correct answer must be one of options"
+        );
+    }
+
+    #[test]
+    fn generate_tracks_used_constellation_answer_for_trivia() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) =
+            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate trivia question");
+
+        let abbr = data.correct_abbr.clone().expect("trivia question should include constellation abbr");
+        assert!(
+            data.used_objects.contains(&abbr),
+            "used_objects should include selected trivia answer constellation"
+        );
+    }
+
+    #[test]
+    fn fully_used_easy_pool_is_reset_and_generation_still_succeeds() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used: HashSet<String> = super::super::EASY_CONSTELLATIONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let result = generate("easy", &mut used, &hip_catalog, &messier_catalog);
+
+        assert!(result.is_ok(), "fully used trivia pool should reset and generate");
+    }
+}

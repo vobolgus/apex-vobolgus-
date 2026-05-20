@@ -184,3 +184,60 @@ pub(super) fn generate(
 
     Ok((q_resp, q_data))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::collections::HashSet;
+
+    #[test]
+    fn easy_generate_returns_star_question_with_options_and_correct_answer_inside() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (resp, data) =
+            generate("easy", &mut used, &hip_catalog, &messier_catalog).expect("must generate star question");
+
+        assert_eq!(resp.question_type, "star");
+        assert_eq!(data.question_type, "star");
+        let options = resp.options.expect("easy star mode should return options");
+        assert_eq!(options.len(), 4, "star easy mode should provide 4 options");
+        assert!(
+            options.contains(&data.correct_answer),
+            "correct star name must be in options"
+        );
+    }
+
+    #[test]
+    fn generate_tracks_used_hip_id_in_question_data() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) =
+            generate("medium", &mut used, &hip_catalog, &messier_catalog).expect("must generate star question");
+
+        let hip = data.correct_hip.expect("star question should include HIP id");
+        assert!(
+            data.used_objects.contains(&hip.to_string()),
+            "used_objects should include used HIP id"
+        );
+    }
+
+    #[test]
+    fn hard_generate_provides_equatorial_coordinates() {
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+        let mut used = HashSet::new();
+
+        let (_, data) = generate("hard", &mut used, &hip_catalog, &messier_catalog)
+            .expect("hard mode should generate star question");
+
+        let ra = data.correct_ra_deg.expect("hard mode should include RA");
+        let dec = data.correct_dec_deg.expect("hard mode should include Dec");
+        assert!((0.0..=360.0).contains(&ra), "RA should be within [0, 360], got {ra}");
+        assert!((-90.0..=90.0).contains(&dec), "Dec should be within [-90, 90], got {dec}");
+    }
+}
