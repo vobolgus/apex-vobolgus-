@@ -166,7 +166,16 @@ pub async fn get_question(
         used_objects,
         &state.hip_catalog,
         &state.messier_catalog,
-    );
+    )
+    .map_err(|e| {
+        let message = e.to_string();
+        let status = if message.starts_with("unknown game mode") {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, format!("Failed to generate question: {message}"))
+    })?;
 
     q_resp.session_id = query.session_id.clone();
     q_resp.current_round = session_current_round;
@@ -357,14 +366,16 @@ fn rebuild_question_response(
 
     let draw_stars_rebuilt = if q_data.question_type == "draw" {
         // Нам нужны звезды созвездия. Мы можем сгенерировать их заново через make_question!
-        let (temp_resp, _) = QuestionFactory::make_question(
+        let temp_resp = QuestionFactory::make_question(
             "draw",
             "medium", // дефолтная сложность
             HashSet::new(),
             &state.hip_catalog,
             &state.messier_catalog,
-        );
-        temp_resp.draw_stars
+        )
+        .ok()
+        .map(|(resp, _)| resp);
+        temp_resp.and_then(|resp| resp.draw_stars)
     } else {
         None
     };

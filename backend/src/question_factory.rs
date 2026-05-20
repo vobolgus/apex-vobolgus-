@@ -1,5 +1,6 @@
 use crate::models::{RenderConfig, LayersConfig, StyleConfig, QuestionResponse, DrawStar};
 use crate::svg_generator::{SvgGenerator, get_constellations_data, localize_constellation};
+use anyhow::{anyhow, bail, Result};
 use rust_core::catalog::{HipCatalog, MessierCatalog, MessierObject};
 use rand::{seq::SliceRandom, Rng};
 use std::collections::{HashMap, HashSet};
@@ -246,7 +247,7 @@ impl QuestionFactory {
         mut used_objects: HashSet<String>,
         hip_catalog: &HipCatalog,
         messier_catalog: &MessierCatalog,
-    ) -> (QuestionResponse, QuestionData) {
+    ) -> Result<(QuestionResponse, QuestionData)> {
         let mut rng = rand::thread_rng();
 
         match mode {
@@ -265,7 +266,9 @@ impl QuestionFactory {
                 let correct_abbr = available.choose(&mut rng).cloned().unwrap_or_else(|| "ORI".to_string());
                 used_objects.insert(correct_abbr.clone());
 
-                let const_json = get_constellations_data().get(&correct_abbr).unwrap();
+                let const_json = get_constellations_data()
+                    .get(&correct_abbr)
+                    .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
                 let correct_name_en = &const_json.name;
                 let correct_name_ru = localize_constellation(&correct_abbr, correct_name_en);
 
@@ -322,7 +325,9 @@ impl QuestionFactory {
 
                 let mut options = vec![correct_name_ru.clone()];
                 for d in selected_distractors {
-                    let d_json = get_constellations_data().get(d).unwrap();
+                    let d_json = get_constellations_data()
+                        .get(d)
+                        .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", d))?;
                     options.push(localize_constellation(d, &d_json.name));
                 }
                 options.shuffle(&mut rng);
@@ -362,7 +367,7 @@ impl QuestionFactory {
                     has_hint: true,
                 };
 
-                (q_resp, q_data)
+                Ok((q_resp, q_data))
             }
             "star" => {
                 let mag_limit = Self::get_magnitude_limit(difficulty);
@@ -511,7 +516,7 @@ impl QuestionFactory {
                     has_hint: true,
                 };
 
-                (q_resp, q_data)
+                Ok((q_resp, q_data))
             }
             "messier" => {
                 let all_objects = messier_catalog.get_all_objects();
@@ -525,7 +530,10 @@ impl QuestionFactory {
                     available = all_objects.clone();
                 }
 
-                let correct_obj = available.choose(&mut rng).cloned().unwrap();
+                let correct_obj = available
+                    .choose(&mut rng)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("available pool is empty for messier object"))?;
                 let m_num = correct_obj.m_number;
                 used_objects.insert(m_num.to_string());
 
@@ -649,7 +657,7 @@ impl QuestionFactory {
                     has_hint: true,
                 };
 
-                (q_resp, q_data)
+                Ok((q_resp, q_data))
             }
             "draw" => {
                 let pool = Self::get_constellations_pool(difficulty);
@@ -666,7 +674,9 @@ impl QuestionFactory {
                 let correct_abbr = available.choose(&mut rng).cloned().unwrap_or_else(|| "ORI".to_string());
                 used_objects.insert(correct_abbr.clone());
 
-                let const_json = get_constellations_data().get(&correct_abbr).unwrap();
+                let const_json = get_constellations_data()
+                    .get(&correct_abbr)
+                    .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
                 let constellation_name = localize_constellation(&correct_abbr, &const_json.name);
 
                 let center = [const_json.center[0] as f64, const_json.center[1] as f64, const_json.center[2] as f64];
@@ -848,7 +858,7 @@ impl QuestionFactory {
                     has_hint: true,
                 };
 
-                (q_resp, q_data)
+                Ok((q_resp, q_data))
             }
             "trivia" => {
                 let pool = Self::get_constellations_pool(difficulty);
@@ -869,11 +879,16 @@ impl QuestionFactory {
                     available_trivia = TRIVIA_QUESTIONS.iter().collect();
                 }
 
-                let trivia = available_trivia.choose(&mut rng).cloned().unwrap();
+                let trivia = available_trivia
+                    .choose(&mut rng)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("available pool is empty for trivia"))?;
                 let correct_abbr = trivia.answer.to_string();
                 used_objects.insert(correct_abbr.clone());
 
-                let const_json = get_constellations_data().get(&correct_abbr).unwrap();
+                let const_json = get_constellations_data()
+                    .get(&correct_abbr)
+                    .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", correct_abbr))?;
                 let correct_name = localize_constellation(&correct_abbr, &const_json.name);
 
                 let mut distractors = pool.iter()
@@ -885,7 +900,9 @@ impl QuestionFactory {
 
                 let mut options = vec![correct_name.clone()];
                 for d in selected_distractors {
-                    let d_json = get_constellations_data().get(d).unwrap();
+                    let d_json = get_constellations_data()
+                        .get(d)
+                        .ok_or_else(|| anyhow!("constellation '{}' not found in embedded data", d))?;
                     options.push(localize_constellation(d, &d_json.name));
                 }
                 options.shuffle(&mut rng);
@@ -966,9 +983,33 @@ impl QuestionFactory {
                     has_hint: true,
                 };
 
-                (q_resp, q_data)
+                Ok((q_resp, q_data))
             }
-            _ => panic!("Unknown game mode: {}", mode)
+            _ => bail!("unknown game mode: {mode}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QuestionFactory;
+    use rust_core::catalog::{HipCatalog, MessierCatalog};
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_make_question_unknown_mode_returns_error() {
+        let used = HashSet::new();
+        let hip_catalog = HipCatalog::new();
+        let messier_catalog = MessierCatalog::new();
+
+        let result = QuestionFactory::make_question(
+            "definitely_not_a_real_mode",
+            "easy",
+            used,
+            &hip_catalog,
+            &messier_catalog,
+        );
+
+        assert!(result.is_err(), "unknown mode should return Err, got: {result:?}");
     }
 }
