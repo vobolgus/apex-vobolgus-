@@ -1,28 +1,13 @@
 <script lang="ts">
-	import { projectPointerToArcball } from '$lib/math/arcball';
-	import {
-		EPSILON,
-		MAX_FOV_DEG,
-		MIN_FOV_DEG,
-		PROJECTION_TRANSITION_MIN_MS,
-		PROJECTION_TRANSITION_MS
-	} from '$lib/constants';
-	import { clamp } from '$lib/math/easing';
+	import { PROJECTION_TRANSITION_MIN_MS, PROJECTION_TRANSITION_MS } from '$lib/constants';
 	import { CanvasRenderer, getProjectionBlend } from '$lib/renderer/canvas-renderer';
+	import { InputController } from '$lib/renderer/input-handlers';
 	import type { MorphInterpolatorFactory, ProjectionAnimationState } from '$lib/renderer/types';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { onMount } from 'svelte';
-	import {
-		multiplyQuaternions,
-		normalizeQuaternion,
-		quaternionBetweenVectors,
-		type Vec3
-	} from '$lib/math/quaternion';
 
 	let canvasEl: HTMLCanvasElement | null = null;
-	let dragging = false;
-	let lastArcballVector: Vec3 | null = null;
-	let activePointerId: number | null = null;
+	let input: InputController | null = null;
 	let rafId = 0;
 	let renderDirty = false;
 	let exportMenuOpen = $state(false);
@@ -41,14 +26,18 @@
 	let projectionBlendStartMs = 0;
 	let projectionBlendDurationMs = PROJECTION_TRANSITION_MS;
 	let renderer: CanvasRenderer | null = null;
-	const activeCanvasPointers = new Map<number, { x: number; y: number }>();
-	let pinchStartDistance = 0;
-	let pinchStartFovDeg = 100;
-	let gestureStartFovDeg = 100;
 
 	onMount(() => {
+		input = new InputController({
+			canvas: () => canvasEl,
+			onChange: markRenderDirty
+		});
 		renderer = canvasEl ? new CanvasRenderer(canvasEl) : null;
 		renderer?.setMorphInterpolatorFactory(flubberInterpolate);
+
+		const handleCanvasWheel = (event: WheelEvent) => input?.onCanvasWheel(event);
+		const handleCanvasGestureStart = (event: Event) => input?.onCanvasGestureStart(event);
+		const handleCanvasGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
 
 		const handleOutsidePointerDown = (event: PointerEvent) => {
 			if (exportMenuOpen && exportControlEl && !exportControlEl.contains(event.target as Node)) {
@@ -65,9 +54,9 @@
 		};
 		window.addEventListener('pointerdown', handleOutsidePointerDown);
 		window.addEventListener('keydown', handleEscapeKey);
-		canvasEl?.addEventListener('wheel', onCanvasWheel, { passive: false });
-		canvasEl?.addEventListener('gesturestart', onCanvasGestureStart as EventListener, { passive: false });
-		canvasEl?.addEventListener('gesturechange', onCanvasGestureChange as EventListener, { passive: false });
+		canvasEl?.addEventListener('wheel', handleCanvasWheel, { passive: false });
+		canvasEl?.addEventListener('gesturestart', handleCanvasGestureStart, { passive: false });
+		canvasEl?.addEventListener('gesturechange', handleCanvasGestureChange, { passive: false });
 
 		void loadFlubber().then(() => {
 			markRenderDirty();
@@ -79,12 +68,13 @@
 		return () => {
 			window.removeEventListener('pointerdown', handleOutsidePointerDown);
 			window.removeEventListener('keydown', handleEscapeKey);
-			canvasEl?.removeEventListener('wheel', onCanvasWheel);
-			canvasEl?.removeEventListener('gesturestart', onCanvasGestureStart as EventListener);
-			canvasEl?.removeEventListener('gesturechange', onCanvasGestureChange as EventListener);
+			canvasEl?.removeEventListener('wheel', handleCanvasWheel);
+			canvasEl?.removeEventListener('gesturestart', handleCanvasGestureStart);
+			canvasEl?.removeEventListener('gesturechange', handleCanvasGestureChange);
 			if (rafId) {
 				cancelAnimationFrame(rafId);
 			}
+			input = null;
 		};
 	});
 
@@ -167,28 +157,6 @@
 		markRenderDirty();
 	}
 
-	function setFov(nextFovDeg: number) {
-		const clampedFovDeg = clamp(nextFovDeg, MIN_FOV_DEG, MAX_FOV_DEG);
-		if (Math.abs(clampedFovDeg - view.fovDeg) <= 0.01) return;
-		view.fovDeg = clampedFovDeg;
-		markRenderDirty();
-	}
-
-	function getPointersDistance() {
-		const [a, b] = [...activeCanvasPointers.values()];
-		if (!a || !b) return 0;
-		return Math.hypot(a.x - b.x, a.y - b.y);
-	}
-
-	function startPinchIfReady() {
-		if (activeCanvasPointers.size !== 2) return;
-		pinchStartDistance = Math.max(getPointersDistance(), EPSILON);
-		pinchStartFovDeg = view.fovDeg;
-		dragging = false;
-		activePointerId = null;
-		lastArcballVector = null;
-	}
-
 	async function loadStars() {
 		try {
 			const response = await fetch('/api/catalog/full?max_mag=6.5');
@@ -207,84 +175,6 @@
 		} catch (error) {
 			console.error(error);
 		}
-	}
-
-	function onPointerDown(event: PointerEvent) {
-		if (!(event.target instanceof HTMLCanvasElement)) return;
-		event.target.setPointerCapture(event.pointerId);
-		activeCanvasPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-		if (activeCanvasPointers.size >= 2) {
-			startPinchIfReady();
-			return;
-		}
-		dragging = true;
-		activePointerId = event.pointerId;
-		const rect = event.target.getBoundingClientRect();
-		lastArcballVector = projectPointerToArcball(event.clientX, event.clientY, rect);
-	}
-
-	function onPointerMove(event: PointerEvent) {
-		if (activeCanvasPointers.has(event.pointerId)) {
-			activeCanvasPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-		}
-		if (activeCanvasPointers.size === 2) {
-			const currentDistance = Math.max(getPointersDistance(), EPSILON);
-			const scale = currentDistance / Math.max(pinchStartDistance, EPSILON);
-			setFov(pinchStartFovDeg / Math.max(scale, EPSILON));
-			return;
-		}
-		if (!dragging || event.pointerId !== activePointerId) return;
-		if (!canvasEl || !lastArcballVector) return;
-		const rect = canvasEl.getBoundingClientRect();
-		const currentArcballVector = projectPointerToArcball(event.clientX, event.clientY, rect);
-		const deltaRotation = quaternionBetweenVectors(lastArcballVector, currentArcballVector);
-		view.orientation = normalizeQuaternion(multiplyQuaternions(deltaRotation, view.orientation));
-		lastArcballVector = currentArcballVector;
-		markRenderDirty();
-	}
-
-	function onPointerUp(event: PointerEvent) {
-		if (!activeCanvasPointers.has(event.pointerId)) return;
-		if (canvasEl?.hasPointerCapture(event.pointerId)) {
-			canvasEl.releasePointerCapture(event.pointerId);
-		}
-		activeCanvasPointers.delete(event.pointerId);
-		if (activeCanvasPointers.size >= 2) {
-			startPinchIfReady();
-			return;
-		}
-		if (activeCanvasPointers.size === 1 && canvasEl) {
-			const [nextPointerId, point] = [...activeCanvasPointers.entries()][0];
-			dragging = true;
-			activePointerId = nextPointerId;
-			const rect = canvasEl.getBoundingClientRect();
-			lastArcballVector = projectPointerToArcball(point.x, point.y, rect);
-			return;
-		}
-		dragging = false;
-		activePointerId = null;
-		lastArcballVector = null;
-		pinchStartDistance = 0;
-	}
-
-	function onCanvasWheel(event: WheelEvent) {
-		if (!event.ctrlKey) return;
-		event.preventDefault();
-		const zoomFactor = Math.exp(event.deltaY * 0.0025);
-		setFov(view.fovDeg * zoomFactor);
-	}
-
-	function onCanvasGestureStart(event: Event) {
-		event.preventDefault();
-		gestureStartFovDeg = view.fovDeg;
-	}
-
-	function onCanvasGestureChange(event: Event) {
-		const gestureEvent = event as Event & { scale?: number };
-		const scale = gestureEvent.scale;
-		if (!scale || !Number.isFinite(scale)) return;
-		event.preventDefault();
-		setFov(gestureStartFovDeg / Math.max(scale, EPSILON));
 	}
 
 function exportChart(format: 'PNG' | 'SVG' | 'PDF') {
@@ -316,10 +206,10 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 
 <main
 	class="page"
-	onpointerdown={onPointerDown}
-	onpointermove={onPointerMove}
-	onpointerup={onPointerUp}
-	onpointercancel={onPointerUp}
+	onpointerdown={(event) => input?.onPointerDown(event)}
+	onpointermove={(event) => input?.onPointerMove(event)}
+	onpointerup={(event) => input?.onPointerUp(event)}
+	onpointercancel={(event) => input?.onPointerUp(event)}
 >
 	<header class="ray-header">
 		<div class="ray-bottom">
