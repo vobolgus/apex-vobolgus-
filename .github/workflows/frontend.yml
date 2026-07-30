@@ -31,6 +31,9 @@ jobs:
       - name: svelte-check
         run: npm run check
 
+      - name: Lint and format check (eslint + prettier)
+        run: npm run lint
+
       - name: Vitest unit tests
         run: npm run test:unit
 

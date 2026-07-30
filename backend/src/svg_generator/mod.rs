@@ -33,6 +33,15 @@ pub fn get_constellations_data() -> &'static HashMap<String, ConstellationJson> 
     })
 }
 
+pub fn get_constellation_boundaries_data() -> &'static HashMap<String, Vec<Vec<[f32; 2]>>> {
+    static BOUNDARIES: OnceLock<HashMap<String, Vec<Vec<[f32; 2]>>>> = OnceLock::new();
+    BOUNDARIES.get_or_init(|| {
+        let json_str = include_str!("../../assets/constellations/constellation_boundaries.json");
+        serde_json::from_str(json_str)
+            .expect("invariant violation: embedded backend/assets/constellations/constellation_boundaries.json is malformed; this indicates checked-in data corruption")
+    })
+}
+
 // Словарь русских названий созвездий для локализации
 pub static CONSTELLATION_NAMES_RU: &[(&str, &str)] = &[
     ("AND", "Андромеда"),
@@ -674,14 +683,38 @@ mod tests {
     }
 
     #[test]
-    fn render_with_ecliptic_layer_adds_dashed_path() {
+    fn render_with_ecliptic_layer_adds_solid_path() {
         let mut cfg = baseline_config();
         cfg.layers.ecliptic = true;
 
         let svg = render(&cfg);
 
-        assert!(svg.contains("stroke=\"#FFD700\""));
-        assert!(svg.contains("stroke-dasharray=\"4,4\""));
+        assert!(svg.contains("stroke=\"#DC2626\""));
+        assert!(!svg.contains("stroke=\"#DC2626\" stroke-width=\"2.4\" stroke-dasharray"));
+    }
+
+    #[test]
+    fn render_with_galactic_equator_layer_adds_solid_path() {
+        let mut cfg = baseline_config();
+        cfg.layers.galactic_equator = true;
+
+        let svg = render(&cfg);
+
+        assert!(
+            svg.contains("stroke=\"#B58CFF\""),
+            "expected galactic equator stroke color in SVG"
+        );
+        assert!(
+            !svg.contains("stroke=\"#B58CFF\" stroke-width=\"2.4\" stroke-dasharray"),
+            "galactic equator must be solid"
+        );
+    }
+
+    #[test]
+    fn render_without_galactic_equator_omits_path() {
+        let cfg = baseline_config();
+        let svg = render(&cfg);
+        assert!(!svg.contains("stroke=\"#B58CFF\""));
     }
 
     #[test]

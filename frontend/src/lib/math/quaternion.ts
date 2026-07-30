@@ -47,7 +47,7 @@ export function multiplyQuaternions(a: Quaternion, b: Quaternion): Quaternion {
 	};
 }
 
-function quaternionFromAxisAngle(axis: Vec3, angle: number): Quaternion {
+export function quaternionFromAxisAngle(axis: Vec3, angle: number): Quaternion {
 	const halfAngle = angle * 0.5;
 	const sinHalf = Math.sin(halfAngle);
 	return normalizeQuaternion({
@@ -65,13 +65,43 @@ export function quaternionBetweenVectors(from: Vec3, to: Vec3): Quaternion {
 	if (axisLen < EPSILON) {
 		// Near parallel/opposite vectors: pick a stable fallback axis.
 		if (alignment > 0) return { x: 0, y: 0, z: 0, w: 1 };
-		const fallbackAxis = Math.abs(from.x) < 0.9 ? cross(from, { x: 1, y: 0, z: 0 }) : cross(from, { x: 0, y: 1, z: 0 });
+		const fallbackAxis =
+			Math.abs(from.x) < 0.9
+				? cross(from, { x: 1, y: 0, z: 0 })
+				: cross(from, { x: 0, y: 1, z: 0 });
 		const normalizedFallback = normalizeVec3(fallbackAxis);
 		return quaternionFromAxisAngle(normalizedFallback, Math.PI * ARCBALL_ROTATION_GAIN);
 	}
 	const normalizedAxis = { x: axis.x / axisLen, y: axis.y / axisLen, z: axis.z / axisLen };
 	const angle = Math.acos(alignment) * ARCBALL_ROTATION_GAIN;
 	return quaternionFromAxisAngle(normalizedAxis, angle);
+}
+
+export function slerpQuaternion(a: Quaternion, b: Quaternion, t: number): Quaternion {
+	let d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+	let b2 = b;
+	if (d < 0) {
+		d = -d;
+		b2 = { x: -b.x, y: -b.y, z: -b.z, w: -b.w };
+	}
+	if (d > 0.9995) {
+		return normalizeQuaternion({
+			x: a.x + t * (b2.x - a.x),
+			y: a.y + t * (b2.y - a.y),
+			z: a.z + t * (b2.z - a.z),
+			w: a.w + t * (b2.w - a.w)
+		});
+	}
+	const theta = Math.acos(d);
+	const sinTheta = Math.sin(theta);
+	const wa = Math.sin((1 - t) * theta) / sinTheta;
+	const wb = Math.sin(t * theta) / sinTheta;
+	return {
+		x: wa * a.x + wb * b2.x,
+		y: wa * a.y + wb * b2.y,
+		z: wa * a.z + wb * b2.z,
+		w: wa * a.w + wb * b2.w
+	};
 }
 
 export function quaternionConjugate(q: Quaternion): Quaternion {

@@ -13,8 +13,21 @@ import {
 import { clamp, easeInOutCubic, lerp } from '../math/easing';
 import { getProjectionFrameParams, sampleStarMorphFrame } from '../math/projection';
 import { rotateVectorByQuaternion } from '../math/quaternion';
+import {
+	CONSTELLATION_BOUNDARY_STYLE,
+	CONSTELLATION_LINE_STYLE,
+	drawConstellationLines,
+	drawReferenceLine,
+	REFERENCE_LINE_STYLES,
+	sampleEcliptic,
+	sampleEquator,
+	sampleGalacticEquator,
+	type ReferenceLineStyle,
+	type UnitVec3
+} from './reference-lines';
 
 import type { Quaternion } from '../math/quaternion';
+import type { ConstellationData } from '../stores.svelte';
 import type {
 	MorphInterpolator,
 	MorphInterpolatorFactory,
@@ -22,9 +35,116 @@ import type {
 	PerceptualCacheKey,
 	ProjectionAnimationState,
 	ProjectionBlendTick,
+	ReferenceLinesState,
 	RenderState,
 	ViewportCacheKey
 } from './types';
+
+const LINE_ANIM_DURATION_MS = 720;
+
+interface LineAnimState {
+	target: boolean;
+	progress: number;
+	animating: boolean;
+	startedAt: number;
+	fromProgress: number;
+}
+
+function makeLineAnim(): LineAnimState {
+	return {
+		target: false,
+		progress: 0,
+		animating: false,
+		startedAt: 0,
+		fromProgress: 0
+	};
+}
+
+function updateLineAnim(anim: LineAnimState, target: boolean, nowMs: number): void {
+	if (anim.target !== target) {
+		anim.target = target;
+		anim.fromProgress = anim.progress;
+		anim.startedAt = nowMs;
+		anim.animating = true;
+	}
+	if (!anim.animating) return;
+	const elapsed = nowMs - anim.startedAt;
+	const t = clamp(elapsed / LINE_ANIM_DURATION_MS, 0, 1);
+	const eased = easeInOutCubic(t);
+	const targetProgress = target ? 1 : 0;
+	anim.progress = lerp(anim.fromProgress, targetProgress, eased);
+	if (t >= 1) {
+		anim.progress = targetProgress;
+		anim.animating = false;
+	}
+}
+
+type ReferenceLineKey = keyof ReferenceLinesState;
+
+/**
+ * A single toggleable reference-line layer. Everything the renderer needs to know about a layer
+ * — its animation slot, its style, and how to draw it — is declared once here, so adding a layer
+ * means adding one entry to REFERENCE_LINE_LAYERS instead of editing four call sites.
+ */
+type ReferenceLineLayer =
+	| {
+			key: ReferenceLineKey;
+			kind: 'greatCircle';
+			/** Pre-sampled unit vectors along the great circle (361 points, 1° steps). */
+			samples: readonly UnitVec3[];
+			style: ReferenceLineStyle;
+	  }
+	| {
+			key: ReferenceLineKey;
+			kind: 'constellationSet';
+			pickData: (state: RenderState) => readonly ConstellationData[];
+			style: ReferenceLineStyle;
+	  };
+
+/**
+ * Draw order is significant and matches the pre-refactor hand-written order: equator, then
+ * ecliptic, then galactic equator, then constellation boundaries, then constellation lines on
+ * top. Changing the order changes rendered output (see the Playwright visual baselines).
+ */
+const REFERENCE_LINE_LAYERS = [
+	{
+		key: 'equator',
+		kind: 'greatCircle',
+		samples: sampleEquator(),
+		style: REFERENCE_LINE_STYLES.equator
+	},
+	{
+		key: 'ecliptic',
+		kind: 'greatCircle',
+		samples: sampleEcliptic(),
+		style: REFERENCE_LINE_STYLES.ecliptic
+	},
+	{
+		key: 'galacticEquator',
+		kind: 'greatCircle',
+		samples: sampleGalacticEquator(),
+		style: REFERENCE_LINE_STYLES.galacticEquator
+	},
+	{
+		key: 'constellationBoundaries',
+		kind: 'constellationSet',
+		pickData: (state) => state.constellationBoundaries,
+		style: CONSTELLATION_BOUNDARY_STYLE
+	},
+	{
+		key: 'constellations',
+		kind: 'constellationSet',
+		pickData: (state) => state.constellations,
+		style: CONSTELLATION_LINE_STYLE
+	}
+] satisfies readonly ReferenceLineLayer[];
+
+// Compile-time guard: every key of ReferenceLinesState must have a layer above. Adding a key to
+// the state type without adding a descriptor makes this alias fail to satisfy its constraint.
+type AssertNever<T extends never> = T;
+type _AllReferenceLinesCovered = AssertNever<
+	Exclude<ReferenceLineKey, (typeof REFERENCE_LINE_LAYERS)[number]['key']>
+>;
 
 const FLUBBER_MAX_SEGMENT_LENGTH = 5;
 
@@ -32,7 +152,10 @@ export function perceptualKeyEquals(a: PerceptualCacheKey, b: PerceptualCacheKey
 	return (
 		a.width === b.width &&
 		a.height === b.height &&
-		a.fovDeg === b.fovDeg &&
+		a.stereoFovDeg === b.stereoFovDeg &&
+		a.pinholeFovDeg === b.pinholeFovDeg &&
+		a.pinholeAspectRatio === b.pinholeAspectRatio &&
+		a.pinholeHeightFrac === b.pinholeHeightFrac &&
 		a.starVectorsLen === b.starVectorsLen &&
 		a.orientation.x === b.orientation.x &&
 		a.orientation.y === b.orientation.y &&
@@ -75,7 +198,10 @@ export function getProjectionBlend(
 export function getPerceptualBlendCumulative({
 	width,
 	height,
-	fovDeg,
+	stereoFovDeg,
+	pinholeFovDeg,
+	pinholeAspectRatio,
+	pinholeHeightFrac,
 	starVectors,
 	orientation
 }: PerceptualBlendInput): number[] {
@@ -105,7 +231,15 @@ export function getPerceptualBlendCumulative({
 
 	for (let i = 0; i < PERCEPTUAL_LUT_POINTS; i += 1) {
 		const blend = i / (PERCEPTUAL_LUT_POINTS - 1);
-		const params = getProjectionFrameParams(width, height, blend, fovDeg);
+		const params = getProjectionFrameParams(
+			width,
+			height,
+			blend,
+			stereoFovDeg,
+			pinholeFovDeg,
+			pinholeAspectRatio,
+			pinholeHeightFrac
+		);
 		const area = params.morphViewportWidth * params.morphViewportHeight;
 
 		if (i === 0) {
@@ -173,7 +307,10 @@ export function getPerceptualBlendCumulative({
 	return cumulative;
 }
 
-export function getPerceptualProjectionBlend(rawBlend: number, cumulative: readonly number[]): number {
+export function getPerceptualProjectionBlend(
+	rawBlend: number,
+	cumulative: readonly number[]
+): number {
 	const normalizedRawBlend = clamp(rawBlend, 0, 1);
 	if (normalizedRawBlend <= 0) return 0;
 	if (normalizedRawBlend >= 1) return 1;
@@ -183,7 +320,8 @@ export function getPerceptualProjectionBlend(rawBlend: number, cumulative: reado
 		if (cumulative[i] < normalizedRawBlend) continue;
 		const prev = cumulative[i - 1];
 		const next = cumulative[i];
-		const localT = Math.abs(next - prev) <= EPSILON ? 0 : (normalizedRawBlend - prev) / (next - prev);
+		const localT =
+			Math.abs(next - prev) <= EPSILON ? 0 : (normalizedRawBlend - prev) / (next - prev);
 		const prevBlend = (i - 1) / (cumulative.length - 1);
 		const nextBlend = i / (cumulative.length - 1);
 		perceptual = lerp(prevBlend, nextBlend, localT);
@@ -198,7 +336,13 @@ function buildCirclePath(cx: number, cy: number, radius: number) {
 	return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx} ${cy + r} A ${r} ${r} 0 1 1 ${cx} ${cy - r} Z`;
 }
 
-function buildRoundedRectPath(left: number, top: number, width: number, height: number, radius: number) {
+function buildRoundedRectPath(
+	left: number,
+	top: number,
+	width: number,
+	height: number,
+	radius: number
+) {
 	const right = left + width;
 	const bottom = top + height;
 	const r = clamp(radius, 0, Math.min(width, height) * 0.5);
@@ -225,8 +369,26 @@ export class CanvasRenderer {
 	private cachedMorphPath = '';
 	private cachedMorphPath2D: Path2D | null = null;
 	private flubberInterpolate: MorphInterpolatorFactory | null = null;
+	// Offscreen layer with all stars pre-rendered. Lets resize loops blit instead of redrawing
+	// 9K arcs/frame. Must be invalidated when orientation, fov, or anything else changes star
+	// positions on canvas. NOT invalidated by aspect/height changes (stars are invariant).
+	private starsLayer: HTMLCanvasElement | null = null;
+	private starsLayerKey: string | null = null;
+
+	private readonly lineAnims: Record<ReferenceLineKey, LineAnimState> = Object.fromEntries(
+		REFERENCE_LINE_LAYERS.map((layer) => [layer.key, makeLineAnim()])
+	) as Record<ReferenceLineKey, LineAnimState>;
 
 	constructor(private readonly canvas: HTMLCanvasElement) {}
+
+	hasActiveLineAnimations(): boolean {
+		return REFERENCE_LINE_LAYERS.some((layer) => this.lineAnims[layer.key].animating);
+	}
+
+	invalidateStarsCache() {
+		this.starsLayer = null;
+		this.starsLayerKey = null;
+	}
 
 	setMorphInterpolatorFactory(factory: MorphInterpolatorFactory | null) {
 		this.flubberInterpolate = factory;
@@ -249,17 +411,45 @@ export class CanvasRenderer {
 		const height = this.canvas.height;
 		const cx = width / 2;
 		const cy = height / 2;
-		const visualBlend = this.getPerceptualProjectionBlend(state.projectionBlend, state, width, height);
-		const params = getProjectionFrameParams(width, height, visualBlend, state.fovDeg);
-		const viewportInterpolator = this.getViewportMorphInterpolator(
-			cx,
-			cy,
-			params.radius,
-			params.pinholeViewportWidth,
-			params.pinholeViewportHeight,
-			PINHOLE_CORNER_RADIUS
+		const visualBlend = this.getPerceptualProjectionBlend(
+			state.projectionBlend,
+			state,
+			width,
+			height
 		);
-		const { path2D: morphViewportPath2D } = this.getMorphViewportPath2D(visualBlend, viewportInterpolator);
+		const params = getProjectionFrameParams(
+			width,
+			height,
+			visualBlend,
+			state.stereoFovDeg,
+			state.pinholeFovDeg,
+			state.pinholeAspectRatio,
+			state.pinholeHeightFrac
+		);
+		let morphViewportPath2D: Path2D;
+		if (visualBlend >= 1) {
+			morphViewportPath2D = new Path2D(
+				buildRoundedRectPath(
+					cx - params.pinholeViewportWidth * 0.5,
+					cy - params.pinholeViewportHeight * 0.5,
+					params.pinholeViewportWidth,
+					params.pinholeViewportHeight,
+					PINHOLE_CORNER_RADIUS
+				)
+			);
+		} else if (visualBlend <= 0) {
+			morphViewportPath2D = new Path2D(buildCirclePath(cx, cy, params.radius));
+		} else {
+			const viewportInterpolator = this.getViewportMorphInterpolator(
+				cx,
+				cy,
+				params.radius,
+				params.pinholeViewportWidth,
+				params.pinholeViewportHeight,
+				PINHOLE_CORNER_RADIUS
+			);
+			morphViewportPath2D = this.getMorphViewportPath2D(visualBlend, viewportInterpolator).path2D;
+		}
 
 		ctx.fillStyle = '#0a0a0b';
 		ctx.fillRect(0, 0, width, height);
@@ -270,37 +460,159 @@ export class CanvasRenderer {
 		ctx.lineWidth = lerp(VIEWPORT_STROKE_WIDTH_STEREO, VIEWPORT_STROKE_WIDTH_PINHOLE, visualBlend);
 		ctx.stroke(morphViewportPath2D);
 
-		if (!state.starVectors.length) return;
+		const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		let hasLinesToDraw = false;
+		for (const layer of REFERENCE_LINE_LAYERS) {
+			const anim = this.lineAnims[layer.key];
+			updateLineAnim(anim, state.referenceLines[layer.key], nowMs);
+			if (anim.progress > 0) hasLinesToDraw = true;
+		}
+
+		if (!state.starVectors.length && !hasLinesToDraw) return;
 
 		ctx.save();
 		ctx.clip(morphViewportPath2D);
-		ctx.fillStyle = '#000000';
 
-		for (const star of state.starVectors) {
-			const sample = sampleStarMorphFrame(star, visualBlend, params, (x, y, z) =>
-				this.rotateVector(x, y, z, state.orientation)
-			);
-			if (sample.visibility <= VISIBILITY_CULL_THRESHOLD) continue;
+		if (hasLinesToDraw) {
+			this.drawReferenceLines(ctx, state, params, visualBlend, cx, cy);
+		}
 
-			const pointRadius = lerp(sample.stereoRadius, sample.pinholeRadius, visualBlend);
-			const pointAlpha = lerp(sample.stereoAlpha, sample.pinholeAlpha, visualBlend);
-
-			ctx.globalAlpha = pointAlpha * sample.visibility;
-			ctx.beginPath();
-			ctx.arc(cx + sample.px, cy + sample.py, pointRadius, 0, Math.PI * 2);
-			ctx.fill();
+		if (state.starVectors.length) {
+			// Cache key for the stars layer: anything that moves stars on canvas must change this.
+			// pinholeAspectRatio / pinholeHeightFrac are intentionally omitted (stars are invariant).
+			const starsKey = this.computeStarsKey(state, width, height, visualBlend);
+			if (this.starsLayerKey !== starsKey || !this.starsLayer) {
+				this.starsLayer = this.buildStarsLayer(state, params, visualBlend, width, height);
+				this.starsLayerKey = starsKey;
+			}
+			if (this.starsLayer) {
+				ctx.drawImage(this.starsLayer, 0, 0);
+			}
 		}
 
 		ctx.restore();
 		ctx.globalAlpha = 1;
 	}
 
-	private rotateVector(x: number, y: number, z: number, orientation: Quaternion): [number, number, number] {
+	private drawReferenceLines(
+		ctx: CanvasRenderingContext2D,
+		state: RenderState,
+		params: ReturnType<typeof getProjectionFrameParams>,
+		visualBlend: number,
+		cx: number,
+		cy: number
+	): void {
+		const rotateVector = (x: number, y: number, z: number) =>
+			this.rotateVector(x, y, z, state.orientation);
+
+		for (const layer of REFERENCE_LINE_LAYERS) {
+			const progress = this.lineAnims[layer.key].progress;
+			if (progress <= 0) continue;
+
+			if (layer.kind === 'greatCircle') {
+				drawReferenceLine({
+					ctx,
+					cx,
+					cy,
+					samples: layer.samples,
+					style: layer.style,
+					progress,
+					visualBlend,
+					params,
+					rotateVector
+				});
+				continue;
+			}
+
+			const data = layer.pickData(state);
+			if (data.length === 0) continue;
+			drawConstellationLines(
+				ctx,
+				cx,
+				cy,
+				data,
+				progress,
+				visualBlend,
+				params,
+				rotateVector,
+				layer.style
+			);
+		}
+	}
+
+	private computeStarsKey(
+		state: RenderState,
+		width: number,
+		height: number,
+		visualBlend: number
+	): string {
+		const o = state.orientation;
+		return [
+			width,
+			height,
+			state.starVectors.length,
+			state.stereoFovDeg,
+			state.pinholeFovDeg,
+			visualBlend,
+			o.x,
+			o.y,
+			o.z,
+			o.w
+		].join('|');
+	}
+
+	private buildStarsLayer(
+		state: RenderState,
+		params: ReturnType<typeof getProjectionFrameParams>,
+		visualBlend: number,
+		width: number,
+		height: number
+	): HTMLCanvasElement {
+		const layer = document.createElement('canvas');
+		layer.width = width;
+		layer.height = height;
+		const ctx = layer.getContext('2d');
+		if (!ctx) return layer;
+		const cx = width / 2;
+		const cy = height / 2;
+		ctx.fillStyle = '#000000';
+		for (const star of state.starVectors) {
+			const sample = sampleStarMorphFrame(star, visualBlend, params, (x, y, z) =>
+				this.rotateVector(x, y, z, state.orientation)
+			);
+			if (sample.visibility <= VISIBILITY_CULL_THRESHOLD) continue;
+			const pointRadius = lerp(sample.stereoRadius, sample.pinholeRadius, visualBlend);
+			const pointAlpha = lerp(sample.stereoAlpha, sample.pinholeAlpha, visualBlend);
+			ctx.globalAlpha = pointAlpha * sample.visibility;
+			ctx.beginPath();
+			ctx.arc(cx + sample.px, cy + sample.py, pointRadius, 0, Math.PI * 2);
+			ctx.fill();
+		}
+		ctx.globalAlpha = 1;
+		return layer;
+	}
+
+	private rotateVector(
+		x: number,
+		y: number,
+		z: number,
+		orientation: Quaternion
+	): [number, number, number] {
 		const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, orientation);
 		return [-rx, ry, rz];
 	}
 
-	private getPerceptualProjectionBlend(rawBlend: number, state: RenderState, width: number, height: number) {
+	private getPerceptualProjectionBlend(
+		rawBlend: number,
+		state: RenderState,
+		width: number,
+		height: number
+	) {
+		// Skip the expensive 72×~1600 sample LUT build when blend is pinned to either
+		// endpoint - getPerceptualProjectionBlend(0|1, ...) returns 0|1 regardless of LUT.
+		// This is the hot path during pinhole resize where blend stays at 1.
+		if (rawBlend <= 0) return 0;
+		if (rawBlend >= 1) return 1;
 		const cumulative = this.getPerceptualBlendCumulative(state, width, height);
 		return getPerceptualProjectionBlend(rawBlend, cumulative);
 	}
@@ -309,7 +621,10 @@ export class CanvasRenderer {
 		const key: PerceptualCacheKey = {
 			width,
 			height,
-			fovDeg: state.fovDeg,
+			stereoFovDeg: state.stereoFovDeg,
+			pinholeFovDeg: state.pinholeFovDeg,
+			pinholeAspectRatio: state.pinholeAspectRatio,
+			pinholeHeightFrac: state.pinholeHeightFrac,
 			starVectorsLen: state.starVectors.length,
 			orientation: {
 				x: state.orientation.x,
@@ -330,7 +645,10 @@ export class CanvasRenderer {
 		const cumulative = getPerceptualBlendCumulative({
 			width,
 			height,
-			fovDeg: state.fovDeg,
+			stereoFovDeg: state.stereoFovDeg,
+			pinholeFovDeg: state.pinholeFovDeg,
+			pinholeAspectRatio: state.pinholeAspectRatio,
+			pinholeHeightFrac: state.pinholeHeightFrac,
 			starVectors: state.starVectors,
 			orientation: state.orientation
 		});

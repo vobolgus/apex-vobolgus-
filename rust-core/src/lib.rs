@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod coords;
 pub mod mechanics;
 pub mod planets;
 pub mod projections;
@@ -6,6 +7,7 @@ pub mod scoring;
 pub mod time;
 
 pub use catalog::{HipCatalog, MessierCatalog, MessierObject, Star};
+pub use coords::ra_dec_to_unit_vector;
 pub use mechanics::{OrbitPoint, OrbitSolution, OrbitState, compute_orbit};
 pub use projections::{
     CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection,

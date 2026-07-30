@@ -49,6 +49,14 @@ fn build_app(state: AppState) -> Router {
             get(handlers::catalog::get_bright_stars),
         )
         .route("/api/catalog/full", get(handlers::catalog::get_full_stars))
+        .route(
+            "/api/constellations",
+            get(handlers::catalog::get_constellations),
+        )
+        .route(
+            "/api/constellation-boundaries",
+            get(handlers::catalog::get_constellation_boundaries),
+        )
         // Orbit simulation (spec uses GET, keep POST for compatibility)
         .route(
             "/api/compute",

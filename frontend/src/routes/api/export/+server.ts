@@ -28,7 +28,8 @@ export const POST: RequestHandler = async ({ request, fetch, url }) => {
 		status: 200,
 		headers: {
 			'content-type': response.headers.get('content-type') ?? 'application/pdf',
-			'content-disposition': response.headers.get('content-disposition') ?? 'attachment; filename="sky_chart.pdf"'
+			'content-disposition':
+				response.headers.get('content-disposition') ?? 'attachment; filename="sky_chart.pdf"'
 		}
 	});
 };

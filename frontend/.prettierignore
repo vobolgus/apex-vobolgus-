@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+build
+dist
+static
+e2e-results
+playwright-report
+e2e/**/*-snapshots
+package-lock.json
+apex.db
