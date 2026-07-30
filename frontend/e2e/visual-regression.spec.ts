@@ -12,7 +12,26 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
  *
  * Subsequent refactor passes MUST keep these screenshots stable
  * (within the configured maxDiffPixelRatio).
+ *
+ * LOCAL ONLY. The committed baselines are `*-chromium-darwin.png`, generated on
+ * macOS. CI runs on ubuntu, where Playwright looks for `*-chromium-linux.png`
+ * and fails because no such baseline exists — font rasterisation and canvas
+ * antialiasing differ enough between the two platforms that one set of images
+ * cannot serve both. Rather than let that sit red, or paper over it by widening
+ * maxDiffPixelRatio until the suite proves nothing, we skip these on CI and keep
+ * the functional e2e specs running there.
+ *
+ * To restore CI coverage, generate Linux baselines in the official image and
+ * commit them alongside the darwin ones:
+ *
+ *   docker run --rm -v "$PWD":/w -w /w/frontend --network host \
+ *     mcr.microsoft.com/playwright:v1.60.0-jammy \
+ *     npx playwright test e2e/visual-regression.spec.ts --update-snapshots
+ *
+ * then drop the test.skip below.
  */
+
+test.skip(!!process.env.CI, 'baselines are macOS-only; see the comment above');
 
 const VIEWPORT = { width: 1280, height: 800 } as const;
 const CATALOG_LOAD_MS = 2500;

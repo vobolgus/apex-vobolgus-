@@ -1,4 +1,3 @@
-// @ts-ignore -- Vitest types arrive with P2.6 dependency update.
 import { describe, expect, it } from 'vitest';
 
 import { projectPointerToArcball } from './arcball';

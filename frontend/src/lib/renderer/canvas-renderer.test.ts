@@ -62,7 +62,10 @@ describe('perceptual projection helpers', () => {
 		const cumulative = getPerceptualBlendCumulative({
 			width: 1200,
 			height: 1200,
-			fovDeg: 100,
+			stereoFovDeg: 180,
+			pinholeFovDeg: 100,
+			pinholeAspectRatio: 1.9 / 1.18,
+			pinholeHeightFrac: 1.18,
 			starVectors,
 			orientation
 		});
@@ -78,7 +81,10 @@ describe('perceptual projection helpers', () => {
 		const cumulative = getPerceptualBlendCumulative({
 			width: 1200,
 			height: 1200,
-			fovDeg: 100,
+			stereoFovDeg: 180,
+			pinholeFovDeg: 100,
+			pinholeAspectRatio: 1.9 / 1.18,
+			pinholeHeightFrac: 1.18,
 			starVectors,
 			orientation
 		});

@@ -17,24 +17,29 @@ export const PERCEPTUAL_AREA_WEIGHT = 0.0045;
 export const PERCEPTUAL_BLEND_MIX = 0.5;
 
 // === Geometry & FOV ===
+export const CHART_RADIUS_FRAC = 0.46;
 export const PINHOLE_CORNER_RADIUS = 22;
-export const MIN_FOV_DEG = 20;
-export const MAX_FOV_DEG = 120;
+export const MIN_FOV_DEG_STEREO = 20;
+export const MAX_FOV_DEG_STEREO = 180;
+export const MIN_FOV_DEG_PINHOLE = 20;
+export const MAX_FOV_DEG_PINHOLE = 120;
+// Pinhole viewport size as a fraction of `radius` (= min(canvas_w, canvas_h) * 0.46).
+// Width is derived as aspect * height; both must stay within the chart-surface.
+export const PINHOLE_HEIGHT_FRAC_DEFAULT = 1.18;
+export const PINHOLE_ASPECT_RATIO_DEFAULT = 1.9 / 1.18;
+export const PINHOLE_HEIGHT_FRAC_MIN = 0.3;
+export const PINHOLE_HEIGHT_FRAC_MAX = 2.0;
+export const PINHOLE_ASPECT_RATIO_MIN = 0.4;
+export const PINHOLE_ASPECT_RATIO_MAX = 3.5;
 export const EPSILON = 1e-7;
 
-// === Star rendering (stereographic) ===
-export const STEREO_STAR_MIN_ALPHA = 0.38;
-export const STEREO_STAR_ALPHA_MAG_DIVISOR = 8;
-export const STEREO_STAR_MIN_RADIUS_PX = 0.45;
-export const STEREO_STAR_BASE_RADIUS_PX = 3.5;
-export const STEREO_STAR_MAG_RADIUS_COEFF = 0.4;
-
-// === Star rendering (pinhole) ===
-export const PINHOLE_STAR_MIN_ALPHA = 0.35;
-export const PINHOLE_STAR_ALPHA_MAG_DIVISOR = 8;
-export const PINHOLE_STAR_MIN_RADIUS_PX = 0.4;
-export const PINHOLE_STAR_BASE_RADIUS_PX = 3.4;
-export const PINHOLE_STAR_MAG_RADIUS_COEFF = 0.38;
+// === Star rendering (shared for stereographic & pinhole) ===
+// size = max(STAR_MIN_RADIUS_PX, STAR_BASE_RADIUS_PX - STAR_MAG_COEFF * v_mag).
+// Brighter stars (lower magnitude) → larger radius; clamped at MIN below.
+export const STAR_MIN_RADIUS_PX = 0.5;
+export const STAR_BASE_RADIUS_PX = 4.0;
+export const STAR_MAG_COEFF = 0.75;
+export const STAR_ALPHA = 1;
 
 // === Projection clamps / SDF ===
 export const PROJECTION_NORM_CLAMP = 1.8;

@@ -1,88 +1,108 @@
 <script lang="ts">
-	import { PROJECTION_TRANSITION_MIN_MS, PROJECTION_TRANSITION_MS } from '$lib/constants';
-	import { CanvasRenderer, getProjectionBlend } from '$lib/renderer/canvas-renderer';
-	import { InputController } from '$lib/renderer/input-handlers';
-	import type { MorphInterpolatorFactory } from '$lib/renderer/types';
-	import { catalog, view } from '$lib/stores.svelte';
-	import PlanetsToggle from '$lib/components/PlanetsToggle.svelte';
 	import { onMount } from 'svelte';
+	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
+	import { exportChart, type ExportFormat } from '$lib/api/export';
+	import PinholeResizeHandles from '$lib/components/PinholeResizeHandles.svelte';
+	import PlanetsToggle from '$lib/components/PlanetsToggle.svelte';
+	import { CHART_RADIUS_FRAC } from '$lib/constants';
+	import { loadFlubberInterpolator } from '$lib/flubber';
+	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
+	import { InputController } from '$lib/renderer/input-handlers';
+	import { LayerState, REFERENCE_LINE_OPTIONS } from '$lib/state/layers.svelte';
+	import {
+		PROJECTION_OPTIONS,
+		ProjectionTransition,
+		type ProjectionMode
+	} from '$lib/state/projection-transition.svelte';
+	import { catalog, view } from '$lib/stores.svelte';
+	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
+
+	const EXPORT_FORMATS = ['PNG', 'SVG', 'PDF'] as const satisfies readonly ExportFormat[];
 
 	let canvasEl: HTMLCanvasElement | null = null;
+	let chartSurfaceEl: HTMLDivElement | null = null;
+	let surfaceSizePx = $state(1);
 	let input: InputController | null = null;
+	let renderer: CanvasRenderer | null = null;
 	let rafId = 0;
 	let renderDirty = false;
-	let exportMenuOpen = $state(false);
-	let selectedExportFormat = $state<'PNG' | 'SVG' | 'PDF'>('PNG');
-	let exportControlEl: HTMLDivElement | null = null;
-	let projectionMenuOpen = $state(false);
-	let projectionControlEl: HTMLDivElement | null = null;
-	const exportFormats = ['PNG', 'SVG', 'PDF'] as const;
-	const projectionOptions = ['stereographic', 'pinhole'] as const;
-	let selectedProjection = $state<(typeof projectionOptions)[number]>('stereographic');
-	let showPlanets = $state(false);
-	let flubberInterpolate: MorphInterpolatorFactory | null = null;
-	type ProjectionBlendState = {
-		blend: number;
-		animating: boolean;
-		from: number;
-		to: number;
-		startMs: number;
-		durationMs: number;
-	};
-	let projection = $state<ProjectionBlendState>({
-		blend: 0,
-		animating: false,
-		from: 0,
-		to: 0,
-		startMs: 0,
-		durationMs: PROJECTION_TRANSITION_MS
-	});
-	let renderer: CanvasRenderer | null = null;
+	let lastFrameTimeMs = 0;
+
+	const layers = new LayerState();
+	const projection = new ProjectionTransition();
+	const exportMenu = new Dropdown();
+	const projectionMenu = new Dropdown();
+	const linesMenu = new Dropdown();
+	const menus = new DropdownGroup(exportMenu, projectionMenu, linesMenu);
+
+	let selectedExportFormat = $state<ExportFormat>('PNG');
 
 	onMount(() => {
 		input = new InputController({
 			canvas: () => canvasEl,
-			onChange: markRenderDirty
+			onChange: markRenderDirty,
+			getMode: () => (projection.blend < 0.5 ? 'stereographic' : 'pinhole')
 		});
 		renderer = canvasEl ? new CanvasRenderer(canvasEl) : null;
-		renderer?.setMorphInterpolatorFactory(flubberInterpolate);
+
+		const surfaceObserver = chartSurfaceEl
+			? new ResizeObserver((entries) => {
+					for (const entry of entries) {
+						const { width, height } = entry.contentRect;
+						surfaceSizePx = Math.max(1, Math.min(width, height));
+					}
+				})
+			: null;
+		if (surfaceObserver && chartSurfaceEl) {
+			surfaceObserver.observe(chartSurfaceEl);
+			const rect = chartSurfaceEl.getBoundingClientRect();
+			surfaceSizePx = Math.max(1, Math.min(rect.width, rect.height));
+		}
 
 		const handleCanvasWheel = (event: WheelEvent) => input?.onCanvasWheel(event);
 		const handleCanvasGestureStart = (event: Event) => input?.onCanvasGestureStart(event);
 		const handleCanvasGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
 
-		const handleOutsidePointerDown = (event: PointerEvent) => {
-			if (exportMenuOpen && exportControlEl && !exportControlEl.contains(event.target as Node)) {
-				exportMenuOpen = false;
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (
+				event.code === 'KeyP' &&
+				event.shiftKey &&
+				!event.repeat &&
+				!event.metaKey &&
+				!event.ctrlKey &&
+				!event.altKey
+			) {
+				event.preventDefault();
+				switchProjection(projection.otherMode);
 			}
-			if (projectionMenuOpen && projectionControlEl && !projectionControlEl.contains(event.target as Node)) {
-				projectionMenuOpen = false;
-			}
+			input?.onKeyDown(event);
 		};
-		const handleEscapeKey = (event: KeyboardEvent) => {
-			if (event.key !== 'Escape') return;
-			exportMenuOpen = false;
-			projectionMenuOpen = false;
-		};
-		window.addEventListener('pointerdown', handleOutsidePointerDown);
-		window.addEventListener('keydown', handleEscapeKey);
+		const handleKeyUp = (event: KeyboardEvent) => input?.onKeyUp(event);
+		const handleBlur = () => input?.onBlur();
+		const stopMenuDismiss = menus.listen();
+		window.addEventListener('keydown', handleKeyDown);
+		window.addEventListener('keyup', handleKeyUp);
+		window.addEventListener('blur', handleBlur);
 		canvasEl?.addEventListener('wheel', handleCanvasWheel, { passive: false });
 		canvasEl?.addEventListener('gesturestart', handleCanvasGestureStart, { passive: false });
 		canvasEl?.addEventListener('gesturechange', handleCanvasGestureChange, { passive: false });
 
-		void loadFlubber().then(() => {
+		void loadFlubberInterpolator().then((interpolate) => {
+			renderer?.setMorphInterpolatorFactory(interpolate);
 			markRenderDirty();
 		});
-
-		void loadStars().then(() => {
-			markRenderDirty();
-		});
+		void loadStars().then(markRenderDirty);
+		void loadConstellations().then(markRenderDirty);
+		void loadConstellationBoundaries().then(markRenderDirty);
 		return () => {
-			window.removeEventListener('pointerdown', handleOutsidePointerDown);
-			window.removeEventListener('keydown', handleEscapeKey);
+			stopMenuDismiss();
+			window.removeEventListener('keydown', handleKeyDown);
+			window.removeEventListener('keyup', handleKeyUp);
+			window.removeEventListener('blur', handleBlur);
 			canvasEl?.removeEventListener('wheel', handleCanvasWheel);
 			canvasEl?.removeEventListener('gesturestart', handleCanvasGestureStart);
 			canvasEl?.removeEventListener('gesturechange', handleCanvasGestureChange);
+			surfaceObserver?.disconnect();
 			if (rafId) {
 				cancelAnimationFrame(rafId);
 			}
@@ -90,144 +110,82 @@
 		};
 	});
 
-	async function loadFlubber() {
-		try {
-			const module = await import('flubber');
-			const maybeDefault = module.default as unknown;
-			const interpolate =
-				module.interpolate ??
-				(typeof maybeDefault === 'function'
-					? (maybeDefault as MorphInterpolatorFactory)
-					: (maybeDefault as { interpolate?: MorphInterpolatorFactory } | undefined)?.interpolate);
-			if (!interpolate) {
-				console.warn('Flubber loaded without interpolate export; using hard switch fallback');
-				return;
-			}
-			flubberInterpolate = interpolate;
-			renderer?.setMorphInterpolatorFactory(interpolate);
-		} catch (error) {
-			console.warn('Flubber lazy import failed; using hard switch fallback', error);
-		}
-	}
-
 	function markRenderDirty() {
 		renderDirty = true;
-		if (rafId) return;
-		rafId = requestAnimationFrame((frameTimeMs) => {
-			rafId = 0;
-			if (!renderDirty && !projection.animating) return;
-			renderDirty = false;
-			const tick = getProjectionBlend(frameTimeMs, projection, projection.blend);
-			projection.blend = tick.blend;
-			projection.animating = tick.animating;
-			renderer?.render({
-				orientation: view.orientation,
-				fovDeg: view.fovDeg,
-				starVectors: catalog.starVectors,
-				projectionBlend: projection.blend
-			});
-			if (projection.animating) {
-				markRenderDirty();
-			}
-		});
+		scheduleFrame();
 	}
 
-	function startProjectionTransition(nextProjection: (typeof projectionOptions)[number]) {
-		const targetBlend = nextProjection === 'pinhole' ? 1 : 0;
-		const nowMs = performance.now();
-		const tick = getProjectionBlend(nowMs, projection, projection.blend);
-		projection.blend = tick.blend;
-		projection.animating = tick.animating;
-		const currentBlend = projection.blend;
-		selectedProjection = nextProjection;
-		projectionMenuOpen = false;
-		if (Math.abs(targetBlend - currentBlend) <= 0.001) {
-			projection.animating = false;
-			projection.blend = targetBlend;
-			markRenderDirty();
+	function scheduleFrame() {
+		if (rafId) return;
+		rafId = requestAnimationFrame(onFrame);
+	}
+
+	function onFrame(frameTimeMs: number) {
+		rafId = 0;
+		const dtMs = lastFrameTimeMs > 0 ? Math.min(frameTimeMs - lastFrameTimeMs, 100) : 16;
+		lastFrameTimeMs = frameTimeMs;
+
+		const inputActive = input?.tick(dtMs) ?? false;
+		if (inputActive) renderDirty = true;
+
+		const linesAnimating = renderer?.hasActiveLineAnimations() ?? false;
+		if (!renderDirty && !projection.animating && !linesAnimating) {
+			lastFrameTimeMs = 0;
 			return;
 		}
-		const durationMs = Math.max(
-			PROJECTION_TRANSITION_MIN_MS,
-			PROJECTION_TRANSITION_MS * Math.abs(targetBlend - currentBlend)
-		);
-		Object.assign(projection, {
-			from: currentBlend,
-			to: targetBlend,
-			startMs: nowMs,
-			durationMs,
-			animating: true,
-			blend: currentBlend
+		renderDirty = false;
+
+		projection.tick(frameTimeMs);
+		renderer?.render({
+			orientation: view.orientation,
+			stereoFovDeg: view.stereoFovDeg,
+			pinholeFovDeg: view.pinholeFovDeg,
+			pinholeAspectRatio: view.pinholeAspectRatio,
+			pinholeHeightFrac: view.pinholeHeightFrac,
+			starVectors: catalog.starVectors,
+			projectionBlend: projection.blend,
+			referenceLines: layers.referenceLines,
+			constellations: catalog.constellations,
+			constellationBoundaries: catalog.constellationBoundaries
 		});
+
+		const linesAnimatingAfter = renderer?.hasActiveLineAnimations() ?? false;
+		if (projection.animating || inputActive || linesAnimatingAfter) {
+			scheduleFrame();
+		} else {
+			lastFrameTimeMs = 0;
+		}
+	}
+
+	$effect(() => {
+		// Reading the snapshot subscribes to every reference-line flag at once.
+		void layers.referenceLines;
+		markRenderDirty();
+	});
+
+	function switchProjection(nextMode: ProjectionMode) {
+		projection.start(nextMode);
+		projectionMenu.close();
 		markRenderDirty();
 	}
 
-	async function loadStars() {
-		try {
-			const response = await fetch('/api/catalog/full?max_mag=6.5');
-			if (!response.ok) throw new Error(`catalog load failed: ${response.status}`);
-			catalog.stars = await response.json();
-			catalog.starVectors = catalog.stars.map((star) => {
-				const cosDec = Math.cos(star.dec);
-				return {
-					x: cosDec * Math.cos(star.ra),
-					y: cosDec * Math.sin(star.ra),
-					z: Math.sin(star.dec),
-					v_mag: star.v_mag
-				};
-			});
-			markRenderDirty();
-		} catch (error) {
-			console.error(error);
-		}
+	function runExport(format: ExportFormat) {
+		void exportChart(canvasEl, {
+			format,
+			projection: projection.mode,
+			layers: {
+				planets: layers.planets,
+				equator: layers.equator,
+				ecliptic: layers.ecliptic,
+				galacticEquator: layers.galacticEquator
+			}
+		});
 	}
 
-function exportChart(format: 'PNG' | 'SVG' | 'PDF') {
-	if (!canvasEl) return;
-	if (format === 'PNG') {
-		const link = document.createElement('a');
-		link.download = `skychart-${Date.now()}.png`;
-		link.href = canvasEl.toDataURL('image/png');
-		link.click();
-		return;
-	}
-	
-	fetch('/api/export', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			format: format.toLowerCase(),
-			projection: selectedProjection,
-			layers: { planets: showPlanets }
-		})
-	})
-		.then((res) => {
-			if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-			return res.blob();
-		})
-		.then((blob) => {
-			const url = URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.download = `skychart-${Date.now()}.${format.toLowerCase()}`;
-			link.href = url;
-			link.click();
-			URL.revokeObjectURL(url);
-		})
-		.catch((err) => console.error(err));
-}
-
-function handleExportPrimaryClick() {
-	exportChart(selectedExportFormat);
-}
-
-function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
-	selectedExportFormat = format;
-	exportMenuOpen = false;
-	exportChart(format);
-}
-
-	function handleProjectionSelect(projection: (typeof projectionOptions)[number]) {
-		startProjectionTransition(projection);
+	function handleExportFormatSelect(format: ExportFormat) {
+		selectedExportFormat = format;
+		exportMenu.close();
+		runExport(format);
 	}
 </script>
 
@@ -244,14 +202,14 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 				<img src="/icon-constellation.png" alt="Apex icon" class="ray-logo" />
 				<span class="ray-textline">
 					<span class="ray-brand">Skycharts</span>
-					<span class="ray-meta-word">by Apex</span>
+					<span class="ray-meta-word">by Vobolgus</span>
 				</span>
 			</div>
 			<div class="ray-right">
 				<button class="tool-btn" type="button">About</button>
 				<button class="tool-btn" type="button">Format</button>
-				<div class="export-wrap" bind:this={exportControlEl}>
-					<button class="export-main" type="button" onclick={handleExportPrimaryClick}>
+				<div class="export-wrap" bind:this={exportMenu.element}>
+					<button class="export-main" type="button" onclick={() => runExport(selectedExportFormat)}>
 						<svg viewBox="0 0 16 16" aria-hidden="true">
 							<path
 								d="M8 1.75a.75.75 0 0 1 .75.75v5.69l1.97-1.97a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 1.06-1.06l1.97 1.97V2.5A.75.75 0 0 1 8 1.75ZM2.75 12a.75.75 0 0 1 .75.75v.5h9v-.5a.75.75 0 0 1 1.5 0V13A1.75 1.75 0 0 1 12.25 14.75h-8.5A1.75 1.75 0 0 1 2 13v-.25a.75.75 0 0 1 .75-.75Z"
@@ -264,16 +222,18 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 						type="button"
 						aria-label="Choose export format"
 						aria-haspopup="menu"
-						aria-expanded={exportMenuOpen}
-						onclick={() => (exportMenuOpen = !exportMenuOpen)}
+						aria-expanded={exportMenu.open}
+						onclick={() => exportMenu.toggle()}
 					>
 						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z" />
+							<path
+								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
+							/>
 						</svg>
 					</button>
-					{#if exportMenuOpen}
+					{#if exportMenu.open}
 						<div class="export-menu" role="menu" aria-label="Export format">
-							{#each exportFormats as format}
+							{#each EXPORT_FORMATS as format (format)}
 								<button
 									class="export-option"
 									class:is-selected={format === selectedExportFormat}
@@ -303,39 +263,53 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 			</div>
 		</div>
 	</header>
-	<canvas bind:this={canvasEl} width="1200" height="1200"></canvas>
+	<section class="chart-area">
+		<div class="chart-surface" bind:this={chartSurfaceEl}>
+			<canvas bind:this={canvasEl} width="1200" height="1200"></canvas>
+			<PinholeResizeHandles
+				viewportWidthPx={surfaceSizePx *
+					CHART_RADIUS_FRAC *
+					(view.pinholeAspectRatio * view.pinholeHeightFrac)}
+				viewportHeightPx={surfaceSizePx * CHART_RADIUS_FRAC * view.pinholeHeightFrac}
+				visible={projection.isPinholeSettled}
+				onChange={markRenderDirty}
+			/>
+		</div>
+	</section>
 	<div class="control-bar-shell">
 		<div class="control-bar" role="group" aria-label="Generator display controls">
 			<div class="control-group projection-group">
-				<label class="control-label control-label-no-caps" id="projection-label">Projection</label>
-				<div class="projection-wrap" bind:this={projectionControlEl}>
+				<span class="control-label control-label-no-caps" id="projection-label">Projection</span>
+				<div class="projection-wrap" bind:this={projectionMenu.element}>
 					<button
 						class="projection-trigger"
 						type="button"
 						aria-haspopup="listbox"
-						aria-expanded={projectionMenuOpen}
+						aria-expanded={projectionMenu.open}
 						aria-labelledby="projection-label projection-trigger-value"
-						onclick={() => (projectionMenuOpen = !projectionMenuOpen)}
+						onclick={() => projectionMenu.toggle()}
 					>
-						<span id="projection-trigger-value">{selectedProjection}</span>
+						<span id="projection-trigger-value">{projection.mode}</span>
 						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z" />
+							<path
+								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
+							/>
 						</svg>
 					</button>
-					{#if projectionMenuOpen}
+					{#if projectionMenu.open}
 						<div class="projection-menu" role="listbox" aria-labelledby="projection-label">
-							{#each projectionOptions as projection}
+							{#each PROJECTION_OPTIONS as mode (mode)}
 								<button
 									class="projection-option"
-									class:is-selected={projection === selectedProjection}
+									class:is-selected={mode === projection.mode}
 									type="button"
 									role="option"
-									aria-selected={projection === selectedProjection}
-									onclick={() => handleProjectionSelect(projection)}
+									aria-selected={mode === projection.mode}
+									onclick={() => switchProjection(mode)}
 								>
-									<span class="projection-option-label">{projection}</span>
+									<span class="projection-option-label">{mode}</span>
 									<span class="projection-option-check" aria-hidden="true">
-										{projection === selectedProjection ? '✓' : ''}
+										{mode === projection.mode ? '✓' : ''}
 									</span>
 								</button>
 							{/each}
@@ -345,8 +319,55 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 			</div>
 			<div class="control-divider"></div>
 			<div class="control-group">
-				<label class="control-label control-label-no-caps">Layers</label>
-				<PlanetsToggle bind:showPlanets />
+				<span class="control-label control-label-no-caps">Layers</span>
+				<PlanetsToggle bind:showPlanets={layers.planets} />
+				<div class="projection-wrap is-lines" bind:this={linesMenu.element}>
+					<button
+						class="projection-trigger"
+						type="button"
+						aria-haspopup="menu"
+						aria-expanded={linesMenu.open}
+						aria-label="Reference lines"
+						onclick={() => linesMenu.toggle()}
+					>
+						<span>Lines</span>
+						<svg viewBox="0 0 16 16" aria-hidden="true">
+							<path
+								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
+							/>
+						</svg>
+					</button>
+					{#if linesMenu.open}
+						<div class="projection-menu" role="menu" aria-label="Reference lines">
+							{#each REFERENCE_LINE_OPTIONS as option (option.key)}
+								<button
+									class="projection-option"
+									class:is-selected={layers[option.key]}
+									type="button"
+									role="menuitemcheckbox"
+									aria-checked={layers[option.key]}
+									onclick={() => layers.toggle(option.key)}
+								>
+									<span class="projection-option-label">{option.label}</span>
+									<span class="lines-tickbox" class:is-on={layers[option.key]} aria-hidden="true">
+										{#if layers[option.key]}
+											<svg viewBox="0 0 12 12"
+												><path
+													d="M2.5 6.2 L5 8.5 L9.5 3.8"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="1.8"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+												/></svg
+											>
+										{/if}
+									</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>
@@ -356,20 +377,15 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 	.page {
 		position: relative;
 		width: 100%;
-		min-height: 100vh;
+		min-height: 100dvh;
+		height: 100dvh;
 		background: #0a0a0b;
 		display: grid;
-		place-items: center;
+		grid-template-rows: auto minmax(0, 1fr) auto;
 		overflow: hidden;
-		padding-top: 56px;
-		padding-bottom: 136px;
 	}
 
 	.ray-header {
-		position: absolute;
-		top: 0;
-		left: 0;
-		right: 0;
 		height: 56px;
 		padding: 0 10px;
 		display: flex;
@@ -377,6 +393,27 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		background: #101114;
 		border-bottom: none;
 		z-index: 5;
+	}
+
+	.chart-area {
+		min-height: 0;
+		min-width: 0;
+		padding: 12px;
+		display: grid;
+		place-items: center;
+		overflow: hidden;
+		container-type: size;
+	}
+
+	.chart-surface {
+		/* Квадрат: сторона = min(ширина области, высота области, фикс. кап).
+		   100cqmin = меньшая сторона .chart-area, кап даёт стабильный размер на десктопе. */
+		--chart-cap: 720px;
+		position: relative;
+		width: min(100cqmin, var(--chart-cap));
+		height: min(100cqmin, var(--chart-cap));
+		display: grid;
+		place-items: center;
 	}
 
 	.ray-bottom {
@@ -414,7 +451,14 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		color: #eceef1;
 		letter-spacing: 0;
 		line-height: 1;
-		font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+		font-family:
+			Inter,
+			system-ui,
+			-apple-system,
+			Segoe UI,
+			Roboto,
+			Arial,
+			sans-serif;
 	}
 
 	.ray-meta-word {
@@ -443,7 +487,11 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		font-weight: 600;
 		cursor: pointer;
 		text-decoration: none;
-		transition: border-color 0.16s ease, color 0.16s ease, box-shadow 0.2s ease, background 0.2s ease;
+		transition:
+			border-color 0.16s ease,
+			color 0.16s ease,
+			box-shadow 0.2s ease,
+			background 0.2s ease;
 	}
 
 	.tool-btn:hover {
@@ -557,7 +605,9 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		align-items: center;
 		column-gap: 8px;
 		cursor: pointer;
-		transition: background 0.14s ease, color 0.14s ease;
+		transition:
+			background 0.14s ease,
+			color 0.14s ease;
 	}
 
 	.export-option-icon {
@@ -600,8 +650,8 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 	}
 
 	canvas {
-		width: 700px;
-		height: 700px;
+		width: 100%;
+		height: 100%;
 		display: block;
 		aspect-ratio: 1 / 1;
 		object-fit: contain;
@@ -614,19 +664,16 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 	}
 
 	.control-bar-shell {
-		position: absolute;
-		left: 0;
-		right: 0;
-		bottom: 2px;
 		display: flex;
 		justify-content: center;
 		pointer-events: none;
 		z-index: 6;
+		padding-top: 8px;
 	}
 
 	.control-bar {
-		width: 920px;
-		max-width: 920px;
+		width: 744px;
+		max-width: 744px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -676,86 +723,13 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 	.control-divider {
 		width: 1px;
 		height: 24px;
-		background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.22) 48%, rgba(255, 255, 255, 0.04) 100%);
+		background: linear-gradient(
+			180deg,
+			rgba(255, 255, 255, 0.04) 0%,
+			rgba(255, 255, 255, 0.22) 48%,
+			rgba(255, 255, 255, 0.04) 100%
+		);
 		flex-shrink: 0;
-	}
-
-	.chip-row {
-		display: inline-flex;
-		gap: 6px;
-	}
-
-	.control-chip {
-		height: 28px;
-		padding: 0 10px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.03);
-		color: #d4dae3;
-		font-size: 0.72rem;
-		font-weight: 600;
-		cursor: pointer;
-		transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
-	}
-
-	.control-chip:hover {
-		border-color: rgba(255, 255, 255, 0.28);
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2f9;
-	}
-
-	.control-chip:active {
-		background: rgba(255, 255, 255, 0.14);
-	}
-
-	.control-chip.is-active {
-		border-color: rgba(170, 198, 255, 0.6);
-		background: rgba(113, 148, 220, 0.24);
-		color: #f4f8ff;
-	}
-
-	.toggle-chip {
-		height: 28px;
-		padding: 0 10px 0 8px;
-		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		background: rgba(255, 255, 255, 0.03);
-		color: #d4dae3;
-		font-size: 0.72rem;
-		font-weight: 600;
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		cursor: pointer;
-		transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
-	}
-
-	.toggle-chip:hover {
-		border-color: rgba(255, 255, 255, 0.28);
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2f9;
-	}
-
-	.toggle-chip:active {
-		background: rgba(255, 255, 255, 0.14);
-	}
-
-	.toggle-chip.is-on {
-		border-color: rgba(128, 169, 242, 0.65);
-		background: rgba(108, 144, 216, 0.22);
-	}
-
-	.toggle-thumb {
-		width: 14px;
-		height: 14px;
-		border-radius: 999px;
-		background: #7e8694;
-		box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
-		transition: background 0.16s ease;
-	}
-
-	.toggle-chip.is-on .toggle-thumb {
-		background: #d6e6ff;
 	}
 
 	.projection-wrap {
@@ -778,7 +752,10 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		gap: 8px;
 		text-transform: lowercase;
 		cursor: pointer;
-		transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+		transition:
+			border-color 0.16s ease,
+			background 0.16s ease,
+			color 0.16s ease;
 	}
 
 	.projection-trigger svg {
@@ -786,7 +763,9 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		height: 14px;
 		fill: #adb4bf;
 		flex-shrink: 0;
-		transition: transform 0.14s ease, fill 0.14s ease;
+		transition:
+			transform 0.14s ease,
+			fill 0.14s ease;
 	}
 
 	.projection-trigger:hover {
@@ -850,7 +829,9 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		column-gap: 8px;
 		cursor: pointer;
 		text-transform: lowercase;
-		transition: background 0.14s ease, color 0.14s ease;
+		transition:
+			background 0.14s ease,
+			color 0.14s ease;
 	}
 
 	.projection-option-label {
@@ -879,37 +860,63 @@ function handleExportFormatSelect(format: 'PNG' | 'SVG' | 'PDF') {
 		color: #f3f6fd;
 	}
 
-	@media (max-width: 640px) {
-		.ray-meta-word {
-			display: none;
-		}
-		.ray-right {
-			gap: 6px;
-		}
-		.tool-btn {
-			padding: 0 8px;
-		}
+	.projection-wrap.is-lines .projection-trigger {
+		min-width: 0;
+		padding: 0 8px 0 12px;
+		text-transform: none;
 	}
 
-	@media (max-width: 860px) {
-		.page {
-			padding-bottom: 136px;
-		}
+	.projection-wrap.is-lines .projection-menu {
+		width: max-content;
+		min-width: 100%;
+	}
 
-		canvas {
-			width: min(700px, 92vw, calc(100vh - 164px));
-			height: min(700px, 92vw, calc(100vh - 164px));
-		}
+	.projection-wrap.is-lines .projection-option {
+		text-transform: none;
+		white-space: nowrap;
+		grid-template-columns: 1fr auto;
+		column-gap: 14px;
+	}
 
+	.projection-wrap.is-lines .projection-option-label {
+		white-space: nowrap;
+	}
+
+	.lines-tickbox {
+		width: 14px;
+		height: 14px;
+		border-radius: 3px;
+		border: 1px solid rgba(255, 255, 255, 0.32);
+		background: rgba(255, 255, 255, 0.04);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: #0a0a0b;
+		transition:
+			background 0.14s ease,
+			border-color 0.14s ease;
+	}
+
+	.lines-tickbox.is-on {
+		background: #e7ebf4;
+		border-color: #e7ebf4;
+	}
+
+	.lines-tickbox svg {
+		width: 12px;
+		height: 12px;
+		display: block;
+	}
+
+	@media (max-width: 743px) {
 		.control-bar {
 			width: 100%;
 			max-width: 100%;
-			padding: 14px 10px;
+			padding: 14px 18px;
 			gap: 12px;
 			border-radius: 0;
 			border-left: 0;
 			border-right: 0;
 		}
 	}
-
 </style>

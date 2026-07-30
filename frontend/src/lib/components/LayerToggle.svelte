@@ -1,17 +1,32 @@
 <script lang="ts">
-	let { showPlanets = $bindable(false) } = $props<{ showPlanets?: boolean }>();
+	let {
+		label,
+		value = $bindable(false),
+		accent = 'rgba(128, 169, 242, 0.65)',
+		accentFill = 'rgba(108, 144, 216, 0.22)',
+		accentThumb = '#d6e6ff',
+		title = 'Included in exported file'
+	} = $props<{
+		label: string;
+		value?: boolean;
+		accent?: string;
+		accentFill?: string;
+		accentThumb?: string;
+		title?: string;
+	}>();
 </script>
 
 <button
 	class="toggle-chip"
-	class:is-on={showPlanets}
+	class:is-on={value}
 	type="button"
 	role="switch"
-	aria-checked={showPlanets}
-	onclick={() => (showPlanets = !showPlanets)}
-	title="Included in exported file"
+	aria-checked={value}
+	onclick={() => (value = !value)}
+	style="--chip-accent: {accent}; --chip-accent-fill: {accentFill}; --chip-thumb-on: {accentThumb};"
+	{title}
 >
-	Planets
+	{label}
 	<span class="toggle-thumb"></span>
 </button>
 
@@ -46,8 +61,8 @@
 	}
 
 	.toggle-chip.is-on {
-		border-color: rgba(128, 169, 242, 0.65);
-		background: rgba(108, 144, 216, 0.22);
+		border-color: var(--chip-accent);
+		background: var(--chip-accent-fill);
 	}
 
 	.toggle-thumb {
@@ -60,6 +75,6 @@
 	}
 
 	.toggle-chip.is-on .toggle-thumb {
-		background: #d6e6ff;
+		background: var(--chip-thumb-on);
 	}
 </style>
