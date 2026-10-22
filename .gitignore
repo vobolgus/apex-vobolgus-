@@ -28,6 +28,10 @@
 !rust-core/
 !rust-core/**
 
+# Archived features kept for reference only (not built, not in the workspace)
+!legacy/
+!legacy/**
+
 # Top-level Node tooling
 !package.json
 !package-lock.json
@@ -41,8 +45,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Local databases and temporary build/dev artifacts
-apex.db
+# Temporary build/dev artifacts
 target/
 build/
 dist/

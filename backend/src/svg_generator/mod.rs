@@ -2,7 +2,7 @@ use crate::models::RenderConfig;
 use chrono::{Datelike, Timelike};
 use rust_core::{
     CameraConfig, DateTime, PinholeProjection, Star, StereoProjection,
-    catalog::{HipCatalog, MessierCatalog},
+    catalog::HipCatalog,
     julian_date,
     planets::{Body, PlanetPosition, all_positions},
 };
@@ -163,13 +163,7 @@ fn planet_radius(position: &PlanetPosition, magnitude_scale: f32) -> f32 {
 }
 
 impl SvgGenerator {
-    pub fn render_map(
-        config: &RenderConfig,
-        hip_catalog: &HipCatalog,
-        messier_catalog: &MessierCatalog,
-        highlight_star_hip: Option<i32>,
-        highlight_messier: Option<i32>,
-    ) -> String {
+    pub fn render_map(config: &RenderConfig, hip_catalog: &HipCatalog) -> String {
         let is_stereo = config.projection == "stereo";
 
         // Определяем размеры холста
@@ -279,21 +273,6 @@ impl SvgGenerator {
                 ];
             }
 
-            if let Some(hip_id) = highlight_star_hip
-                && let Some(star) = hip_catalog
-                    .get_stars(7.5, None)
-                    .iter()
-                    .find(|s| s.hip_id == hip_id)
-            {
-                dir = [star.x as f64, star.y as f64, star.z as f64];
-            }
-
-            if let Some(m_num) = highlight_messier
-                && let Some(obj) = messier_catalog.get_object_by_number(m_num)
-            {
-                dir = [obj.x as f64, obj.y as f64, obj.z as f64];
-            }
-
             dir
         } else {
             [0.0, 0.0, 0.0]
@@ -387,76 +366,6 @@ impl SvgGenerator {
                     }
                 }
             }
-        }
-
-        // 4. Подсветка Звезды ( highlight_star_hip )
-        if let Some(hip_id) = highlight_star_hip
-            && let Some(star) = hip_catalog
-                .get_stars(7.5, None)
-                .iter()
-                .find(|s| s.hip_id == hip_id)
-            && let Some((px, py)) = project_point(star.x, star.y, star.z)
-        {
-            svg.push_str(&format!(
-                r##"<circle cx="{:.2}" cy="{:.2}" r="15" fill="none" stroke="#FF6B6B" stroke-width="2.0" opacity="0.9" />"##,
-                px, py
-            ));
-            svg.push_str(&format!(
-                r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
-                px - 20.0, py, px + 20.0, py
-            ));
-            svg.push_str(&format!(
-                r##"<line x1="{:.2}" y1="{:.2}" x2="{:.2}" y2="{:.2}" stroke="#FF6B6B" stroke-width="1.0" opacity="0.8" />"##,
-                px, py - 20.0, px, py + 20.0
-            ));
-        }
-
-        // 5. Подсветка Объекта Мессье ( highlight_messier )
-        if let Some(m_num) = highlight_messier
-            && let Some(obj) = messier_catalog.get_object_by_number(m_num)
-            && let Some((px, py)) = project_point(obj.x, obj.y, obj.z)
-        {
-            let type_names = [
-                (1, "Галактика"),
-                (2, "Шаровое скопление"),
-                (3, "Рассеянное скопление"),
-                (4, "Туманность"),
-                (5, "Остаток сверхновой"),
-                (6, "Звёздное облако"),
-                (7, "Двойная звезда"),
-            ];
-            let mut type_name = "Объект";
-            for &(t_id, t_name) in &type_names {
-                if t_id == obj.obj_type {
-                    type_name = t_name;
-                    break;
-                }
-            }
-
-            let color = obj.type_color();
-            let size_px = (obj.size * 3.0).clamp(15.0, 150.0);
-
-            // Отрисовываем красивый маркер
-            svg.push_str(&format!(
-                r##"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="none" stroke="{}" stroke-width="2.5" opacity="0.9" />"##,
-                px, py, size_px, color
-            ));
-            svg.push_str(&format!(
-                r##"<circle cx="{:.2}" cy="{:.2}" r="3" fill="{}" opacity="1.0" />"##,
-                px, py, color
-            ));
-
-            // Красивый информационный заголовок сверху
-            let title_text = format!(
-                "Тип: {}  |  Зв. вел.: {:.1}m  |  Угл. р-р: {:.1}'",
-                type_name, obj.v_mag, obj.size
-            );
-            svg.push_str(&format!(
-                r##"<text x="{}" y="30" fill="#FFFFFF" font-family="{}" font-size="12" font-weight="500" text-anchor="middle">{}</text>"##,
-                width as f32 / 2.0,
-                font_family,
-                title_text
-            ));
         }
 
         // 6. Названия созвездий
@@ -558,7 +467,7 @@ mod tests {
     use super::*;
     use crate::models::{LayersConfig, RenderConfig, StyleConfig};
     use rust_core::{
-        catalog::{HipCatalog, MessierCatalog},
+        catalog::HipCatalog,
         julian_date,
         planets::{Body, all_positions},
     };
@@ -601,18 +510,13 @@ mod tests {
         }
     }
 
-    fn catalogs() -> (&'static HipCatalog, &'static MessierCatalog) {
+    fn hip_catalog() -> &'static HipCatalog {
         static HIP: OnceLock<HipCatalog> = OnceLock::new();
-        static MESSIER: OnceLock<MessierCatalog> = OnceLock::new();
-        (
-            HIP.get_or_init(HipCatalog::new),
-            MESSIER.get_or_init(MessierCatalog::new),
-        )
+        HIP.get_or_init(HipCatalog::new)
     }
 
     fn render(cfg: &RenderConfig) -> String {
-        let (hip, messier) = catalogs();
-        SvgGenerator::render_map(cfg, hip, messier, None, None)
+        SvgGenerator::render_map(cfg, hip_catalog())
     }
 
     fn count_occurrences(haystack: &str, needle: &str) -> usize {

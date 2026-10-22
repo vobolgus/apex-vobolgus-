@@ -3,7 +3,7 @@ import { expect, test, type Locator } from '@playwright/test';
 /**
  * Open a menu, tolerating a not-yet-hydrated page.
  *
- * The dev server compiles /generator lazily, so on a cold start (exactly what CI
+ * The dev server compiles the page at / lazily, so on a cold start (exactly what CI
  * does: boot the server, run Playwright immediately) the SSR markup — canvas and
  * buttons included — is on the page before Svelte hydrates. A click that lands in
  * that window hits an element with no handler attached yet and is silently lost,
@@ -32,7 +32,7 @@ test.describe('planets toggle and export', () => {
 			});
 		});
 
-		await page.goto('/generator');
+		await page.goto('/');
 		await page.waitForSelector('canvas');
 
 		const exportToggle = page.locator('button.export-toggle');

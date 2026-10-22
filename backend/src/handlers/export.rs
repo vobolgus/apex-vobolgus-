@@ -47,13 +47,7 @@ pub async fn export_pdf(
     }
 
     // 1. Генерируем SVG
-    let svg_str = SvgGenerator::render_map(
-        &config,
-        &state.hip_catalog,
-        &state.messier_catalog,
-        None,
-        None,
-    );
+    let svg_str = SvgGenerator::render_map(&config, &state.hip_catalog);
 
     if query.format.as_deref() == Some("svg") {
         let mut headers = HeaderMap::new();
@@ -106,16 +100,12 @@ mod tests {
     use super::*;
     use crate::AppState;
     use crate::models::{LayersConfig, RenderConfig, StyleConfig};
-    use sqlx::SqlitePool;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_export_pdf_stereo() {
-        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let state = AppState {
-            db,
             hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-            messier_catalog: Arc::new(rust_core::catalog::MessierCatalog::new()),
         };
 
         let config = RenderConfig {
@@ -165,11 +155,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_pdf_pinhole() {
-        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
         let state = AppState {
-            db,
             hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-            messier_catalog: Arc::new(rust_core::catalog::MessierCatalog::new()),
         };
 
         let config = RenderConfig {

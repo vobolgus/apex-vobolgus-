@@ -40,7 +40,7 @@ const ANIMATION_MID_MS = 310;
 
 async function gotoGenerator(page: Page): Promise<Locator> {
 	await page.setViewportSize({ ...VIEWPORT });
-	await page.goto('/generator');
+	await page.goto('/');
 	await page.waitForSelector('canvas');
 	const canvas = page.locator('canvas').first();
 	await expect(canvas).toBeVisible();

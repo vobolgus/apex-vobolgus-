@@ -1,53 +1,77 @@
-# Apex — Web service and mobile app for learning astronomy
+# Apex — star-map generator
 
-Apex offers three independent tools under one brand:
+Apex is a web tool for making star maps for observing sessions, olympiads and
+astronomy lessons. The whole product is one page: a large real-time sky preview
+with a compact control bar, in the spirit of ray.so.
 
-1. **Star-map Generator**: Custom PDF and SVG maps for observations, Olympiads, and astronomy lessons. It features high-fidelity real-time previews with support for stereographic and pinhole projections.
-2. **Sky Quiz**: An educational gaming platform with five distinct modes for learning constellations, stars, and Messier objects. It implements engagement mechanics like streaks, ranks, and scoring bonuses.
-3. **AstraEtudes**: A suite of interactive physics simulators designed for educational purposes, covering orbital mechanics, lunar phases, and other astronomical phenomena.
+The project used to also include Sky Quiz games, the AstraEtudes simulators and
+a planned Flutter app. Those parts are archived in [`legacy/`](legacy/README.md)
+and are no longer built.
 
-The project is designed for students, educators, and astronomy enthusiasts, providing a modern dark-space UI experience.
+## What the page does
+
+- Real-time Canvas 2D preview of the Hipparcos catalog down to magnitude 6.5
+  (about 8,900 stars), computed entirely in the browser.
+- Stereographic and pinhole projections with an animated morph between them
+  (projection menu or `Shift+P`). In pinhole mode the frame can be resized with
+  drag handles.
+- Free orientation: drag to rotate, pinch (or ctrl+wheel) to zoom, `W A S D` or
+  arrow keys to pan, `Q`/`E` to roll, `Shift+I`/`Shift+O` to zoom, `Shift+N` to
+  turn north up.
+- Reference lines: constellation figures, constellation boundaries, celestial
+  equator, ecliptic, galactic equator.
+- Export: PNG straight from the canvas; SVG and PDF rendered by the backend
+  (`POST /api/export`). The planets toggle applies to the backend export only.
+
+Known gap: the page does not yet send the full `RenderConfig` that
+`POST /api/export` expects (the contract is in [`SPEC.md`](SPEC.md)), so
+SVG/PDF downloads from the UI do not work yet. PNG export does.
 
 ## Stack
 
-- **Rust Core**: The engine of the project, implemented as a shared library (`rust-core/`). It handles star catalogs (Hipparcos, Messier), coordinate projections, and orbital mechanics.
-- **Backend**: A high-performance Axum-based HTTP API (`backend/`) using SQLx for SQLite persistence. It handles server-side PDF/SVG export and game session management.
-- **Frontend**: A reactive SvelteKit web application (`frontend/`). It utilizes 2D Canvas for instantaneous local previews, ensuring a seamless user experience.
-- **Mobile (Planned)**: Cross-platform iOS and Android applications built with Flutter. It will leverage `flutter_rust_bridge` to execute the Rust core natively on the device for offline capabilities.
+- **rust-core** (`rust-core/`): shared Rust library. Hipparcos (HIP) star
+  catalog and Messier catalog (positions of the 110 objects, not drawn on the
+  map yet), celestial coordinates and time (Julian date, sidereal time),
+  stereographic and pinhole projections, low-precision ephemeris of the Sun,
+  Moon and planets (Meeus).
+- **backend** (`backend/`): Axum HTTP server. Star catalog, constellation
+  figures and boundaries, SVG map rendering and PDF export via `svg2pdf`.
+  Stateless: no database, catalogs are loaded into memory at startup.
+- **frontend** (`frontend/`): SvelteKit app with a single page, the generator
+  at `/` (`/generator` redirects to it). Canvas 2D renderer in TypeScript; the
+  SvelteKit server proxies `/api/*` to the backend.
 
 ## Architecture
 
 ```text
 ┌─────────────────────────────────────────┐
 │             rust-core (lib)             │
-│   catalog · projections · mechanics     │
-│   scoring · constellation data         │
-└──────────┬──────────────────┬───────────┘
-           │                  │
-    ┌──────▼──────┐    ┌──────▼────────────────┐
-    │ Axum server │    │   Flutter (mobile)    │
-    │ PDF export  │    │   (planned)           │
-    │ Game API    │    │   FFI → rust-core     │
-    │ Sim API     │    └───────────────────────┘
-    └──────┬──────┘
-           │ HTTP
+│   HIP · Messier · coords · time         │
+│   projections · planets                 │
+└──────────┬──────────────────────────────┘
+           │
+    ┌──────▼───────────────────┐
+    │ backend (Axum, :8080)    │
+    │ catalog · constellations │
+    │ SVG / PDF export         │
+    └──────┬───────────────────┘
+           │ HTTP, proxied by SvelteKit /api/*
     ┌──────▼──────────────────────────────┐
-    │           SvelteKit (web)           │
-    │  Landing · Generator · Quiz · Sims  │
-    │  Canvas preview — realtime (JS)     │
+    │         frontend (SvelteKit)        │
+    │  generator page at /                │
+    │  Canvas 2D preview — realtime (TS)  │
     └─────────────────────────────────────┘
 ```
 
-## Key Features
-
-- **High-Precision Astronomy**: Uses standard astronomical catalogs and rigorous projection algorithms.
-- **Real-Time Visualization**: Instant feedback in the generator UI using client-side Canvas rendering.
-- **Multi-Format Export**: Generate production-ready PDF and SVG maps for print and digital use.
-- **Gamified Learning**: Progressive difficulty levels and rank-based progression in Sky Quiz.
-- **Physical Simulations**: Numerical integrators (RK4) for realistic orbital mechanics modeling.
-- **Optimized Performance**: Layered catalog loading ensures the interface remains responsive even with large datasets.
+Backend endpoints used by the page: `GET /api/catalog/full`,
+`GET /api/constellations`, `GET /api/constellation-boundaries`,
+`POST /api/export` (PDF by default, SVG with `?format=svg`). The backend also
+serves `GET /api/catalog/bright` and a `GET /` health probe. Details are in
+[`backend/API.md`](backend/API.md).
 
 ## How to develop
+
+Requirements: Rust 1.88+ (edition 2024), Node.js 20.19+ or 22.12+ (Vite 8).
 
 ### Backend
 
@@ -57,29 +81,61 @@ From the repository root:
 cargo run -p backend
 ```
 
-Configurable via `DATABASE_URL` (defaults to `sqlite://apex.db`).
+The server listens on `http://localhost:8080`. There is no database and no
+configuration to set up.
 
 ### Frontend
 
-From the `frontend/` directory:
-
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
 
+Open http://localhost:5173. The SvelteKit server forwards `/api/*` to
+`BACKEND_URL` (default `http://localhost:8080`, see `frontend/.env.example`).
+
 ### Tests
 
-- **Rust**: `cargo test --workspace`
-- **Frontend**: `cd frontend && npm run check && npm run test:unit && npx playwright test`
+- **Rust**: `cargo test --workspace`. CI also runs `cargo fmt --check --all`
+  and `cargo clippy --workspace --all-targets -- -D warnings`.
+- **Frontend** (in `frontend/`): `npm run check`, `npm run lint`,
+  `npm run test:unit`.
+- **E2E** (Playwright visual regression, in `frontend/`): the config does not
+  start any servers. Run the backend on `:8080` and a dev server on `:5174`,
+  then the tests:
+
+  ```bash
+  npm run dev -- --port 5174   # in a separate terminal
+  npx playwright install chromium   # first time only
+  npm run test:e2e
+  ```
 
 ## Project structure
 
-- `rust-core/`: The core astronomy engine. Includes star catalog loaders, projection mathematics, and physical mechanics.
-- `backend/`: Axum server implementation. Handles API endpoints for catalogs, game sessions, and high-quality PDF/SVG generation using the `plotters` crate.
-- `frontend/`: The web frontend built with SvelteKit and Tailwind CSS. Contains the landing page, generator UI, and quiz game screens.
-- `SPEC.md`: The source of truth for the project's technical specification, architectural design, and UI/UX references.
-- `Cargo.toml`: Workspace configuration for the Rust ecosystem.
+```text
+rust-core/                 astronomy core library
+  src/catalog/             HIP and Messier catalogs (*_data.bin)
+  src/coords.rs, time.rs   coordinate conversions, Julian date, sidereal time
+  src/projections/         stereographic and pinhole
+  src/planets.rs           Sun, Moon and planet positions
+backend/                   Axum server
+  src/handlers/            catalog.rs, export.rs
+  src/svg_generator/       SVG map renderer behind /api/export
+  assets/constellations/   constellation figures and boundaries (JSON)
+  assets/golden/           reference-geometry fixture shared by Rust and TS tests
+  API.md                   HTTP API reference
+frontend/                  SvelteKit app
+  src/routes/+page.svelte  the generator page
+  src/routes/generator/    redirect from the old /generator URL to /
+  src/routes/api/          server-side proxies to the backend
+  src/lib/                 renderer, math, state, components, API clients
+  e2e/                     Playwright visual regression tests
+legacy/                    archived features, reference only (see legacy/README.md)
+SPEC.md                    product specification (generator only)
+CHANGELOG.md               release notes
+Cargo.toml                 Rust workspace (rust-core, backend)
+```
 
 ## License
 

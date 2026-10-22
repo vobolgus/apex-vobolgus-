@@ -82,11 +82,11 @@ jobs:
       - name: Start frontend dev server
         run: |
           nohup npm run dev -- --host 0.0.0.0 --port 5174 > /tmp/frontend.log 2>&1 &
-          # Probe /generator, not /. Vite compiles routes on first request, so
-          # hitting the route the tests use warms it here instead of during the
+          # Probe /, the generator page the tests use. Vite compiles routes on
+          # first request, so hitting it here warms it instead of during the
           # first test, where a not-yet-hydrated page swallows clicks.
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:5174/generator -o /dev/null; then
+            if curl -sf http://localhost:5174/ -o /dev/null; then
               echo "frontend up after ${i}s"
               exit 0
             fi

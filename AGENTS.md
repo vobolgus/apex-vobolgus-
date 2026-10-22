@@ -7,8 +7,9 @@
 - User expects git operations to target the explicitly named repository/remote and branch constraints without deviation.
 - User expects new feature work to be implemented as a new project per `SPEC.md`, using legacy code only as a reference.
 ## Learned Workspace Facts
-- The repository includes both legacy Python project structure and a Rust workspace.
+- The repository is a Rust workspace plus a SvelteKit app in `frontend/`; `legacy/` holds archived, unbuilt code (the earlier Python project was removed from the tree).
 - The Rust workspace currently centers on `backend` and `rust-core` crates at the repo root.
 - Incremental continual-learning state is tracked at `.cursor/hooks/state/continual-learning-index.json`.
 - The GitHub repository `vobolgus/apex-vobolgus-` is a public fork of `04Maksimka/apex`.
-- A new SvelteKit frontend project is located in the `frontend/` directory and is now the active target for generator UI work.
+- The SvelteKit frontend in `frontend/` is a single-page app: the generator page is `frontend/src/routes/+page.svelte`, served at `/` (`/generator` redirects to `/`).
+- Project scope is the star-map generator only (served at `/`); archived features (Sky Quiz, AstraEtudes, Messier photos, landing page, original `SPEC.md`) live in `legacy/` for reference and are not built or routed.

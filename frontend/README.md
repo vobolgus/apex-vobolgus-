@@ -4,19 +4,24 @@ New frontend implementation for Apex based on the project specification.
 
 Current scope:
 
-- New SvelteKit app shell (`/`, `/generator`, `/games`, `/astra-etudes`)
+- Single-page SvelteKit app: the star-map generator at `/`
+  (the old `/generator` URL permanently redirects to `/`)
 - Generator page with:
   - control panel + live preview canvas
-  - layered catalog loading (`bright` first, `full` in background)
-  - PDF export via backend API
+  - loads the full catalog (`/api/catalog/full`, stars ≤ 6.5m), constellation
+    figures and boundaries
+  - PNG export from the canvas; SVG/PDF via the backend API (the UI payload is
+    not a full `RenderConfig` yet, see the root README)
 - Internal API proxy routes:
   - `GET /api/catalog/bright`
   - `GET /api/catalog/full`
+  - `GET /api/constellations`
+  - `GET /api/constellation-boundaries`
   - `POST /api/export`
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+
 - Running backend service (`backend`, default `http://localhost:8080`)
 
 ## Run

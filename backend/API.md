@@ -2,65 +2,131 @@
 
 Base URL (local): `http://localhost:8080`
 
+The backend serves the star-map generator only. The SvelteKit app proxies these
+routes under the same paths (`/api/...`).
+
+CORS: any origin, method and header.
+
 ## Health
 
 - `GET /`
-- Response: `Apex Backend is running!`
-
-## Static assets
-
-- `GET /images/m31.jpeg` - Messier image assets (`m1..m110`)
+- Response: `Apex Backend is running!` (`text/plain`)
 
 ## Catalog
 
-- `GET /api/catalog/bright?max_mag=4.0`
+Both routes return HIP stars as a JSON array, filtered by `min_mag <= v_mag <= max_mag`.
+
+- `GET /api/catalog/bright?max_mag=4.0&min_mag=...`
   - layered loading first step (default `max_mag=4.0`)
-- `GET /api/catalog/full?max_mag=6.5`
+- `GET /api/catalog/full?max_mag=6.5&min_mag=...`
   - full catalog step (default `max_mag=6.5`)
 
-## Orbit simulation (AstraEtudes)
+Query params (both optional, numbers): `max_mag`, `min_mag` (no lower bound when omitted).
 
-- `GET /api/compute`
-  - Query params: `r_x`, `r_y`, `v_x`, `v_y`, `mu`, `dt`, `steps`
-- `POST /api/compute`
-  - JSON body with same fields
+Star object:
+
+```json
+{ "hip_id": 32349, "v_mag": -1.44, "ra": 1.7677, "dec": -0.2917, "x": -0.187, "y": 0.939, "z": -0.288 }
+```
+
+- `ra`, `dec` in radians
+- `x`, `y`, `z` - unit vector in the equatorial (ECI) frame
+
+## Constellations
+
+Both routes return a JSON array sorted by `abbr`, no query params:
+
+```json
+[{ "abbr": "ORI", "segments": [[{ "x": 0.1, "y": 0.9, "z": 0.1 }, { "x": 0.2, "y": 0.9, "z": 0.0 }]] }]
+```
+
+Each segment is a polyline of unit vectors (equatorial frame).
+
+- `GET /api/constellations` - stick figures
+  - built from `assets/constellations/constellations_data.json`; HIP ids are resolved
+    against stars with `v_mag <= 7.5`
+  - segments with fewer than 2 resolved points are dropped, constellations left
+    without segments are omitted
+- `GET /api/constellation-boundaries` - IAU boundary polygons
+  - built from `assets/constellations/constellation_boundaries.json` (RA/Dec degrees
+    converted to unit vectors)
+
+## Export
+
+- `POST /api/export` - PDF
+  - Response: `application/pdf`, `Content-Disposition: attachment; filename="sky_chart.pdf"`
+- `POST /api/export?format=svg` - the same map as SVG
+  - Response: `image/svg+xml; charset=utf-8`
+  - any other `format` value returns the PDF
+- Request: `Content-Type: application/json`, body is `RenderConfig`
+
+`RenderConfig` (`?` = optional, may be omitted or `null`):
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `projection` | string | `stereo` (800x800, circular sky) or `pinhole` |
+| `datetime?` | string | UTC, `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DD`; anything else (including ISO `...T...Z`) falls back to `2024-06-14 06:10:00` |
+| `latitude` | number | observer latitude, degrees |
+| `longitude` | number | observer longitude, degrees |
+| `magnitude_limit?` | number | faintest star magnitude, default `6.5` |
+| `fov_deg?` | number | pinhole field of view, default `60` |
+| `aspect_ratio?` | number | pinhole width/height (height is 800 px), default `1.5` |
+| `constellation?` | string | abbreviation (e.g. `ORI`): draws lines/names for this constellation only; pinhole without `center_direction` is centered on it |
+| `center_direction?` | `[x, y, z]` | pinhole view direction (equatorial frame, normalized by the server), default `[1, 0, 0]` |
+| `tilt_angle?` | number | pinhole camera roll, degrees, default `0` |
+| `layers` | `LayersConfig` | all fields required |
+| `style` | `StyleConfig` | all fields required |
+| `print_info?` | bool | prints Lat/Lon and Time in the bottom-left corner |
+| `footer_text?` | string | centered footer line |
+
+`LayersConfig` (all `bool`):
+
+- `ecliptic`, `equator`, `galactic_equator`, `equatorial_grid` - reference lines
+- `constellations`, `constellation_names` - stick figures and names (`constellation_names`
+  also labels planets)
+- `planets` - Sun, Moon and planets brighter than `magnitude_limit * magnitude_scale`
+- `zenith` - zenith cross (stereo only)
+- `horizontal_grid`, `poles` - accepted, currently not drawn by the backend renderer
+
+`StyleConfig`:
+
+- `star_color`, `constellation_line_color`, `grid_color`, `background_color`,
+  `font_family` - strings
+- `magnitude_scale` - number, star/planet size multiplier
 
 Example:
 
 ```bash
-curl "http://localhost:8080/api/compute?r_x=7000&r_y=0&v_x=0&v_y=7.546049108166282&mu=398600.44&dt=10&steps=25"
+curl -X POST "http://localhost:8080/api/export?format=svg" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projection": "stereo",
+    "datetime": "2026-05-20 22:00:00",
+    "latitude": 55.75,
+    "longitude": 37.62,
+    "magnitude_limit": 6.0,
+    "layers": {
+      "ecliptic": true, "equator": false, "galactic_equator": false, "planets": true,
+      "horizontal_grid": false, "equatorial_grid": false, "constellations": true,
+      "constellation_names": true, "zenith": false, "poles": false
+    },
+    "style": {
+      "star_color": "#FFFFFF", "constellation_line_color": "#808080",
+      "grid_color": "#404040", "background_color": "#05050A",
+      "font_family": "sans-serif", "magnitude_scale": 1.0
+    }
+  }'
 ```
 
-Validation:
-
-- `mu > 0`
-- `dt > 0`
-- `steps in 1..=100000`
-
-## PDF export
-
-- `POST /api/export`
-- Content-Type: `application/json`
-- Response: PDF bytes (`application/pdf`)
-
-Validation:
+Validation (`400`, plain-text message):
 
 - `projection` in `stereo|pinhole`
 - `latitude` in `-90..=90`
 - `longitude` in `-180..=180`
 - optional `magnitude_limit` in `0..=10`
 
-## Sky Quiz
+Other errors:
 
-- `GET /game/api/modes`
-- `POST /game/api/start`
-- `GET /game/api/question?session_id=...`
-- `POST /game/api/answer`
-- `GET /game/api/hint?session_id=...`
-- `POST /game/api/finish`
-
-`/game/api/start` validation:
-
-- `mode` in `constellation|star|messier|draw|trivia`
-- `difficulty` in `easy|medium|hard`
-- `total_rounds` in `1..=50`
+- `422` - body does not match `RenderConfig` (missing required field, wrong type)
+- `400` - malformed JSON; `415` - missing `Content-Type: application/json`
+- `500` - SVG parsing or PDF conversion failed (plain-text message)

@@ -40,8 +40,9 @@ export default ts.config(
 				'error',
 				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
 			],
-			// The app links with plain `href="/route"`; adopting `resolve()` everywhere
-			// is a separate decision, not something the linter should force here.
+			// The app is a single page with no in-app navigation links; adopting
+			// `resolve()` for any future ones is a separate decision, not something
+			// the linter should force here.
 			'svelte/no-navigation-without-resolve': 'off'
 		}
 	},
