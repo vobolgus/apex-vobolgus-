@@ -2,13 +2,19 @@
 	import { onMount, tick } from 'svelte';
 	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
-	import { buildRenderConfig } from '$lib/api/render-config';
+	import { buildRenderConfig, type ChartView } from '$lib/api/render-config';
 	import AboutDialog from '$lib/components/AboutDialog.svelte';
+	import { chartThumbnail } from '$lib/components/document/chart-thumbnail';
+	import PageEditor from '$lib/components/document/PageEditor.svelte';
+	import PagesPanel from '$lib/components/document/PagesPanel.svelte';
 	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import LayersPopover from '$lib/components/dock/LayersPopover.svelte';
 	import { PROJECTION_SEGMENTS } from '$lib/components/dock/options';
 	import SegmentedControl from '$lib/components/dock/SegmentedControl.svelte';
 	import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
+	import { DocumentStore } from '$lib/document/document.svelte';
+	import { exportDocument, snapshotChart } from '$lib/document/render';
 	import { loadFlubberInterpolator } from '$lib/flubber';
 	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
 	import { InputController } from '$lib/renderer/input-handlers';
@@ -26,6 +32,7 @@
 	} from '$lib/state/projection-transition.svelte';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
+	import { toast } from '$lib/ui/toast.svelte';
 
 	/** The export menu: what each format is for, and its shortcut (⌘S always saves a PNG). */
 	const EXPORT_OPTIONS = [
@@ -37,6 +44,11 @@
 		note: string;
 		keys: readonly string[];
 	}[];
+
+	/** The compact header and the collapsed pages panel start here (as in the CSS). */
+	const NARROW_QUERY = '(max-width: 743px)';
+	/** A document export slower than this says it is working on it. */
+	const EXPORT_PROGRESS_DELAY_MS = 600;
 
 	let canvasEl: HTMLCanvasElement | null = null;
 	let chartAreaEl: HTMLElement | null = null;
@@ -64,8 +76,46 @@
 	// ⌘ or Ctrl for the shortcuts; read on mount, so the server render assumes a Mac.
 	let apple = $state(true);
 
+	// The PDF document. Read from storage on mount, so the server render and hydration agree.
+	const documentStore = new DocumentStore();
+	/** The page the editor is open on; null while it is closed. */
+	let editorPageId = $state<string | null>(null);
+	let pagesPanel = $state<ReturnType<typeof PagesPanel>>();
+	let addButtonEl = $state<HTMLButtonElement | null>(null);
+	/** How far the pages panel reaches into the chart area, px; the chart keeps clear of it. */
+	let panelFootprintPx = $state(0);
+	let narrow = $state(false);
+	/** Read out after Add to PDF (the thumbnail's flash is the visual cue). */
+	let addAnnouncement = $state('');
+	const modalOpen = $derived(aboutOpen || editorPageId !== null);
+	// On a phone the panel floats over the chart, which it may cover; on a wide screen the chart moves aside.
+	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
+	const documentNote = $derived(
+		documentStore.pageCount === 0
+			? 'Add a chart first'
+			: `${documentStore.pageCount} ${documentStore.pageCount === 1 ? 'page' : 'pages'} · A4`
+	);
+
+	const notify = (message: string, undo?: () => void) => {
+		toast.show(message, undo);
+	};
+
 	onMount(() => {
 		apple = isApplePlatform(navigator);
+		const narrowQuery = window.matchMedia(NARROW_QUERY);
+		narrow = narrowQuery.matches;
+		const handleNarrowChange = (event: MediaQueryListEvent) => (narrow = event.matches);
+		narrowQuery.addEventListener('change', handleNarrowChange);
+		documentStore.load();
+		// Collapsed by default on a phone, where the open panel would cover the chart.
+		if (narrow) documentStore.panelOpen = false;
+		// Saves are debounced: write the last one before the tab goes away.
+		const flushDocument = () => documentStore.flush();
+		const handleVisibilityChange = () => {
+			if (document.visibilityState === 'hidden') flushDocument();
+		};
+		window.addEventListener('pagehide', flushDocument);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		input = new InputController({
 			canvas: () => canvasEl,
 			onChange: markRenderDirty,
@@ -103,6 +153,14 @@
 		const handleChartGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
 
 		const handleKeyDown = (event: KeyboardEvent) => {
+			// ⌘Z/Ctrl+Z takes back what the toast offers to undo, from anywhere (also the editor).
+			if (isModShortcut(event, 'KeyZ', apple) && toast.current?.undo) {
+				event.preventDefault();
+				if (!event.repeat) toast.undo();
+				return;
+			}
+			// The editor is modal and handles its own keys; nothing here acts behind it.
+			if (editorPageId !== null) return;
 			if (isHelpShortcut(event)) {
 				event.preventDefault();
 				if (!event.repeat) setAboutOpen(!aboutOpen);
@@ -154,6 +212,10 @@
 		void loadConstellationBoundaries().then(markRenderDirty);
 		return () => {
 			stopMenuDismiss();
+			narrowQuery.removeEventListener('change', handleNarrowChange);
+			window.removeEventListener('pagehide', flushDocument);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+			flushDocument();
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('keyup', handleKeyUp);
 			window.removeEventListener('blur', handleBlur);
@@ -236,21 +298,64 @@
 		markRenderDirty();
 	}
 
+	/** What the preview shows now; the projection is the one it is heading to. */
+	function currentChartView(): ChartView {
+		return {
+			projection: projection.mode,
+			orientation: view.orientation,
+			stereoFovDeg: view.stereoFovDeg,
+			pinholeFovDeg: view.pinholeFovDeg,
+			pinholeAspectRatio: view.pinholeAspectRatio,
+			pinholeHeightFrac: view.pinholeHeightFrac
+		};
+	}
+
 	function runExport(format: ExportFormat) {
 		void exportChart(canvasEl, format, () =>
-			buildRenderConfig(
-				{
-					projection: projection.mode,
-					orientation: view.orientation,
-					stereoFovDeg: view.stereoFovDeg,
-					pinholeFovDeg: view.pinholeFovDeg,
-					pinholeAspectRatio: view.pinholeAspectRatio,
-					pinholeHeightFrac: view.pinholeHeightFrac
-				},
-				layers,
-				new Date()
-			)
+			buildRenderConfig(currentChartView(), layers, new Date())
 		);
+	}
+
+	/**
+	 * Add to PDF: a frozen copy of the chart goes where it fits in the document (a
+	 * new page if nowhere), with a thumbnail of the preview to show until its vector
+	 * preview loads. The panel opens on that page and flashes it.
+	 */
+	function addToPdf() {
+		const chartView = currentChartView();
+		const chart = snapshotChart(chartView, layers);
+		const thumb = canvasEl ? chartThumbnail(canvasEl, chartView) : undefined;
+		const { pageId } = documentStore.addChart(chart, thumb);
+		documentStore.selectedPageId = pageId;
+		announce(`Added to page ${documentStore.pageIndex(pageId) + 1}`);
+		void pagesPanel?.reveal(pageId);
+	}
+
+	/** Polite live region; cleared first, so the same words twice are read twice. */
+	function announce(message: string) {
+		addAnnouncement = '';
+		setTimeout(() => (addAnnouncement = message), 50);
+	}
+
+	async function runDocumentExport() {
+		exportMenu.close();
+		if (documentStore.pageCount === 0) return;
+		let progressId: number | null = null;
+		const progress = setTimeout(() => {
+			progressId = toast.show('Preparing the PDF…');
+		}, EXPORT_PROGRESS_DELAY_MS);
+		const ok = await exportDocument(documentStore.pages);
+		clearTimeout(progress);
+		if (progressId !== null) toast.dismiss(progressId);
+		if (!ok) toast.show('Couldn’t export the PDF. Try again in a moment.');
+	}
+
+	function openEditor(pageId: string) {
+		menus.closeAll();
+		// Keys held down as the editor opens must not keep turning the sky behind it.
+		input?.onBlur();
+		documentStore.selectedPageId = pageId;
+		editorPageId = pageId;
 	}
 
 	function handleExportFormatSelect(format: ExportFormat) {
@@ -273,8 +378,11 @@
 	/** ↑/↓ (Home/End) move through the formats, kept from the window, where arrows rotate the sky. */
 	function handleExportMenuKeydown(event: KeyboardEvent) {
 		if (event.metaKey || event.ctrlKey || event.altKey) return;
+		// Disabled rows (the empty document) are skipped.
 		const items = Array.from(
-			exportMenuEl?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []
+			exportMenuEl?.querySelectorAll<HTMLElement>(
+				'[role="menuitemradio"], [role="menuitem"]:not(:disabled)'
+			) ?? []
 		);
 		const current = items.indexOf(document.activeElement as HTMLElement);
 		let next: number;
@@ -348,6 +456,18 @@
 					</svg>
 					<span class="tool-label">About</span>
 				</button>
+				<button
+					bind:this={addButtonEl}
+					class="add-btn"
+					type="button"
+					title="Add the chart to the PDF document"
+					onclick={addToPdf}
+				>
+					<svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M8 3.25v9.5M3.25 8h9.5" />
+					</svg>
+					<span class="tool-label">Add to PDF</span>
+				</button>
 				<div class="export-wrap" bind:this={exportMenu.element}>
 					<button class="export-main" type="button" onclick={() => runExport(selectedExportFormat)}>
 						<svg class="export-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -378,68 +498,101 @@
 							tabindex="-1"
 							onkeydown={handleExportMenuKeydown}
 						>
-							{#each EXPORT_OPTIONS as option (option.format)}
-								{@const checked = option.format === selectedExportFormat}
-								<button
-									class="export-option"
-									type="button"
-									role="menuitemradio"
-									aria-checked={checked}
-									aria-labelledby="export-{option.format}-name"
-									aria-describedby="export-{option.format}-note"
-									aria-keyshortcuts={option.keys.length ? ariaKeys(option.keys, apple) : undefined}
-									onclick={() => handleExportFormatSelect(option.format)}
-								>
-									<svg class="export-option-icon" viewBox="0 0 16 16" aria-hidden="true">
-										{#if option.format === 'PNG'}
-											<rect x="2.5" y="3" width="11" height="10" rx="1.5" />
-											<path d="M2.5 10.5l3-3 3 3 2-2 3 3" />
-										{:else if option.format === 'SVG'}
-											<path d="M3 13l4-10 2 6 4-2" />
-											<circle cx="3" cy="13" r="1" />
-											<circle cx="13" cy="7" r="1" />
-										{:else}
-											<path d="M4 2.5h5.5l3 3v8h-8.5z" />
-											<path d="M9.5 2.5v3h3" />
-										{/if}
-									</svg>
-									<span class="export-option-text">
-										<span class="export-option-name" id="export-{option.format}-name">
-											{option.format}
+							<div class="export-group" role="group" aria-label="Chart">
+								{#each EXPORT_OPTIONS as option (option.format)}
+									{@const checked = option.format === selectedExportFormat}
+									<button
+										class="export-option"
+										type="button"
+										role="menuitemradio"
+										aria-checked={checked}
+										aria-labelledby="export-{option.format}-name"
+										aria-describedby="export-{option.format}-note"
+										aria-keyshortcuts={option.keys.length
+											? ariaKeys(option.keys, apple)
+											: undefined}
+										onclick={() => handleExportFormatSelect(option.format)}
+									>
+										<svg class="export-option-icon" viewBox="0 0 16 16" aria-hidden="true">
+											{#if option.format === 'PNG'}
+												<rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+												<path d="M2.5 10.5l3-3 3 3 2-2 3 3" />
+											{:else if option.format === 'SVG'}
+												<path d="M3 13l4-10 2 6 4-2" />
+												<circle cx="3" cy="13" r="1" />
+												<circle cx="13" cy="7" r="1" />
+											{:else}
+												<path d="M4 2.5h5.5l3 3v8h-8.5z" />
+												<path d="M9.5 2.5v3h3" />
+											{/if}
+										</svg>
+										<span class="export-option-text">
+											<span class="export-option-name" id="export-{option.format}-name">
+												{option.format}
+											</span>
+											<span class="export-option-note" id="export-{option.format}-note">
+												{option.note}
+											</span>
 										</span>
-										<span class="export-option-note" id="export-{option.format}-note">
-											{option.note}
+										<span class="export-option-keys" aria-hidden="true">
+											{#each option.keys as key (key)}
+												<kbd>{keyLabel(key, apple)}</kbd>
+											{/each}
 										</span>
-									</span>
-									<span class="export-option-keys" aria-hidden="true">
-										{#each option.keys as key (key)}
-											<kbd>{keyLabel(key, apple)}</kbd>
-										{/each}
-									</span>
-									<svg class="export-option-check" viewBox="0 0 16 16" aria-hidden="true">
-										{#if checked}<path d="M3.5 8.5l3 3 6-7" />{/if}
-									</svg>
-								</button>
-							{/each}
+										<svg class="export-option-check" viewBox="0 0 16 16" aria-hidden="true">
+											{#if checked}<path d="M3.5 8.5l3 3 6-7" />{/if}
+										</svg>
+									</button>
+								{/each}
+							</div>
+							<div class="export-separator" role="separator"></div>
+							<button
+								class="export-option"
+								type="button"
+								role="menuitem"
+								disabled={documentStore.pageCount === 0}
+								aria-labelledby="export-document-name"
+								aria-describedby="export-document-note"
+								onclick={runDocumentExport}
+							>
+								<svg class="export-option-icon" viewBox="0 0 16 16" aria-hidden="true">
+									<path d="M5.5 2.5h5l3 3v7.5h-8z" />
+									<path d="M10.5 2.5v3h3M2.5 5v8.5a1 1 0 0 0 1 1H10" />
+								</svg>
+								<span class="export-option-text">
+									<span class="export-option-name" id="export-document-name">PDF document</span>
+									<span class="export-option-note" id="export-document-note">{documentNote}</span>
+								</span>
+								<span class="export-option-keys" aria-hidden="true"></span>
+								<span class="export-option-check" aria-hidden="true"></span>
+							</button>
 						</div>
 					{/if}
 				</div>
 			</div>
 		</div>
 	</header>
-	<section class="chart-area" bind:this={chartAreaEl}>
+	<section class="chart-area" bind:this={chartAreaEl} style:--panel-reserve="{panelReservePx}px">
 		<div class="chart-surface" bind:this={chartSurfaceEl}>
 			<canvas bind:this={canvasEl} width={CHART_CANVAS_BACKING_PX} height={CHART_CANVAS_BACKING_PX}
 			></canvas>
 			<PinholeFrameOverlay
 				bind:this={pinholeOverlay}
 				{surfaceSizePx}
-				clipWidthPx={chartClipWidthPx}
+				clipWidthPx={Math.max(1, chartClipWidthPx - 2 * panelReservePx)}
 				clipHeightPx={chartClipHeightPx}
 				visible={projection.isPinholeSettled}
 				onChange={markRenderDirty}
 			/>
 		</div>
+		<PagesPanel
+			bind:this={pagesPanel}
+			bind:footprint={panelFootprintPx}
+			store={documentStore}
+			onopen={openEditor}
+			{notify}
+			onemptied={() => addButtonEl?.focus()}
+		/>
 	</section>
 	<div class="control-bar-shell">
 		<div class="control-bar" role="group" aria-label="Generator display controls">
@@ -460,6 +613,14 @@
 	</div>
 </main>
 <AboutDialog bind:open={aboutOpen} {apple} />
+<PageEditor
+	store={documentStore}
+	pageId={editorPageId}
+	onclose={() => (editorPageId = null)}
+	{notify}
+/>
+<Toast store={toast} modal={modalOpen} />
+<p class="sr-only" role="status">{addAnnouncement}</p>
 
 <style>
 	.page {
@@ -483,7 +644,13 @@
 		z-index: 5;
 	}
 
+	/*
+	 * Its own stacking context: the pages panel and the frame overlay inside it
+	 * stay under the header's export menu and the dock's popover.
+	 */
 	.chart-area {
+		position: relative;
+		isolation: isolate;
 		min-height: 0;
 		min-width: 0;
 		padding: 12px;
@@ -494,12 +661,14 @@
 	}
 
 	.chart-surface {
-		/* Квадрат: сторона = min(ширина области, высота области, фикс. кап).
-		   100cqmin = меньшая сторона .chart-area, кап даёт стабильный размер на десктопе. */
+		/* Квадрат: сторона = min(ширина области, высота области, фикс. кап); кап даёт
+		   стабильный размер на десктопе. Из ширины вычитается охват панели страниц
+		   (--panel-reserve) с обеих сторон: карта остаётся по центру и не уходит под панель. */
 		--chart-cap: 720px;
+		--chart-side: max(0px, min(100cqw - 2 * var(--panel-reserve, 0px), 100cqh, var(--chart-cap)));
 		position: relative;
-		width: min(100cqmin, var(--chart-cap));
-		height: min(100cqmin, var(--chart-cap));
+		width: var(--chart-side);
+		height: var(--chart-side);
 		display: grid;
 		place-items: center;
 	}
@@ -600,6 +769,48 @@
 	/* After :focus-visible: a key or click press shows on a focused button too. */
 	.tool-btn:active {
 		background: var(--fill-press);
+		color: var(--fg-1);
+	}
+
+	/* ray.so's secondary button: a faint fill and a hairline edge, brighter under the pointer. */
+	.add-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		height: 30px;
+		padding: 0 12px 0 10px;
+		border: 0;
+		border-radius: var(--r-ctl);
+		background: var(--fill-hover);
+		box-shadow: inset 0 0 0 1px var(--hairline-strong);
+		color: var(--fg-2);
+		font: var(--font-ui);
+		white-space: nowrap;
+		cursor: pointer;
+		transition:
+			background var(--ease-ui),
+			color var(--ease-ui);
+	}
+
+	@media (hover: hover) {
+		.add-btn:hover {
+			background: var(--fill-press);
+			color: var(--fg-1);
+		}
+	}
+
+	.add-btn:focus-visible {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		background: var(--fill-press);
+		color: var(--fg-1);
+		box-shadow:
+			inset 0 0 0 1px var(--hairline-strong),
+			var(--ring);
+	}
+
+	.add-btn:active {
+		background: var(--fill-on);
 		color: var(--fg-1);
 	}
 
@@ -737,6 +948,17 @@
 		outline: none;
 	}
 
+	.export-group {
+		display: grid;
+		gap: 2px;
+	}
+
+	.export-separator {
+		height: 1px;
+		margin: 3px 2px;
+		background: var(--hairline);
+	}
+
 	.export-option {
 		display: grid;
 		grid-template-columns: 16px minmax(0, 1fr) auto 16px;
@@ -756,7 +978,7 @@
 	}
 
 	@media (hover: hover) {
-		.export-option:hover {
+		.export-option:not(:disabled):hover {
 			background: var(--fill-hover);
 			color: var(--fg-1);
 		}
@@ -779,6 +1001,18 @@
 
 	.export-option:active {
 		background: var(--fill-press);
+	}
+
+	/* The document row with nothing in the document: dimmed, no hover, skipped by the arrows. */
+	.export-option:disabled {
+		background: transparent;
+		color: var(--fg-2);
+		cursor: default;
+	}
+
+	.export-option:disabled .export-option-icon,
+	.export-option:disabled .export-option-name {
+		opacity: 0.5;
 	}
 
 	.export-option[aria-checked='true'] {
@@ -824,7 +1058,7 @@
 	}
 
 	/* A lit row over the white chart takes --fg-3 under 4.5:1; --fg-2 keeps it readable. */
-	.export-option:is(:hover, :focus, :active) .export-option-note {
+	.export-option:not(:disabled):is(:hover, :focus, :active) .export-option-note {
 		color: var(--fg-2);
 	}
 
@@ -933,7 +1167,8 @@
 
 	@media (max-width: 743px) {
 		/* "?" alone, a 32 px square; the label stays for screen readers. */
-		.tool-btn {
+		.tool-btn,
+		.add-btn {
 			width: 32px;
 			height: 32px;
 			padding: 0;
@@ -963,6 +1198,15 @@
 			clip-path: inset(50%);
 			white-space: nowrap;
 		}
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 
 	/* The byline is the first thing to go when the header runs out of room. */

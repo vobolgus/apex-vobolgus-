@@ -26,6 +26,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
 	{ action: 'Close a menu, cancel a resize', keys: ['Esc'] },
 	{ action: 'Toggle export menu', keys: ['mod', 'K'] },
 	{ action: 'Save PNG', keys: ['mod', 'S'] },
+	{ action: 'Undo a deletion', keys: ['mod', 'Z'] },
 	{ action: 'Open shortcuts', keys: ['?'] }
 ];
 

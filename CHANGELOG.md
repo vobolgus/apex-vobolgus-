@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- PDF document in the generator: **+ Add to PDF** in the header places the chart as the preview shows it on the first page with room (a new A4 page if none), and a pages panel floats on the left of the chart: page thumbnails with their charts, a red ⊖ on hover to delete a page (with an Undo toast for 6 s, also `⌘Z`/`Ctrl+Z`), ⊕ to add a page, a tab to collapse it to the page count (collapsed by default on phones), and a click on a page opens the page editor. The export menu gets a "PDF document" row ("N pages · A4") that downloads every page as one PDF. The document is kept in `localStorage`.
 - `POST /api/export/document` (and its SvelteKit proxy): charts placed on pages in mm come back as one multi-page PDF, each page exactly its requested size (A4 portrait or landscape) and an empty page blank. Pages are built as SVG with every chart nested under its own id prefix, converted with `svg2pdf::to_chunk` and assembled with `pdf-writer`.
 - `view.px` in `RenderConfig`: the length of one preview px in view units. Star and planet radii, line widths and text scale with it, so a chart sized in mm keeps its stars the same size on paper however large it is drawn.
 - `style.chart_outline` strokes the sky's edge 1 preview px wide, and `style.background_color: "none"` paints no background, for charts on white paper.

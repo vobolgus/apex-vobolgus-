@@ -2,7 +2,8 @@
  * Design tokens for the generator chrome (dock, popovers, switches).
  *
  * The interface is monochrome: every state is a step of white over the dark
- * page, and the only colour is `--accent`, reserved for Export. Text never
+ * page, and the only colour is `--accent`, reserved for Export and for the
+ * destructive ⊖ buttons. Text never
  * goes below `--fg-3` (about 5:1 on `--dock`); `--fg-icon-off` is for
  * non-text marks only.
  */
@@ -13,6 +14,14 @@
 	--pop: rgba(23, 24, 27, 0.96);
 	/* Modal dialogs: opaque, they sit over a dimmed page. */
 	--panel: #17181b;
+	/* The dock's fill made opaque, for the pages panel, which may float over the white chart. */
+	--dock-solid: #131417;
+
+	/* PDF pages: white paper lifted off the dark page. */
+	--paper: #ffffff;
+	--paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.35);
+	/* A chart's edge on paper: the PDF's `chart_outline`. */
+	--paper-chart-edge: #c9ced6;
 
 	--fg-1: #f2f3f5;
 	--fg-2: rgba(255, 255, 255, 0.64);
@@ -23,6 +32,8 @@
 	--fill-press: rgba(255, 255, 255, 0.1);
 	--fill-on: rgba(255, 255, 255, 0.12);
 	--hairline: rgba(255, 255, 255, 0.08);
+	/* The edge of a floating panel or a secondary button, which must hold against the page. */
+	--hairline-strong: rgba(255, 255, 255, 0.12);
 	/* .40, not the report's .32: the outer ring needs 3:1 against the dock (WCAG 1.4.11). */
 	--ring: 0 0 0 2px var(--page), 0 0 0 4px rgba(255, 255, 255, 0.4);
 
@@ -37,6 +48,9 @@
 	--accent-wash-press: rgba(211, 75, 75, 0.24);
 	--accent-edge: rgba(211, 75, 75, 0.38);
 	--accent-fg: #ff9d9d;
+	/* The solid accent of a destructive ⊖ badge, under the pointer and pressed. */
+	--accent-hover: #e05f5f;
+	--accent-press: #bf4040;
 
 	--h-dock: 44px;
 	--h-ctl: 32px;
