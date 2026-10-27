@@ -9,7 +9,7 @@
  */
 
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
-import { findPlacement, fitFrame, refitFrames } from './geometry';
+import { findPlacement, fitFrame, rotateLayout } from './geometry';
 import type { ChartSnapshot, DocItem, DocPage, PageOrientation, Rect } from './types';
 
 export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v1';
@@ -145,12 +145,13 @@ export class DocumentStore {
 		});
 	}
 
-	/** Turn a page; charts that no longer fit are placed again or scaled down into it. */
+	/** Turn a page; its layout turns with it (`rotateLayout`): rows become columns. */
 	setOrientation(id: string, orientation: PageOrientation): void {
 		const page = this.page(id);
 		if (!page || page.orientation === orientation) return;
-		const frames = refitFrames(
+		const frames = rotateLayout(
 			page.items.map((item) => ({ frame: item.frame, aspect: item.chart.aspect })),
+			page.orientation,
 			orientation
 		);
 		page.orientation = orientation;

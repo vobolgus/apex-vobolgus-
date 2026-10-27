@@ -485,24 +485,126 @@ export function placeFrame(
 }
 
 /**
- * A page's frames after it turned to `o`. Frames still inside the content box stay;
- * each one that is not is placed again (`placeFrame`), clear of the frames settled
- * so far.
+ * A page's frames after it turned from `from` to `to`: the layout turns with the
+ * page, as a block, in whichever of two ways shrinks it less. Turned, rows of charts
+ * become columns (left-to-right becoming top-to-bottom) with the gaps between them
+ * kept, so two discs side by side on a landscape page stand one above the other on
+ * a portrait one; kept, the arrangement stays and is only fitted in (a stack of wide
+ * panoramas stays a stack). A tie keeps it. The block keeps its place in the free
+ * space (centred stays centred, against an edge stays there) and shrinks uniformly
+ * only when it no longer fits; it never grows, so turning back restores the layout
+ * whenever neither turn had to shrink it. A chart that would end up under the
+ * smallest side is placed again on its own (`placeFrame`).
  */
-export function refitFrames(
+export function rotateLayout(
 	items: readonly { frame: Rect; aspect: number }[],
-	o: PageOrientation
+	from: PageOrientation,
+	to: PageOrientation
 ): Rect[] {
-	const box = contentBox(o);
-	const result: (Rect | null)[] = items.map(({ frame }) => (inside(frame, box) ? frame : null));
-	const settled = result.filter((frame): frame is Rect => frame !== null);
-	items.forEach(({ frame, aspect }, i) => {
-		if (result[i]) return;
-		const placed = placeFrame(frame, aspect, settled, o);
-		result[i] = placed;
+	if (items.length === 0 || from === to) return items.map(({ frame }) => ({ ...frame }));
+	const frames = items.map(({ frame }) => frame);
+	const oldBox = contentBox(from);
+	const newBox = contentBox(to);
+	const old = boundingRect(frames);
+	// Where the block sat in the old free space, as fractions of it.
+	const fx = freeFraction(old.x - oldBox.x, oldBox.w - old.w);
+	const fy = freeFraction(old.y - oldBox.y, oldBox.h - old.h);
+
+	const kept = frames.map((f) => ({ ...f, x: f.x - old.x, y: f.y - old.y }));
+	const turned = transposeRows(frames);
+	const keptScale = fitScale(old.w, old.h, newBox);
+	const turnedScale = fitScale(turned.w, turned.h, newBox);
+	const turn = turnedScale > keptScale + EPS;
+	const scale = turn ? turnedScale : keptScale;
+	const rects = turn ? turned.rects : kept;
+	const [blockW, blockH] = turn ? [turned.w, turned.h] : [old.w, old.h];
+	// Turned, the axes swap, and so do the fractions.
+	const [ax, ay] = turn ? [fy, fx] : [fx, fy];
+	const originX = newBox.x + ax * Math.max(0, newBox.w - blockW * scale);
+	const originY = newBox.y + ay * Math.max(0, newBox.h - blockH * scale);
+
+	const result = rects.map((rect) => ({
+		x: originX + rect.x * scale,
+		y: originY + rect.y * scale,
+		w: rect.w * scale,
+		h: rect.h * scale
+	}));
+	const small = result.map((rect, i) => rect.w + EPS < minWidth(items[i].aspect));
+	const settled = result.filter((_, i) => !small[i]);
+	return result.map((rect, i) => {
+		if (!small[i]) return rect;
+		const placed = placeFrame(rect, items[i].aspect, settled, to);
 		settled.push(placed);
+		return placed;
 	});
-	return result as Rect[];
+}
+
+/** The scale that fits a `w` × `h` block into `box`, at most 1. */
+function fitScale(w: number, h: number, box: Rect): number {
+	return Math.min(1, box.w / w, box.h / h);
+}
+
+/**
+ * The frames with rows made columns, relative to the new block's top-left: each
+ * row's charts stacked in their left-to-right order with the horizontal gaps
+ * between them, each as far in from the column's left as it sat below the row's top,
+ * and the columns following each other with the rows' gaps. A row is every chart that
+ * overlaps it vertically, taken top-down.
+ */
+function transposeRows(frames: readonly Rect[]): { rects: Rect[]; w: number; h: number } {
+	const order = frames
+		.map((_, i) => i)
+		.sort((a, b) => frames[a].y - frames[b].y || frames[a].x - frames[b].x);
+	const rows: { members: number[]; top: number; bottom: number }[] = [];
+	for (const i of order) {
+		const f = frames[i];
+		const row = rows.at(-1);
+		if (row && f.y < row.bottom - EPS) {
+			row.members.push(i);
+			row.bottom = Math.max(row.bottom, f.y + f.h);
+		} else {
+			rows.push({ members: [i], top: f.y, bottom: f.y + f.h });
+		}
+	}
+
+	const rects: Rect[] = new Array(frames.length);
+	let columnLeft = 0;
+	let w = 0;
+	let h = 0;
+	rows.forEach((row, r) => {
+		const members = [...row.members].sort((a, b) => frames[a].x - frames[b].x);
+		let top = 0;
+		let width = 0;
+		members.forEach((i, k) => {
+			const f = frames[i];
+			if (k > 0) {
+				const before = frames[members[k - 1]];
+				top += Math.max(0, f.x - (before.x + before.w));
+			}
+			const inset = f.y - row.top;
+			rects[i] = { x: columnLeft + inset, y: top, w: f.w, h: f.h };
+			top += f.h;
+			width = Math.max(width, inset + f.w);
+		});
+		w = columnLeft + width;
+		h = Math.max(h, top);
+		const next = rows[r + 1];
+		if (next) columnLeft += width + Math.max(0, next.top - row.bottom);
+	});
+	return { rects, w, h };
+}
+
+/** How far into its free space a block sits, 0..1; centred when there is none. */
+function freeFraction(offset: number, free: number): number {
+	return free > EPS ? clamp(offset / free, 0, 1) : 0.5;
+}
+
+function boundingRect(frames: readonly Rect[]): Rect {
+	const x = Math.min(...frames.map((f) => f.x));
+	const y = Math.min(...frames.map((f) => f.y));
+	const right = Math.max(...frames.map((f) => f.x + f.w));
+	const bottom = Math.max(...frames.map((f) => f.y + f.h));
+	return { x, y, w: right - x, h: bottom - y };
 }
 
 // === Helpers ===

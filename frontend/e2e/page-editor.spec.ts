@@ -1,10 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { contentBox, gridLines } from '../src/lib/document/geometry';
 
 /**
  * The page editor, opened from the pages panel: a chart dragged near a grid line
- * snaps onto it, a chart dragged onto the next page moves there, one let go off
- * every page goes back, and Escape closes the editor.
+ * snaps onto it, a chart dragged onto the next page moves there, one on a
+ * neighbouring page can be dragged onto the current one, one let go off every
+ * page goes back, and Escape closes the editor.
  */
 
 const STORAGE_KEY = 'skycharts.document.v1';
@@ -86,6 +87,20 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 	await page.mouse.up();
 }
 
+/** The element's box once it has stopped moving: the pages slide when the current one changes. */
+async function settledBox(locator: Locator) {
+	let last = await locator.boundingBox();
+	for (let i = 0; i < 40; i += 1) {
+		await locator.page().waitForTimeout(50);
+		const box = await locator.boundingBox();
+		if (box && last && Math.abs(box.x - last.x) < 0.5 && Math.abs(box.y - last.y) < 0.5) {
+			return box;
+		}
+		last = box;
+	}
+	throw new Error('the element never stopped moving');
+}
+
 function centre(box: { x: number; y: number; width: number; height: number }) {
 	return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
@@ -140,6 +155,42 @@ test('a chart dragged onto the next page moves there, Escape closes', async ({ p
 
 	await page.keyboard.press('Escape');
 	await expect(editor).toBeHidden();
+});
+
+test('a chart on a neighbouring page can be dragged onto the current one', async ({ page }) => {
+	const editor = await seedAndOpen(page);
+	await editor.getByRole('button', { name: 'Show page 2, no charts' }).click();
+	const current = editor.getByRole('group', { name: 'Page 2, A4 portrait, no charts' });
+	await expect(current).toBeVisible();
+
+	// Page 1 is now the neighbour on the left; its charts are pictures, not buttons.
+	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .chart');
+	await drag(page, centre(await settledBox(side)), centre(await settledBox(current)));
+
+	await expect
+		.poll(async () => (await savedPages(page)).map((items) => items.map((it) => it.id)))
+		.toEqual([['e2e-b'], ['e2e-a']]);
+	// The drop keeps page 2 current (the release's click does not turn to page 1) and selects the chart.
+	await expect(editor.getByRole('group', { name: 'Page 2, A4 portrait, 1 chart' })).toBeVisible();
+	await expect(editor.getByRole('button', { name: /^Chart 1 of 1,/ })).toBeFocused();
+});
+
+test('a click on a neighbour’s chart, without a drag, turns to that page', async ({ page }) => {
+	const editor = await seedAndOpen(page);
+	await editor.getByRole('button', { name: 'Show page 2, no charts' }).click();
+	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .chart');
+	await page.mouse.click(...(Object.values(centre(await settledBox(side))) as [number, number]));
+	await expect(editor.getByRole('group', { name: 'Page 1, A4 portrait, 2 charts' })).toBeVisible();
+	expect((await savedPages(page)).map((items) => items.length)).toEqual([2, 0]);
+});
+
+test('opening the editor puts the focus on the editor, not on its close button', async ({
+	page
+}) => {
+	const editor = await seedAndOpen(page);
+	await expect(editor).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(editor.getByRole('button', { name: 'Close' })).toBeFocused();
 });
 
 test('a chart let go off every page goes back where it was', async ({ page }) => {

@@ -140,42 +140,18 @@ describe('PagesPanel', () => {
 		expect(parseFloat(chartEl.style.width)).toBeCloseTo(item.frame.w * scale, 6);
 	});
 
-	it('shows the thumb until the vector preview loads, then the preview', async () => {
+	it('draws each chart on a canvas of its own and asks the backend for nothing', async () => {
 		const store = new DocumentStore(null);
 		store.addChart(chart(), 'data:image/png;base64,AAAA');
+		store.addChart(chart());
 		const ctx = setup(store);
 		cleanup = ctx.cleanup;
-		const img = () => ctx.target.querySelector<HTMLImageElement>('.chart img');
+		await settle();
 
-		expect(img()?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
-		await vi.waitFor(() => expect(img()?.getAttribute('src')).toBe('blob:preview'));
-		expect(preview.url).toHaveBeenCalledWith(store.pages[0].items[0]);
-	});
-
-	it('fetches a new preview once a resize has settled, not on every move', async () => {
-		vi.useFakeTimers();
-		try {
-			const store = new DocumentStore(null);
-			store.addChart(chart());
-			const ctx = setup(store);
-			cleanup = ctx.cleanup;
-			await vi.advanceTimersByTimeAsync(0);
-			expect(preview.url).toHaveBeenCalledTimes(1);
-
-			const page = store.pages[0];
-			const item = page.items[0];
-			for (const w of [120, 110, 100, 90]) {
-				store.updateItem(page.id, item.id, { ...item.frame, w, h: w });
-				flushSync();
-				await vi.advanceTimersByTimeAsync(50);
-			}
-			expect(preview.url).toHaveBeenCalledTimes(1);
-			await vi.advanceTimersByTimeAsync(400);
-			expect(preview.url).toHaveBeenCalledTimes(2);
-			expect(preview.url.mock.lastCall?.[0]).toMatchObject({ frame: { w: 90, h: 90 } });
-		} finally {
-			vi.useRealTimers();
-		}
+		const canvases = ctx.target.querySelectorAll('.chart canvas');
+		expect(canvases).toHaveLength(2);
+		expect(ctx.target.querySelector('.chart img')).toBeNull();
+		expect(preview.url).not.toHaveBeenCalled();
 	});
 
 	it('opens the editor on a click on a thumbnail', () => {

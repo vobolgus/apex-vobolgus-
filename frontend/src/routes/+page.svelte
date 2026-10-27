@@ -646,6 +646,8 @@
 			</div>
 		</div>
 	</div>
+	<!-- Inside the page, which clips it: after it, even a 1 px box would make the document scroll. -->
+	<p class="sr-only" role="status">{addAnnouncement}</p>
 </main>
 <AboutDialog bind:open={aboutOpen} {apple} />
 <PageEditor
@@ -657,7 +659,6 @@
 	{apple}
 />
 <Toast store={toast} modal={modalOpen} {apple} />
-<p class="sr-only" role="status">{addAnnouncement}</p>
 
 <style>
 	.page {
@@ -1241,6 +1242,7 @@
 		position: absolute;
 		width: 1px;
 		height: 1px;
+		margin: 0;
 		overflow: hidden;
 		clip-path: inset(50%);
 		white-space: nowrap;

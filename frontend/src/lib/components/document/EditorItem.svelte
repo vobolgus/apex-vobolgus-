@@ -38,7 +38,7 @@
 		nextPage?: number | null;
 		/** Where to draw the chart, mm on its page; off the page while it is dragged to another. */
 		frame: Rect;
-		/** On the current page: focusable, draggable, resizable. */
+		/** On the current page: focusable, resizable, with its toolbar. Elsewhere it can still be dragged. */
 		interactive: boolean;
 		mode?: ItemState;
 		/** Id of the element that explains the keys. */
@@ -287,7 +287,13 @@
 			<span class="readout" aria-hidden="true">{sizeLabel(frame)}</span>
 		{/if}
 	{:else}
-		<div class="chart">{@render preview()}</div>
+		<!-- A neighbour's chart: not focusable, but it can be grabbed and dropped on another page.
+		     Pointer only, like dragging itself: the keys move a chart with Page Up/Down, and the
+		     neighbouring page around it is the button that makes it current. -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="chart is-grabbable" onpointerdown={handleChartPointerDown}>
+			{@render preview()}
+		</div>
 	{/if}
 </div>
 
@@ -340,6 +346,12 @@
 
 	.is-disc .chart::before {
 		border-radius: 50%;
+	}
+
+	/* A neighbour's chart: grabbed and dropped like the current page's, nothing more. */
+	.chart.is-grabbable {
+		cursor: grab;
+		touch-action: none;
 	}
 
 	.is-interactive .chart {

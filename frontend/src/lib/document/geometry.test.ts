@@ -11,7 +11,7 @@ import {
 	pageSize,
 	placeFrame,
 	PRINT_MM_PER_PREVIEW_PX,
-	refitFrames,
+	rotateLayout,
 	sizeCandidates,
 	snapMove,
 	snapResize,
@@ -776,42 +776,128 @@ describe('placeFrame', () => {
 	});
 });
 
-describe('refitFrames', () => {
-	it('keeps frames that still fit', () => {
-		const items = [
-			{ frame: { x: 12, y: 12, w: 90, h: 90 }, aspect: 1 },
-			{ frame: { x: 108, y: 12, w: 90, h: 90 }, aspect: 1 }
+describe('rotateLayout', () => {
+	const turn = (frames: Rect[], from: PageOrientation, to: PageOrientation, aspect?: number[]) =>
+		rotateLayout(
+			frames.map((frame, i) => ({ frame, aspect: aspect?.[i] ?? frame.w / frame.h })),
+			from,
+			to
+		);
+
+	it('stands two discs side by side on a landscape page one above the other', () => {
+		// Two equal halves, centred top to bottom: the layout the user set up.
+		const row = [
+			{ x: 12, y: 38.25, w: 133.5, h: 133.5 },
+			{ x: 151.5, y: 38.25, w: 133.5, h: 133.5 }
 		];
-		expect(refitFrames(items, 'landscape')).toEqual(items.map((i) => i.frame));
+		const [top, bottom] = turn(row, 'landscape', 'portrait');
+		expectRect(top, { x: 38.25, y: 12, w: 133.5, h: 133.5 });
+		expectRect(bottom, { x: 38.25, y: 151.5, w: 133.5, h: 133.5 });
 	});
 
-	it('places a frame that fell off the page next to the ones that stayed', () => {
-		// Two stacked half-height discs on a portrait page, turned landscape.
-		const items = [
-			{ frame: { x: 12, y: 12, w: 133.5, h: 133.5 }, aspect: 1 },
-			{ frame: { x: 12, y: 151.5, w: 133.5, h: 133.5 }, aspect: 1 }
+	it('lays a portrait column out as a landscape row', () => {
+		const column = [
+			{ x: 12, y: 12, w: 133.5, h: 133.5 },
+			{ x: 12, y: 151.5, w: 133.5, h: 133.5 }
 		];
-		const [first, second] = refitFrames(items, 'landscape');
-		expect(first).toEqual(items[0].frame);
+		const [first, second] = turn(column, 'portrait', 'landscape');
+		expectRect(first, { x: 12, y: 12, w: 133.5, h: 133.5 });
 		expectRect(second, { x: 151.5, y: 12, w: 133.5, h: 133.5 });
+	});
+
+	it('turns back to the layout it started from', () => {
+		const layouts: Rect[][] = [
+			[
+				{ x: 12, y: 38.25, w: 133.5, h: 133.5 },
+				{ x: 151.5, y: 38.25, w: 133.5, h: 133.5 }
+			],
+			[
+				{ x: 12, y: 12, w: 87, h: 87 },
+				{ x: 105, y: 12, w: 87, h: 87 },
+				{ x: 198, y: 12, w: 87, h: 87 }
+			],
+			[{ x: 60, y: 40, w: 100, h: 62.5 }]
+		];
+		for (const frames of layouts) {
+			const back = turn(turn(frames, 'landscape', 'portrait'), 'portrait', 'landscape');
+			back.forEach((frame, i) => expectRect(frame, frames[i]));
+		}
+	});
+
+	it('keeps a lone chart where it sat: in a corner, or centred', () => {
+		const [corner] = turn([{ x: 12, y: 12, w: 90, h: 90 }], 'portrait', 'landscape');
+		expectRect(corner, { x: 12, y: 12, w: 90, h: 90 });
+		const [centred] = turn([{ x: 60, y: 103.5, w: 90, h: 90 }], 'portrait', 'landscape');
+		const box = contentBox('landscape');
+		expect(centred.x + centred.w / 2).toBeCloseTo(box.x + box.w / 2, 9);
+		expect(centred.y + centred.h / 2).toBeCloseTo(box.y + box.h / 2, 9);
+	});
+
+	it('shrinks the whole block uniformly when it no longer fits, never one chart alone', () => {
+		// Add to PDF's own layout: a full-width disc over a pinhole and a small disc.
+		const frames = [
+			{ x: 12, y: 12, w: 186, h: 186 },
+			{ x: 12, y: 204, w: 90, h: 55.9 },
+			{ x: 108, y: 204, w: 63.8, h: 63.8 }
+		];
+		const turned = turn(frames, 'portrait', 'landscape');
+		const scale = turned[0].w / frames[0].w;
+		expect(scale).toBeLessThan(1);
+		turned.forEach((frame, i) => {
+			expect(frame.w / frames[i].w).toBeCloseTo(scale, 9);
+			expect(insideBox(frame, 'landscape')).toBe(true);
+		});
+		// The row under the big disc becomes a column beside it.
+		expect(turned[1].x).toBeGreaterThan(turned[0].x + turned[0].w);
+		expect(turned[2].y).toBeGreaterThan(turned[1].y + turned[1].h);
+		expect(overlaps(turned[0], turned[1]) || overlaps(turned[1], turned[2])).toBe(false);
 	});
 
 	it('scales a frame down when it is larger than the new box', () => {
 		const aspect = 186 / 273;
-		const [frame] = refitFrames([{ frame: { x: 12, y: 12, w: 186, h: 273 }, aspect }], 'landscape');
-		expectRect(frame, { x: 12, y: 12, w: 186 * aspect, h: 186 });
+		const [frame] = turn([{ x: 12, y: 12, w: 186, h: 273 }], 'portrait', 'landscape', [aspect]);
+		expect(frame.h).toBeCloseTo(186, 9);
+		expect(frame.w / frame.h).toBeCloseTo(aspect, 9);
+		expect(insideBox(frame, 'landscape')).toBe(true);
 	});
 
-	it('falls back to fitting into the box when the page has no room', () => {
-		const aspect = 273 / 186;
-		const items = [
-			{ frame: { x: 12, y: 12, w: 273, h: 186 }, aspect },
-			{ frame: { x: 12, y: 210, w: 60, h: 60 }, aspect: 1 }
-		];
-		const [kept, squeezed] = refitFrames(items, 'landscape');
-		expect(kept).toEqual(items[0].frame);
-		expect(insideBox(squeezed, 'landscape')).toBe(true);
-		expectRect(squeezed, { x: 12, y: 138, w: 60, h: 60 });
+	it('turns Add to PDF layouts into layouts that fit, overlap nothing and keep every aspect', () => {
+		// A turn shrinks a block to 186/273 at most, so a chart whose short side is at least
+		// 40 / (186/273) ≈ 59 mm never falls under the smallest side and is never placed
+		// again on its own: the turned block overlaps nothing because the old one did not.
+		const roomySide = MIN_CHART_SIDE_MM / (186 / 273);
+		const random = rng(11);
+		let checked = 0;
+		for (let run = 0; run < 400; run++) {
+			const from: PageOrientation = random() < 0.5 ? 'portrait' : 'landscape';
+			const to: PageOrientation = from === 'portrait' ? 'landscape' : 'portrait';
+			const items: { frame: Rect; aspect: number }[] = [];
+			for (let n = 0; n < 6; n++) {
+				const aspect = between(random, 0.5, 3);
+				const spot = findPlacement(
+					[
+						page(
+							from,
+							items.map((it) => it.frame)
+						)
+					],
+					aspect
+				);
+				if (spot.pageIndex === null) break;
+				items.push({ frame: spot.frame, aspect });
+			}
+			const frames = rotateLayout(items, from, to);
+			frames.forEach((frame, i) => {
+				expect(insideBox(frame, to, 1e-6)).toBe(true);
+				expect(frame.w / frame.h).toBeCloseTo(items[i].aspect, 9);
+			});
+			if (items.some(({ frame }) => Math.min(frame.w, frame.h) < roomySide)) continue;
+			checked += 1;
+			frames.forEach((frame, i) => {
+				for (let j = 0; j < i; j++) expect(overlaps(frame, frames[j])).toBe(false);
+			});
+		}
+		expect(checked).toBeGreaterThan(50);
 	});
 
 	it('keeps random pages inside the box after a turn, at every aspect', () => {
@@ -823,9 +909,8 @@ describe('refitFrames', () => {
 				const aspect = between(random, 0.4, 3.5);
 				return { frame: randomFrame(random, from, aspect), aspect };
 			});
-			const frames = refitFrames(items, to);
-			frames.forEach((frame, i) => {
-				expect(insideBox(frame, to)).toBe(true);
+			rotateLayout(items, from, to).forEach((frame, i) => {
+				expect(insideBox(frame, to, 1e-6)).toBe(true);
 				expect(frame.w / frame.h).toBeCloseTo(items[i].aspect, 9);
 			});
 		}

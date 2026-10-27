@@ -18,7 +18,7 @@
 
 <style>
 	.shell {
-		min-height: 100vh;
+		height: 100%;
 	}
 
 	.content {

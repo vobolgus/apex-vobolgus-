@@ -149,12 +149,14 @@
 		if (index >= 0) lastIndex = index;
 	});
 
-	// Open and close with the prop. The content renders first, so showModal() finds ⊗.
+	// Open and close with the prop. The content renders first, so the stage can be measured.
 	$effect(() => {
 		const dialog = dialogEl;
 		if (!dialog) return;
 		if (open && !dialog.open) {
 			dialog.showModal();
+			// The dialog itself takes the focus: on ⊗, Safari would ring it on every open. Tab reaches ⊗.
+			dialog.focus({ preventScroll: true });
 			measureStage();
 			// Two frames: the first paints at the measured size, the next may animate.
 			requestAnimationFrame(() => requestAnimationFrame(() => (animated = dialog.open)));
@@ -331,6 +333,15 @@
 
 	let session: Session | null = null;
 	let drag = $state.raw<DragView | null>(null);
+	/** Set for the click a drag's release ends in. */
+	let swallowClick = false;
+
+	function handleClickCapture(event: MouseEvent) {
+		if (!swallowClick) return;
+		swallowClick = false;
+		event.stopPropagation();
+		event.preventDefault();
+	}
 
 	function pageBoxes(): { id: string; box: Box }[] {
 		const origin = stageEl?.getBoundingClientRect() ?? { left: 0, top: 0 };
@@ -349,9 +360,15 @@
 		return true;
 	}
 
+	/** The page a chart is on: the current one, or a neighbour it is grabbed from. */
+	function pageOf(item: DocItem): DocPage | undefined {
+		return store.pages.find((page) => page.items.some((it) => it.id === item.id));
+	}
+
 	function beginSession(
 		event: PointerEvent,
 		item: DocItem,
+		pageId: string,
 		kind: Session['kind'],
 		extra: Partial<Pick<Session, 'grab' | 'anchor' | 'anchorPoint' | 'corner'>>
 	) {
@@ -360,7 +377,7 @@
 		const { signal } = listeners;
 		session = {
 			kind,
-			pageId: current!.id,
+			pageId,
 			itemId: item.id,
 			aspect: item.chart.aspect,
 			pointerId: event.pointerId,
@@ -391,12 +408,13 @@
 	}
 
 	function startMove(event: PointerEvent, item: DocItem) {
-		if (!claimPointer(event)) return;
-		const chartEl = event.currentTarget as HTMLElement;
-		chartEl.focus({ preventScroll: true });
-		const box = pageBoxes().find((b) => b.id === current!.id)!.box;
+		const page = pageOf(item);
+		const box = page && pageBoxes().find((b) => b.id === page.id)?.box;
+		if (!page || !box || !claimPointer(event)) return;
+		// A neighbour's chart is not focusable; it takes the focus once it lands on the current page.
+		(event.currentTarget as HTMLElement).focus({ preventScroll: true });
 		const pointer = screenToMm({ x: event.clientX, y: event.clientY }, box, layout.scale);
-		beginSession(event, item, 'move', {
+		beginSession(event, item, page.id, 'move', {
 			grab: { x: pointer.x - item.frame.x, y: pointer.y - item.frame.y }
 		});
 	}
@@ -409,7 +427,7 @@
 			?.querySelector<HTMLElement>('[role="button"]');
 		chartEl?.focus({ preventScroll: true });
 		const anchor = anchorOf(handle);
-		beginSession(event, item, 'resize', {
+		beginSession(event, item, current!.id, 'resize', {
 			anchor,
 			anchorPoint: cornerOf(item.frame, anchor),
 			corner: cornerOf(item.frame, handle)
@@ -492,14 +510,24 @@
 		const view = drag;
 		endDrag();
 		if (!s.moved || !view) return;
+		// The click this release ends in must not make the page it was grabbed on current.
+		swallowClick = true;
+		setTimeout(() => (swallowClick = false));
 		if (view.targetId === null) {
 			snapBack(s.itemId);
 		} else if (view.targetId === s.pageId) {
 			store.updateItem(s.pageId, s.itemId, view.frame);
 		} else if (store.moveItem(s.itemId, view.targetId, view.frame)) {
 			announce(`Chart moved to page ${store.pageIndex(view.targetId) + 1}`);
-			// Its element is gone with it: keep the focus on this page.
-			void tick().then(focusPaper);
+			// Its element is gone with it: the focus goes to it on the current page, else stays here.
+			const itemId = s.itemId;
+			void tick().then(() => {
+				const moved = dialogEl?.querySelector<HTMLElement>(
+					`.slot[data-role="current"] [data-item-id="${itemId}"] [role="button"]`
+				);
+				if (moved) moved.focus({ preventScroll: true });
+				else focusPaper();
+			});
 		} else {
 			snapBack(s.itemId);
 			announce(`Page ${store.pageIndex(view.targetId) + 1} is full`);
@@ -699,6 +727,7 @@
 	bind:this={dialogEl}
 	class="editor"
 	class:is-animated={animated}
+	tabindex="-1"
 	style:--strip-h={stripHeight > 0 ? `${stripHeight}px` : undefined}
 	aria-labelledby="{id}-title"
 	aria-describedby="{id}-summary"
@@ -707,11 +736,12 @@
 	onclose={handleClose}
 	onpointerdown={handleBackdropPointerDown}
 	onclick={handleBackdropClick}
+	onclickcapture={handleClickCapture}
 >
 	{#if open && current}
 		<div class="content">
 			<header class="bar">
-				<!-- First in the dialog, so showModal() puts the focus here and the arrows page through. -->
+				<!-- First in the dialog: the first stop for Tab. -->
 				<button
 					class="close"
 					type="button"
@@ -728,11 +758,6 @@
 					<h2 id="{id}-title">PDF document</h2>
 					<p class="summary" id="{id}-summary">{summary}</p>
 				</div>
-				<p class="tips" aria-hidden="true">
-					<span>Drag to move</span>
-					<span>Corners resize</span>
-					<span>Drop on a neighbour to move it there</span>
-				</p>
 			</header>
 
 			<div class="stage" bind:this={stageEl}>
@@ -843,8 +868,8 @@
 
 	.bar {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		grid-template-areas: 'title tips close';
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas: 'title close';
 		align-items: center;
 		gap: 16px;
 		height: 56px;
@@ -880,25 +905,6 @@
 		font-variant-numeric: tabular-nums;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-	}
-
-	.tips {
-		grid-area: tips;
-		display: flex;
-		gap: 16px;
-		margin: 0;
-		color: var(--fg-3);
-		font:
-			400 12px/16px Inter,
-			system-ui,
-			sans-serif;
-		white-space: nowrap;
-	}
-
-	.tips span + span::before {
-		content: '·';
-		margin-right: 16px;
-		color: var(--fg-icon-off);
 	}
 
 	.close {
@@ -959,12 +965,6 @@
 		overflow: hidden;
 		clip-path: inset(50%);
 		white-space: nowrap;
-	}
-
-	@media (max-width: 1100px) {
-		.tips {
-			display: none;
-		}
 	}
 
 	/* A phone: the whole screen, no frame of dimmed app around it. */
