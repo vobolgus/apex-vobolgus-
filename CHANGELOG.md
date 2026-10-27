@@ -11,7 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - About dialog after ray.so's: a description and the full shortcut list, opened from the header or with `?`.
 - `⌘K`/`Ctrl+K` toggles the export menu (arrow keys move through the formats); `⌘S`/`Ctrl+S` saves a PNG.
 
+### Fixed
+- SVG and PDF export from the generator: the request was not a `RenderConfig` and every export failed with 422. The page now sends the preview's camera (`view`), field of view, layers and colours, and the backend draws the same chart, pinned to the preview by a shared golden fixture.
+
 ### Changed
+- `RenderConfig`: an optional `view` (camera basis and chart size) replaces the observer for orientation, so `latitude`/`longitude` are only required without one; `style.chart_color` fills the sky; `layers.constellation_boundaries` draws the IAU boundaries; `datetime` accepts RFC 3339.
+- The backend draws constellation lines as great-circle arcs and traces reference circles in 1° steps, with the preview's line widths and opacities.
 - Bottom dock: a Stereo/Pinhole segmented control and a Layers popover with grouped switches replace the row of labelled toggles.
 - The pinhole frame has its own overlay (corner brackets, edge pills, a size readout while dragging, keyboard-resizable edges) instead of Moveable, which is no longer a dependency.
 - Header: the export format menu is visible again, and on narrow screens Export shrinks to "⤓ PNG ▾" so the header fits at 390 px.

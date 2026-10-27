@@ -9,6 +9,9 @@ use axum::{
 };
 use serde::Deserialize;
 
+/// Largest chart side a `view` may ask for; the preview's is about 1100 px.
+const MAX_VIEW_SIZE_PX: f64 = 20_000.0;
+
 #[derive(Debug, Deserialize, Default)]
 pub struct ExportQuery {
     pub format: Option<String>,
@@ -25,17 +28,43 @@ pub async fn export_pdf(
             "projection must be 'stereo' or 'pinhole'".to_string(),
         ));
     }
-    if !(-90.0..=90.0).contains(&config.latitude) {
+    if config.view.is_none() && (config.latitude.is_none() || config.longitude.is_none()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "latitude and longitude are required without a view".to_string(),
+        ));
+    }
+    if let Some(latitude) = config.latitude
+        && !(-90.0..=90.0).contains(&latitude)
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "latitude must be in -90..=90".to_string(),
         ));
     }
-    if !(-180.0..=180.0).contains(&config.longitude) {
+    if let Some(longitude) = config.longitude
+        && !(-180.0..=180.0).contains(&longitude)
+    {
         return Err((
             StatusCode::BAD_REQUEST,
             "longitude must be in -180..=180".to_string(),
         ));
+    }
+    if let Some(view) = &config.view {
+        if !(view.width <= MAX_VIEW_SIZE_PX && view.height <= MAX_VIEW_SIZE_PX) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("view width and height must be at most {MAX_VIEW_SIZE_PX} px"),
+            ));
+        }
+        if SvgGenerator::view_projection(&config).is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "view needs non-zero right, up and forward vectors, a positive size and a fov_deg \
+                 the projection can show"
+                    .to_string(),
+            ));
+        }
     }
     if let Some(max_mag) = config.magnitude_limit
         && !(0.0..=10.0).contains(&max_mag)
@@ -111,14 +140,15 @@ mod tests {
         let config = RenderConfig {
             projection: "stereo".to_string(),
             datetime: Some("2026-05-20T12:00:00Z".to_string()),
-            latitude: 55.75,
-            longitude: 37.62,
+            latitude: Some(55.75),
+            longitude: Some(37.62),
             magnitude_limit: Some(6.0),
             fov_deg: Some(120.0),
             aspect_ratio: Some(1.0),
             constellation: None,
             center_direction: None,
             tilt_angle: Some(0.0),
+            view: None,
             layers: LayersConfig {
                 ecliptic: true,
                 equator: true,
@@ -127,6 +157,7 @@ mod tests {
                 horizontal_grid: true,
                 equatorial_grid: true,
                 constellations: true,
+                constellation_boundaries: false,
                 constellation_names: true,
                 zenith: true,
                 poles: true,
@@ -136,6 +167,7 @@ mod tests {
                 constellation_line_color: "#808080".to_string(),
                 grid_color: "#404040".to_string(),
                 background_color: "#05050A".to_string(),
+                chart_color: None,
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
@@ -162,14 +194,15 @@ mod tests {
         let config = RenderConfig {
             projection: "pinhole".to_string(),
             datetime: Some("2026-05-20T12:00:00Z".to_string()),
-            latitude: 45.0,
-            longitude: 19.0,
+            latitude: Some(45.0),
+            longitude: Some(19.0),
             magnitude_limit: Some(5.0),
             fov_deg: Some(60.0),
             aspect_ratio: Some(1.0),
             constellation: Some("ORI".to_string()),
             center_direction: None,
             tilt_angle: Some(0.0),
+            view: None,
             layers: LayersConfig {
                 ecliptic: false,
                 equator: false,
@@ -178,6 +211,7 @@ mod tests {
                 horizontal_grid: false,
                 equatorial_grid: false,
                 constellations: true,
+                constellation_boundaries: false,
                 constellation_names: false,
                 zenith: false,
                 poles: false,
@@ -187,6 +221,7 @@ mod tests {
                 constellation_line_color: "#808080".to_string(),
                 grid_color: "#404040".to_string(),
                 background_color: "#05050A".to_string(),
+                chart_color: None,
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
@@ -202,5 +237,95 @@ mod tests {
             "application/pdf"
         );
         assert!(pdf_bytes.starts_with(b"%PDF-"));
+    }
+
+    fn view_payload() -> serde_json::Value {
+        serde_json::json!({
+            "projection": "stereo",
+            "fov_deg": 180.0,
+            "view": {
+                "right": [1.0, 0.0, 0.0],
+                "up": [0.0, 1.0, 0.0],
+                "forward": [0.0, 0.0, 1.0],
+                "width": 1104.0,
+                "height": 1104.0
+            },
+            "layers": {
+                "ecliptic": true, "equator": true, "galactic_equator": true, "planets": false,
+                "horizontal_grid": false, "equatorial_grid": false, "constellations": true,
+                "constellation_boundaries": true, "constellation_names": false,
+                "zenith": false, "poles": false
+            },
+            "style": {
+                "star_color": "#000000", "constellation_line_color": "#000000",
+                "grid_color": "#000000", "background_color": "#0a0a0b",
+                "chart_color": "#ffffff", "font_family": "Inter", "magnitude_scale": 1.0
+            }
+        })
+    }
+
+    async fn export(
+        payload: serde_json::Value,
+        format: Option<&str>,
+    ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
+        let state = AppState {
+            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
+        };
+        let config: RenderConfig = serde_json::from_value(payload).unwrap();
+        let query = ExportQuery {
+            format: format.map(str::to_string),
+        };
+        export_pdf(State(state), Query(query), Json(config)).await
+    }
+
+    #[tokio::test]
+    async fn a_view_needs_no_observer_and_exports_svg_and_pdf() {
+        let (headers, body) = export(view_payload(), Some("svg")).await.unwrap();
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("image/svg+xml")
+        );
+        assert!(
+            String::from_utf8(body)
+                .unwrap()
+                .contains(r##"viewBox="0 0 1104 1104""##)
+        );
+
+        let (_, pdf) = export(view_payload(), None).await.unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+    }
+
+    #[tokio::test]
+    async fn without_a_view_the_observer_is_required() {
+        let mut payload = view_payload();
+        payload.as_object_mut().unwrap().remove("view");
+        let (status, _) = export(payload, Some("svg")).await.unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn rejects_a_degenerate_or_oversized_view() {
+        let mut zero_forward = view_payload();
+        zero_forward["view"]["forward"] = serde_json::json!([0.0, 0.0, 0.0]);
+        assert_eq!(
+            export(zero_forward, Some("svg")).await.unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
+
+        let mut huge = view_payload();
+        huge["view"]["width"] = serde_json::json!(1.0e6);
+        assert_eq!(
+            export(huge, Some("svg")).await.unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
+
+        let mut pinhole_too_wide = view_payload();
+        pinhole_too_wide["projection"] = serde_json::json!("pinhole");
+        assert_eq!(
+            export(pinhole_too_wide, Some("svg")).await.unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
     }
 }

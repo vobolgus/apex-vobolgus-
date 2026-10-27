@@ -1,4 +1,6 @@
 import {
+	CHART_PAGE_COLOR,
+	CHART_SKY_COLOR,
 	EPSILON,
 	PERCEPTUAL_AREA_WEIGHT,
 	PERCEPTUAL_BLEND_MIX,
@@ -6,13 +8,13 @@ import {
 	PERCEPTUAL_SAMPLE_TARGET,
 	PERCEPTUAL_VISIBILITY_WEIGHT,
 	PINHOLE_CORNER_RADIUS,
+	STAR_COLOR,
 	VIEWPORT_STROKE_WIDTH_PINHOLE,
 	VIEWPORT_STROKE_WIDTH_STEREO,
 	VISIBILITY_CULL_THRESHOLD
 } from '../constants';
 import { clamp, easeInOutCubic, lerp } from '../math/easing';
-import { getProjectionFrameParams, sampleStarMorphFrame } from '../math/projection';
-import { rotateVectorByQuaternion } from '../math/quaternion';
+import { getProjectionFrameParams, sampleStarMorphFrame, toViewSpace } from '../math/projection';
 import {
 	CONSTELLATION_BOUNDARY_STYLE,
 	CONSTELLATION_LINE_STYLE,
@@ -219,10 +221,7 @@ export function getPerceptualBlendCumulative({
 		sampledIndices.push(i);
 	}
 
-	const rotateVector = (x: number, y: number, z: number) => {
-		const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, orientation);
-		return [-rx, ry, rz] as const;
-	};
+	const rotateVector = (x: number, y: number, z: number) => toViewSpace(x, y, z, orientation);
 
 	const prevPx = new Array<number>(sampledIndices.length).fill(0);
 	const prevPy = new Array<number>(sampledIndices.length).fill(0);
@@ -451,10 +450,10 @@ export class CanvasRenderer {
 			morphViewportPath2D = this.getMorphViewportPath2D(visualBlend, viewportInterpolator).path2D;
 		}
 
-		ctx.fillStyle = '#0a0a0b';
+		ctx.fillStyle = CHART_PAGE_COLOR;
 		ctx.fillRect(0, 0, width, height);
 
-		ctx.fillStyle = '#ffffff';
+		ctx.fillStyle = CHART_SKY_COLOR;
 		ctx.fill(morphViewportPath2D);
 		ctx.strokeStyle = visualBlend > 0.5 ? '#d7dbe3' : '#ffffff';
 		ctx.lineWidth = lerp(VIEWPORT_STROKE_WIDTH_STEREO, VIEWPORT_STROKE_WIDTH_PINHOLE, visualBlend);
@@ -575,7 +574,7 @@ export class CanvasRenderer {
 		if (!ctx) return layer;
 		const cx = width / 2;
 		const cy = height / 2;
-		ctx.fillStyle = '#000000';
+		ctx.fillStyle = STAR_COLOR;
 		for (const star of state.starVectors) {
 			const sample = sampleStarMorphFrame(star, visualBlend, params, (x, y, z) =>
 				this.rotateVector(x, y, z, state.orientation)
@@ -598,8 +597,7 @@ export class CanvasRenderer {
 		z: number,
 		orientation: Quaternion
 	): [number, number, number] {
-		const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, orientation);
-		return [-rx, ry, rz];
+		return toViewSpace(x, y, z, orientation);
 	}
 
 	private getPerceptualProjectionBlend(

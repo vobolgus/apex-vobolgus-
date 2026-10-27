@@ -10,7 +10,7 @@ import { raDecToUnitVector } from '$lib/math/astronomy';
 import { catalog, type CatalogStar, type ConstellationData } from '$lib/stores.svelte';
 
 /** Faintest star magnitude requested from `/api/catalog/full` by default. */
-const DEFAULT_MAX_MAGNITUDE = 6.5;
+export const DEFAULT_MAX_MAGNITUDE = 6.5;
 
 /**
  * `fetch` + JSON decode with the loaders' shared failure handling.

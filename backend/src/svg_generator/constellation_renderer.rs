@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use crate::models::RenderConfig;
 use rust_core::Star;
+use rust_core::coords::ra_dec_to_unit_vector;
 
+use super::grids::{PolylineStyle, draw_polyline, great_circle_points};
 use super::{ConstellationJson, localize_constellation};
 
 pub(super) fn draw_constellation_lines<F>(
@@ -20,6 +22,13 @@ pub(super) fn draw_constellation_lines<F>(
         return;
     }
 
+    // The preview's CONSTELLATION_LINE_STYLE.
+    let style = PolylineStyle {
+        stroke: const_color,
+        width: "0.6",
+        opacity: "0.35",
+    };
+
     for (abbr, const_data) in constellations {
         if let Some(target) = target_constellation
             && target != abbr
@@ -32,18 +41,61 @@ pub(super) fn draw_constellation_lines<F>(
                 let id1 = line[i];
                 let id2 = line[i + 1];
 
-                if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2))
-                    && let (Some((p1_x, p1_y)), Some((p2_x, p2_y))) = (
-                        project_point(s1.x, s1.y, s1.z),
-                        project_point(s2.x, s2.y, s2.z),
-                    )
-                {
-                    svg.push_str(&format!(
-                        r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="0.8" opacity="0.6" />"##,
-                        p1_x, p1_y, p2_x, p2_y, const_color
-                    ));
+                if let (Some(s1), Some(s2)) = (star_map.get(&id1), star_map.get(&id2)) {
+                    // A great-circle arc, cut where it leaves the chart, as in the preview.
+                    draw_polyline(
+                        svg,
+                        great_circle_points((s1.x, s1.y, s1.z), (s2.x, s2.y, s2.z)),
+                        project_point,
+                        &style,
+                    );
                 }
             }
+        }
+    }
+}
+
+/// IAU boundaries, each polygon edge traced as a great-circle arc like the preview's.
+/// `boundaries` maps an abbreviation to polygons of `[ra_deg, dec_deg]` vertices.
+pub(super) fn draw_constellation_boundaries<F>(
+    svg: &mut String,
+    config: &RenderConfig,
+    boundaries: &HashMap<String, Vec<Vec<[f32; 2]>>>,
+    target_constellation: Option<&String>,
+    line_color: &str,
+    project_point: &F,
+) where
+    F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
+{
+    if !config.layers.constellation_boundaries {
+        return;
+    }
+
+    // The preview's CONSTELLATION_BOUNDARY_STYLE.
+    let style = PolylineStyle {
+        stroke: line_color,
+        width: "0.4",
+        opacity: "0.15",
+    };
+
+    for (abbr, polygons) in boundaries {
+        if let Some(target) = target_constellation
+            && target != abbr
+        {
+            continue;
+        }
+        for polygon in polygons {
+            let vertices: Vec<(f32, f32, f32)> = polygon
+                .iter()
+                .map(|&[ra_deg, dec_deg]| {
+                    ra_dec_to_unit_vector(ra_deg.to_radians(), dec_deg.to_radians())
+                })
+                .collect();
+            // One path per polygon: the arcs share their end points, so skip each repeat.
+            let points = vertices.windows(2).enumerate().flat_map(|(i, edge)| {
+                great_circle_points(edge[0], edge[1]).skip(usize::from(i > 0))
+            });
+            draw_polyline(svg, points, project_point, &style);
         }
     }
 }

@@ -64,26 +64,39 @@ Each segment is a polyline of unit vectors (equatorial frame).
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `projection` | string | `stereo` (800x800, circular sky) or `pinhole` |
-| `datetime?` | string | UTC, `YYYY-MM-DD HH:MM:SS` or `YYYY-MM-DD`; anything else (including ISO `...T...Z`) falls back to `2024-06-14 06:10:00` |
-| `latitude` | number | observer latitude, degrees |
-| `longitude` | number | observer longitude, degrees |
+| `projection` | string | `stereo` (circular sky; 800x800 without a `view`) or `pinhole` |
+| `datetime?` | string | RFC 3339 (`2025-06-01T22:00:00Z`), or UTC `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD`; anything else falls back to `2024-06-14 06:10:00`. Places the planets, and the sky without a `view` |
+| `latitude?` | number | observer latitude, degrees; required without a `view` |
+| `longitude?` | number | observer longitude, degrees; required without a `view` |
 | `magnitude_limit?` | number | faintest star magnitude, default `6.5` |
-| `fov_deg?` | number | pinhole field of view, default `60` |
-| `aspect_ratio?` | number | pinhole width/height (height is 800 px), default `1.5` |
+| `fov_deg?` | number | with a `view`: across the disc for `stereo` (default `180`), horizontal for `pinhole` (default `60`). Without one, pinhole only, across the frame diagonal, default `60` |
+| `aspect_ratio?` | number | pinhole width/height (height is 800 px) without a `view`, default `1.5` |
+| `view?` | `ViewConfig` | the generator preview's camera; see below |
 | `constellation?` | string | abbreviation (e.g. `ORI`): draws lines/names for this constellation only; pinhole without `center_direction` is centered on it |
-| `center_direction?` | `[x, y, z]` | pinhole view direction (equatorial frame, normalized by the server), default `[1, 0, 0]` |
-| `tilt_angle?` | number | pinhole camera roll, degrees, default `0` |
+| `center_direction?` | `[x, y, z]` | pinhole view direction without a `view` (equatorial frame, normalized by the server), default `[1, 0, 0]` |
+| `tilt_angle?` | number | pinhole camera roll without a `view`, degrees, default `0` |
 | `layers` | `LayersConfig` | all fields required |
 | `style` | `StyleConfig` | all fields required |
 | `print_info?` | bool | prints Lat/Lon and Time in the bottom-left corner |
 | `footer_text?` | string | centered footer line |
 
-`LayersConfig` (all `bool`):
+`ViewConfig` draws exactly what the generator preview shows, with its projection
+formulas (`rust-core` `ViewProjection`, pinned to the preview by
+`assets/golden/view-projection.json`). It replaces the observer, `center_direction`,
+`tilt_angle` and the `constellation` centring, and drops the horizon decorations
+(compass letters, horizon ring, zenith cross):
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `right`, `up`, `forward` | `[x, y, z]` | screen right, screen up and the chart centre in the equatorial frame (normalized by the server). Taken as given, so they also decide which way round the sky reads |
+| `width`, `height` | number | chart size in px, at most `20000`: the SVG `viewBox`. Stars use the preview's radii and lines its widths in these px; a stereo disc is as wide as the shorter side |
+
+`LayersConfig` (all `bool`; `constellation_boundaries` may be omitted, default `false`):
 
 - `ecliptic`, `equator`, `galactic_equator`, `equatorial_grid` - reference lines
 - `constellations`, `constellation_names` - stick figures and names (`constellation_names`
   also labels planets)
+- `constellation_boundaries` - IAU boundaries, in `constellation_line_color`
 - `planets` - Sun, Moon and planets brighter than `magnitude_limit * magnitude_scale`
 - `zenith` - zenith cross (stereo only)
 - `horizontal_grid`, `poles` - accepted, currently not drawn by the backend renderer
@@ -91,7 +104,9 @@ Each segment is a polyline of unit vectors (equatorial frame).
 `StyleConfig`:
 
 - `star_color`, `constellation_line_color`, `grid_color`, `background_color`,
-  `font_family` - strings
+  `font_family` - strings; `background_color` fills the whole image
+- `chart_color?` - string, fill of the sky itself (the stereo disc or the pinhole frame);
+  omitted, the background shows through
 - `magnitude_scale` - number, star/planet size multiplier
 
 Example:
@@ -121,9 +136,11 @@ curl -X POST "http://localhost:8080/api/export?format=svg" \
 Validation (`400`, plain-text message):
 
 - `projection` in `stereo|pinhole`
-- `latitude` in `-90..=90`
-- `longitude` in `-180..=180`
+- `latitude` and `longitude` present when there is no `view`
+- `latitude` in `-90..=90`, `longitude` in `-180..=180` when given
 - optional `magnitude_limit` in `0..=10`
+- `view`: non-zero `right`, `up` and `forward`, `width` and `height` in `(0, 20000]`, and
+  `fov_deg` below `360` for `stereo` and below `180` for `pinhole`
 
 Other errors:
 

@@ -40,10 +40,12 @@ test.describe('planets toggle and export', () => {
 		await expect(exportToggle).toBeEnabled();
 
 		let interceptedRequest: any = null;
-		await page.route('**/api/export', async (route) => {
+		let interceptedFormat: string | null = null;
+		await page.route('**/api/export?*', async (route) => {
 			const req = route.request();
 			if (req.method() === 'POST') {
 				interceptedRequest = JSON.parse(req.postData() || '{}');
+				interceptedFormat = new URL(req.url()).searchParams.get('format');
 			}
 			await route.fulfill({
 				status: 200,
@@ -60,8 +62,12 @@ test.describe('planets toggle and export', () => {
 			expect(interceptedRequest).not.toBeNull();
 		}).toPass({ timeout: 5000 });
 
-		expect(interceptedRequest?.format).toBe('svg');
+		expect(interceptedFormat).toBe('svg');
 		expect(interceptedRequest?.layers?.planets).toBe(false);
+		// A full RenderConfig of the current view (SPEC.md), not just the layer flags.
+		expect(interceptedRequest?.projection).toBe('stereo');
+		expect(interceptedRequest?.view?.forward).toHaveLength(3);
+		expect(interceptedRequest?.style?.chart_color).toBe('#ffffff');
 
 		interceptedRequest = null;
 
@@ -80,7 +86,7 @@ test.describe('planets toggle and export', () => {
 			expect(interceptedRequest).not.toBeNull();
 		}).toPass({ timeout: 5000 });
 
-		expect(interceptedRequest?.format).toBe('svg');
+		expect(interceptedFormat).toBe('svg');
 		expect(interceptedRequest?.layers?.planets).toBe(true);
 	});
 });

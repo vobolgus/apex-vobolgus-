@@ -21,7 +21,8 @@ and are no longer built.
 - Reference lines: constellation figures, constellation boundaries, celestial
   equator, ecliptic, galactic equator.
 - Export: PNG straight from the canvas; SVG and PDF rendered by the backend
-  (`POST /api/export`). The planets toggle applies to the backend export only.
+  (`POST /api/export`) from the preview's own camera, so they show the same chart.
+  The planets toggle applies to the backend export only.
 - About dialog (header button or `?`) with every shortcut; `⌘K`/`Ctrl+K` opens
   the export menu and `⌘S`/`Ctrl+S` saves a PNG.
 

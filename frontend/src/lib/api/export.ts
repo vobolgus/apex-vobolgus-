@@ -2,23 +2,12 @@
  * Chart export.
  *
  * PNG is produced client-side straight from the canvas; SVG and PDF are
- * rendered by the backend, which needs the current projection and layer state.
+ * rendered by the backend from a RenderConfig of the current view.
  */
 
+import type { RenderConfig } from './render-config';
+
 export type ExportFormat = 'PNG' | 'SVG' | 'PDF';
-
-export interface ExportLayers {
-	planets: boolean;
-	equator: boolean;
-	ecliptic: boolean;
-	galacticEquator: boolean;
-}
-
-export interface ExportRequest {
-	format: ExportFormat;
-	projection: string;
-	layers: ExportLayers;
-}
 
 /** Trigger a browser download for `href` under `filename`. */
 function downloadFile(href: string, filename: string) {
@@ -29,12 +18,14 @@ function downloadFile(href: string, filename: string) {
 }
 
 /**
- * Export the chart in `format`. Errors are logged rather than thrown: the call
- * sites are click handlers with nothing useful to do with a rejection.
+ * Export the chart in `format`. `config` is only built for SVG and PDF. Errors
+ * are logged rather than thrown: the call sites are click handlers with nothing
+ * useful to do with a rejection.
  */
 export async function exportChart(
 	canvas: HTMLCanvasElement | null,
-	{ format, projection, layers }: ExportRequest
+	format: ExportFormat,
+	config: () => RenderConfig
 ): Promise<void> {
 	if (!canvas) return;
 	const extension = format.toLowerCase();
@@ -45,19 +36,10 @@ export async function exportChart(
 	}
 
 	try {
-		const response = await fetch('/api/export', {
+		const response = await fetch(`/api/export?format=${extension}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				format: extension,
-				projection,
-				layers: {
-					planets: layers.planets,
-					equator: layers.equator,
-					ecliptic: layers.ecliptic,
-					galactic_equator: layers.galacticEquator
-				}
-			})
+			body: JSON.stringify(config())
 		});
 		if (!response.ok) throw new Error(`Export failed: ${response.status}`);
 		const url = URL.createObjectURL(await response.blob());

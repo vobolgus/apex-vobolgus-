@@ -58,6 +58,11 @@ export const VISIBILITY_CULL_THRESHOLD = 0.001;
 export const VIEWPORT_STROKE_WIDTH_STEREO = 2.8;
 export const VIEWPORT_STROKE_WIDTH_PINHOLE = 2.2;
 
+// === Chart colours (the SVG/PDF export sends the same, see `api/render-config.ts`) ===
+export const CHART_PAGE_COLOR = '#0a0a0b';
+export const CHART_SKY_COLOR = '#ffffff';
+export const STAR_COLOR = '#000000';
+
 // === Chart canvas ===
 // Backing-store size of the chart canvas; the renderer works in these px and CSS
 // scales the canvas to the chart surface, so canvas px × S / 1200 = CSS px.

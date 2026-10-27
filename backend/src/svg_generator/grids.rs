@@ -2,9 +2,15 @@ use crate::models::RenderConfig;
 use rust_core::coords::ra_dec_to_unit_vector;
 use std::fmt::Write;
 
-/// Every traced circle is sampled in 5° steps, i.e. 73 points for a full turn.
-const CIRCLE_STEPS: u32 = 72;
-const CIRCLE_STEP_DEG: f32 = 5.0;
+/// Every traced circle is sampled in 1° steps, i.e. 361 points for a full turn, as
+/// the preview does (`SAMPLE_STEP_DEG` in `reference-lines.ts`): coarser chords
+/// show as corners on a zoomed-in stereo chart.
+const CIRCLE_STEPS: u32 = 360;
+const CIRCLE_STEP_DEG: f32 = 1.0;
+
+/// Longest piece of a great-circle arc drawn as one straight segment, as in the
+/// preview (`GREAT_CIRCLE_SUBDIV_DEG`).
+const GREAT_CIRCLE_STEP_DEG: f32 = 3.0;
 
 /// Mean obliquity of the ecliptic at J2000, in degrees.
 pub(crate) const OBLIQUITY_DEG: f32 = 23.439_291;
@@ -23,10 +29,10 @@ const GAL_TO_EQ_M20: f64 = -0.483_835_015_5;
 const GAL_TO_EQ_M21: f64 = 0.746_982_244_5;
 
 /// Stroke styling applied to one traced polyline.
-struct PolylineStyle<'a> {
-    stroke: &'a str,
-    width: &'a str,
-    opacity: &'a str,
+pub(super) struct PolylineStyle<'a> {
+    pub(super) stroke: &'a str,
+    pub(super) width: &'a str,
+    pub(super) opacity: &'a str,
 }
 
 // ---------------------------------------------------------------------------
@@ -103,8 +109,33 @@ where
     path
 }
 
+/// The points of the shorter great-circle arc from `a` to `b`, both ends included,
+/// at most `GREAT_CIRCLE_STEP_DEG` apart. Projected, a stereo arc stays curved.
+pub(super) fn great_circle_points(
+    a: (f32, f32, f32),
+    b: (f32, f32, f32),
+) -> impl Iterator<Item = (f32, f32, f32)> {
+    let dot = (a.0 * b.0 + a.1 * b.1 + a.2 * b.2).clamp(-1.0, 1.0);
+    let angle = dot.acos();
+    let steps = ((angle.to_degrees() / GREAT_CIRCLE_STEP_DEG).ceil() as u32).max(1);
+    let sin_angle = angle.sin();
+    (0..=steps).map(move |step| {
+        if step == 0 || sin_angle.abs() < 1e-6 {
+            return if step == 0 { a } else { b };
+        }
+        let t = step as f32 / steps as f32;
+        let wa = ((1.0 - t) * angle).sin() / sin_angle;
+        let wb = (t * angle).sin() / sin_angle;
+        (
+            wa * a.0 + wb * b.0,
+            wa * a.1 + wb * b.1,
+            wa * a.2 + wb * b.2,
+        )
+    })
+}
+
 /// Traces `points` and, if anything was visible, appends the styled `<path>` element.
-fn draw_polyline<F>(
+pub(super) fn draw_polyline<F>(
     svg: &mut String,
     points: impl Iterator<Item = (f32, f32, f32)>,
     project_point: &F,
@@ -186,10 +217,11 @@ pub(super) fn draw_celestial_equator<F>(svg: &mut String, grid_color: &str, proj
 where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
+    // Widths and opacities here and below are the preview's REFERENCE_LINE_STYLES.
     let style = PolylineStyle {
         stroke: grid_color,
-        width: "0.8",
-        opacity: "0.85",
+        width: "1",
+        opacity: "1",
     };
     draw_polyline(
         svg,
@@ -205,7 +237,7 @@ where
 {
     let style = PolylineStyle {
         stroke: "#DC2626",
-        width: "0.8",
+        width: "1",
         opacity: "0.95",
     };
     draw_polyline(
@@ -222,7 +254,7 @@ where
 {
     let style = PolylineStyle {
         stroke: "#B58CFF",
-        width: "0.8",
+        width: "1",
         opacity: "0.9",
     };
     draw_polyline(

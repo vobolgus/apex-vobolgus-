@@ -16,6 +16,49 @@ import {
 	VISIBILITY_SMOOTHSTEP_INNER,
 	VISIBILITY_SMOOTHSTEP_OUTER
 } from '../constants';
+import { rotateVectorByQuaternion, type Quaternion } from './quaternion';
+
+/**
+ * A sky vector in the preview's view space: x right, y up, z the chart centre.
+ * x is negated after the rotation, so the chart reads as the sky does from the
+ * ground, with east to the left of north.
+ */
+export function toViewSpace(
+	x: number,
+	y: number,
+	z: number,
+	orientation: Quaternion
+): [number, number, number] {
+	const [rx, ry, rz] = rotateVectorByQuaternion(x, y, z, orientation);
+	return [-rx, ry, rz];
+}
+
+export type Vec3Tuple = [number, number, number];
+
+/** The view-space axes as sky directions (equatorial frame). */
+export interface ViewBasis {
+	right: Vec3Tuple;
+	up: Vec3Tuple;
+	forward: Vec3Tuple;
+}
+
+/**
+ * The rows of the linear map `toViewSpace`. The export projects with these, so it
+ * follows the preview, flip included, without knowing about it.
+ */
+export function viewBasis(orientation: Quaternion): ViewBasis {
+	const columns = [
+		toViewSpace(1, 0, 0, orientation),
+		toViewSpace(0, 1, 0, orientation),
+		toViewSpace(0, 0, 1, orientation)
+	];
+	const row = (axis: 0 | 1 | 2): Vec3Tuple => [
+		columns[0][axis],
+		columns[1][axis],
+		columns[2][axis]
+	];
+	return { right: row(0), up: row(1), forward: row(2) };
+}
 
 export interface ProjectionFrameParams {
 	radius: number;

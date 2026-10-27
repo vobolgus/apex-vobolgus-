@@ -8,7 +8,7 @@ pub use catalog::{HipCatalog, MessierCatalog, MessierObject, Star};
 pub use coords::ra_dec_to_unit_vector;
 pub use projections::{
     CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection,
-    StereoProjectionResult,
+    StereoProjectionResult, ViewKind, ViewProjection,
 };
 pub use time::{DateTime, get_sidereal_time, julian_date, vequinox_hour_angle};
 

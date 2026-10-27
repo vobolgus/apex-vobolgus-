@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
+	import { buildRenderConfig } from '$lib/api/render-config';
 	import AboutDialog from '$lib/components/AboutDialog.svelte';
 	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
 	import LayersPopover from '$lib/components/dock/LayersPopover.svelte';
@@ -221,16 +222,20 @@
 	}
 
 	function runExport(format: ExportFormat) {
-		void exportChart(canvasEl, {
-			format,
-			projection: projection.mode,
-			layers: {
-				planets: layers.planets,
-				equator: layers.equator,
-				ecliptic: layers.ecliptic,
-				galacticEquator: layers.galacticEquator
-			}
-		});
+		void exportChart(canvasEl, format, () =>
+			buildRenderConfig(
+				{
+					projection: projection.mode,
+					orientation: view.orientation,
+					stereoFovDeg: view.stereoFovDeg,
+					pinholeFovDeg: view.pinholeFovDeg,
+					pinholeAspectRatio: view.pinholeAspectRatio,
+					pinholeHeightFrac: view.pinholeHeightFrac
+				},
+				layers,
+				new Date()
+			)
+		);
 	}
 
 	function handleExportFormatSelect(format: ExportFormat) {
