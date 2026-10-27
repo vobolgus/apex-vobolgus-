@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
-	import PinholeResizeHandles from '$lib/components/PinholeResizeHandles.svelte';
-	import PlanetsToggle from '$lib/components/PlanetsToggle.svelte';
-	import { CHART_RADIUS_FRAC } from '$lib/constants';
+	import AboutDialog from '$lib/components/AboutDialog.svelte';
+	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
+	import LayersPopover from '$lib/components/dock/LayersPopover.svelte';
+	import { PROJECTION_SEGMENTS } from '$lib/components/dock/options';
+	import SegmentedControl from '$lib/components/dock/SegmentedControl.svelte';
+	import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
 	import { loadFlubberInterpolator } from '$lib/flubber';
 	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
 	import { InputController } from '$lib/renderer/input-handlers';
-	import { LayerState, REFERENCE_LINE_OPTIONS } from '$lib/state/layers.svelte';
+	import { isApplePlatform, isHelpShortcut, isModShortcut } from '$lib/shortcuts';
+	import { LayerState } from '$lib/state/layers.svelte';
 	import {
-		PROJECTION_OPTIONS,
 		ProjectionTransition,
 		type ProjectionMode
 	} from '$lib/state/projection-transition.svelte';
@@ -20,8 +23,13 @@
 	const EXPORT_FORMATS = ['PNG', 'SVG', 'PDF'] as const satisfies readonly ExportFormat[];
 
 	let canvasEl: HTMLCanvasElement | null = null;
+	let chartAreaEl: HTMLElement | null = null;
 	let chartSurfaceEl: HTMLDivElement | null = null;
 	let surfaceSizePx = $state(1);
+	// The chart area clips the surface; the frame overlay keeps its handles inside it.
+	let chartClipWidthPx = $state(1);
+	let chartClipHeightPx = $state(1);
+	let pinholeOverlay = $state<ReturnType<typeof PinholeFrameOverlay>>();
 	let input: InputController | null = null;
 	let renderer: CanvasRenderer | null = null;
 	let rafId = 0;
@@ -31,13 +39,17 @@
 	const layers = new LayerState();
 	const projection = new ProjectionTransition();
 	const exportMenu = new Dropdown();
-	const projectionMenu = new Dropdown();
-	const linesMenu = new Dropdown();
-	const menus = new DropdownGroup(exportMenu, projectionMenu, linesMenu);
+	const layersMenu = new Dropdown();
+	const menus = new DropdownGroup(exportMenu, layersMenu);
 
 	let selectedExportFormat = $state<ExportFormat>('PNG');
+	let exportMenuEl = $state<HTMLDivElement | null>(null);
+	let aboutOpen = $state(false);
+	// ⌘ or Ctrl for the shortcuts; read on mount, so the server render assumes a Mac.
+	let apple = $state(true);
 
 	onMount(() => {
+		apple = isApplePlatform(navigator);
 		input = new InputController({
 			canvas: () => canvasEl,
 			onChange: markRenderDirty,
@@ -48,8 +60,12 @@
 		const surfaceObserver = chartSurfaceEl
 			? new ResizeObserver((entries) => {
 					for (const entry of entries) {
-						const { width, height } = entry.contentRect;
-						surfaceSizePx = Math.max(1, Math.min(width, height));
+						if (entry.target === chartSurfaceEl) {
+							const { width, height } = entry.contentRect;
+							surfaceSizePx = Math.max(1, Math.min(width, height));
+						} else if (entry.target === chartAreaEl) {
+							measureChartClip();
+						}
 					}
 				})
 			: null;
@@ -58,12 +74,36 @@
 			const rect = chartSurfaceEl.getBoundingClientRect();
 			surfaceSizePx = Math.max(1, Math.min(rect.width, rect.height));
 		}
+		if (surfaceObserver && chartAreaEl) {
+			surfaceObserver.observe(chartAreaEl);
+			measureChartClip();
+		}
 
-		const handleCanvasWheel = (event: WheelEvent) => input?.onCanvasWheel(event);
-		const handleCanvasGestureStart = (event: Event) => input?.onCanvasGestureStart(event);
-		const handleCanvasGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
+		// Zoom gestures are taken on the whole chart surface, not just the canvas, so a
+		// trackpad pinch over the frame's resize handles still zooms the sky instead of
+		// the page.
+		const handleChartWheel = (event: WheelEvent) => input?.onCanvasWheel(event);
+		const handleChartGestureStart = (event: Event) => input?.onCanvasGestureStart(event);
+		const handleChartGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
 
 		const handleKeyDown = (event: KeyboardEvent) => {
+			if (isHelpShortcut(event)) {
+				event.preventDefault();
+				if (!event.repeat) setAboutOpen(!aboutOpen);
+				return;
+			}
+			// The dialog is modal: the chart and the menus behind it stay put.
+			if (aboutOpen) return;
+			if (isModShortcut(event, 'KeyK', apple)) {
+				event.preventDefault();
+				if (!event.repeat) void toggleExportMenuFromKeyboard();
+				return;
+			}
+			if (isModShortcut(event, 'KeyS', apple)) {
+				event.preventDefault();
+				if (!event.repeat) runExport('PNG');
+				return;
+			}
 			if (
 				event.code === 'KeyP' &&
 				event.shiftKey &&
@@ -83,9 +123,11 @@
 		window.addEventListener('keydown', handleKeyDown);
 		window.addEventListener('keyup', handleKeyUp);
 		window.addEventListener('blur', handleBlur);
-		canvasEl?.addEventListener('wheel', handleCanvasWheel, { passive: false });
-		canvasEl?.addEventListener('gesturestart', handleCanvasGestureStart, { passive: false });
-		canvasEl?.addEventListener('gesturechange', handleCanvasGestureChange, { passive: false });
+		chartSurfaceEl?.addEventListener('wheel', handleChartWheel, { passive: false });
+		chartSurfaceEl?.addEventListener('gesturestart', handleChartGestureStart, { passive: false });
+		chartSurfaceEl?.addEventListener('gesturechange', handleChartGestureChange, {
+			passive: false
+		});
 
 		void loadFlubberInterpolator().then((interpolate) => {
 			renderer?.setMorphInterpolatorFactory(interpolate);
@@ -99,9 +141,9 @@
 			window.removeEventListener('keydown', handleKeyDown);
 			window.removeEventListener('keyup', handleKeyUp);
 			window.removeEventListener('blur', handleBlur);
-			canvasEl?.removeEventListener('wheel', handleCanvasWheel);
-			canvasEl?.removeEventListener('gesturestart', handleCanvasGestureStart);
-			canvasEl?.removeEventListener('gesturechange', handleCanvasGestureChange);
+			chartSurfaceEl?.removeEventListener('wheel', handleChartWheel);
+			chartSurfaceEl?.removeEventListener('gesturestart', handleChartGestureStart);
+			chartSurfaceEl?.removeEventListener('gesturechange', handleChartGestureChange);
 			surfaceObserver?.disconnect();
 			if (rafId) {
 				cancelAnimationFrame(rafId);
@@ -109,6 +151,12 @@
 			input = null;
 		};
 	});
+
+	function measureChartClip() {
+		if (!chartAreaEl) return;
+		chartClipWidthPx = Math.max(1, chartAreaEl.clientWidth);
+		chartClipHeightPx = Math.max(1, chartAreaEl.clientHeight);
+	}
 
 	function markRenderDirty() {
 		renderDirty = true;
@@ -124,6 +172,10 @@
 		rafId = 0;
 		const dtMs = lastFrameTimeMs > 0 ? Math.min(frameTimeMs - lastFrameTimeMs, 100) : 16;
 		lastFrameTimeMs = frameTimeMs;
+
+		// A frame-resize drag applies its latest pointer position here, so the overlay
+		// and the canvas move together, at most once per frame.
+		if (pinholeOverlay?.flush()) renderDirty = true;
 
 		const inputActive = input?.tick(dtMs) ?? false;
 		if (inputActive) renderDirty = true;
@@ -165,7 +217,6 @@
 
 	function switchProjection(nextMode: ProjectionMode) {
 		projection.start(nextMode);
-		projectionMenu.close();
 		markRenderDirty();
 	}
 
@@ -187,12 +238,65 @@
 		exportMenu.close();
 		runExport(format);
 	}
+
+	/** ⌘K: open the format menu with the focus on the selected format, or close it again. */
+	async function toggleExportMenuFromKeyboard() {
+		if (exportMenu.open) {
+			exportMenu.dismiss();
+			return;
+		}
+		exportMenu.show();
+		await tick();
+		exportMenuEl?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+	}
+
+	/** ↑/↓ (Home/End) move through the formats, kept from the window, where arrows rotate the sky. */
+	function handleExportMenuKeydown(event: KeyboardEvent) {
+		if (event.metaKey || event.ctrlKey || event.altKey) return;
+		const items = Array.from(
+			exportMenuEl?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? []
+		);
+		const current = items.indexOf(document.activeElement as HTMLElement);
+		let next: number;
+		switch (event.key) {
+			case 'ArrowDown':
+				next = (current + 1) % items.length;
+				break;
+			case 'ArrowUp':
+				next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length;
+				break;
+			case 'Home':
+				next = 0;
+				break;
+			case 'End':
+				next = items.length - 1;
+				break;
+			default:
+				return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		items[next]?.focus();
+	}
+
+	function setAboutOpen(next: boolean) {
+		if (next) {
+			menus.closeAll();
+			// Keys held down as the dialog opens must not keep turning the sky behind it.
+			input?.onBlur();
+		}
+		aboutOpen = next;
+	}
 </script>
 
 <main
 	class="page"
 	onpointerdown={(event) => input?.onPointerDown(event)}
-	onpointermove={(event) => input?.onPointerMove(event)}
+	onpointermove={(event) => {
+		input?.onPointerMove(event);
+		pinholeOverlay?.trackPointer(event);
+	}}
+	onpointerleave={() => pinholeOverlay?.clearPointer()}
 	onpointerup={(event) => input?.onPointerUp(event)}
 	onpointercancel={(event) => input?.onPointerUp(event)}
 >
@@ -206,7 +310,20 @@
 				</span>
 			</div>
 			<div class="ray-right">
-				<button class="tool-btn" type="button">About</button>
+				<button
+					class="tool-btn"
+					type="button"
+					aria-haspopup="dialog"
+					aria-keyshortcuts="Shift+?"
+					title="About · ?"
+					onclick={() => setAboutOpen(true)}
+				>
+					<svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+						<circle cx="8" cy="8" r="6.25" />
+						<path d="M8 7.5v3.5M8 5.1v.01" />
+					</svg>
+					About
+				</button>
 				<button class="tool-btn" type="button">Format</button>
 				<div class="export-wrap" bind:this={exportMenu.element}>
 					<button class="export-main" type="button" onclick={() => runExport(selectedExportFormat)}>
@@ -215,9 +332,11 @@
 								d="M8 1.75a.75.75 0 0 1 .75.75v5.69l1.97-1.97a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 1.06-1.06l1.97 1.97V2.5A.75.75 0 0 1 8 1.75ZM2.75 12a.75.75 0 0 1 .75.75v.5h9v-.5a.75.75 0 0 1 1.5 0V13A1.75 1.75 0 0 1 12.25 14.75h-8.5A1.75 1.75 0 0 1 2 13v-.25a.75.75 0 0 1 .75-.75Z"
 							/>
 						</svg>
-						<span>Export Image</span>
+						<span class="export-label-full">Export Image</span>
+						<span class="export-label-short" aria-hidden="true">{selectedExportFormat}</span>
 					</button>
 					<button
+						bind:this={exportMenu.trigger}
 						class="export-toggle"
 						type="button"
 						aria-label="Choose export format"
@@ -232,7 +351,14 @@
 						</svg>
 					</button>
 					{#if exportMenu.open}
-						<div class="export-menu" role="menu" aria-label="Export format">
+						<div
+							bind:this={exportMenuEl}
+							class="export-menu"
+							role="menu"
+							aria-label="Export format"
+							tabindex="-1"
+							onkeydown={handleExportMenuKeydown}
+						>
 							{#each EXPORT_FORMATS as format (format)}
 								<button
 									class="export-option"
@@ -263,14 +389,15 @@
 			</div>
 		</div>
 	</header>
-	<section class="chart-area">
+	<section class="chart-area" bind:this={chartAreaEl}>
 		<div class="chart-surface" bind:this={chartSurfaceEl}>
-			<canvas bind:this={canvasEl} width="1200" height="1200"></canvas>
-			<PinholeResizeHandles
-				viewportWidthPx={surfaceSizePx *
-					CHART_RADIUS_FRAC *
-					(view.pinholeAspectRatio * view.pinholeHeightFrac)}
-				viewportHeightPx={surfaceSizePx * CHART_RADIUS_FRAC * view.pinholeHeightFrac}
+			<canvas bind:this={canvasEl} width={CHART_CANVAS_BACKING_PX} height={CHART_CANVAS_BACKING_PX}
+			></canvas>
+			<PinholeFrameOverlay
+				bind:this={pinholeOverlay}
+				{surfaceSizePx}
+				clipWidthPx={chartClipWidthPx}
+				clipHeightPx={chartClipHeightPx}
 				visible={projection.isPinholeSettled}
 				onChange={markRenderDirty}
 			/>
@@ -278,100 +405,23 @@
 	</section>
 	<div class="control-bar-shell">
 		<div class="control-bar" role="group" aria-label="Generator display controls">
-			<div class="control-group projection-group">
-				<span class="control-label control-label-no-caps" id="projection-label">Projection</span>
-				<div class="projection-wrap" bind:this={projectionMenu.element}>
-					<button
-						class="projection-trigger"
-						type="button"
-						aria-haspopup="listbox"
-						aria-expanded={projectionMenu.open}
-						aria-labelledby="projection-label projection-trigger-value"
-						onclick={() => projectionMenu.toggle()}
-					>
-						<span id="projection-trigger-value">{projection.mode}</span>
-						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path
-								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
-							/>
-						</svg>
-					</button>
-					{#if projectionMenu.open}
-						<div class="projection-menu" role="listbox" aria-labelledby="projection-label">
-							{#each PROJECTION_OPTIONS as mode (mode)}
-								<button
-									class="projection-option"
-									class:is-selected={mode === projection.mode}
-									type="button"
-									role="option"
-									aria-selected={mode === projection.mode}
-									onclick={() => switchProjection(mode)}
-								>
-									<span class="projection-option-label">{mode}</span>
-									<span class="projection-option-check" aria-hidden="true">
-										{mode === projection.mode ? '✓' : ''}
-									</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
-			</div>
-			<div class="control-divider"></div>
 			<div class="control-group">
-				<span class="control-label control-label-no-caps">Layers</span>
-				<PlanetsToggle bind:showPlanets={layers.planets} />
-				<div class="projection-wrap is-lines" bind:this={linesMenu.element}>
-					<button
-						class="projection-trigger"
-						type="button"
-						aria-haspopup="menu"
-						aria-expanded={linesMenu.open}
-						aria-label="Reference lines"
-						onclick={() => linesMenu.toggle()}
-					>
-						<span>Lines</span>
-						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path
-								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
-							/>
-						</svg>
-					</button>
-					{#if linesMenu.open}
-						<div class="projection-menu" role="menu" aria-label="Reference lines">
-							{#each REFERENCE_LINE_OPTIONS as option (option.key)}
-								<button
-									class="projection-option"
-									class:is-selected={layers[option.key]}
-									type="button"
-									role="menuitemcheckbox"
-									aria-checked={layers[option.key]}
-									onclick={() => layers.toggle(option.key)}
-								>
-									<span class="projection-option-label">{option.label}</span>
-									<span class="lines-tickbox" class:is-on={layers[option.key]} aria-hidden="true">
-										{#if layers[option.key]}
-											<svg viewBox="0 0 12 12"
-												><path
-													d="M2.5 6.2 L5 8.5 L9.5 3.8"
-													fill="none"
-													stroke="currentColor"
-													stroke-width="1.8"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-												/></svg
-											>
-										{/if}
-									</span>
-								</button>
-							{/each}
-						</div>
-					{/if}
-				</div>
+				<SegmentedControl
+					label="Projection"
+					options={PROJECTION_SEGMENTS}
+					value={projection.mode}
+					onselect={switchProjection}
+					shortcut="Shift+P"
+				/>
+			</div>
+			<span class="control-divider" aria-hidden="true"></span>
+			<div class="control-group">
+				<LayersPopover {layers} menu={layersMenu} />
 			</div>
 		</div>
 	</div>
 </main>
+<AboutDialog bind:open={aboutOpen} {apple} />
 
 <style>
 	.page {
@@ -477,6 +527,7 @@
 	.tool-btn {
 		display: inline-flex;
 		align-items: center;
+		gap: 6px;
 		height: 28px;
 		padding: 0 11px;
 		border-radius: 7px;
@@ -506,6 +557,16 @@
 		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
 	}
 
+	.tool-icon {
+		width: 14px;
+		height: 14px;
+		flex-shrink: 0;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+	}
+
 	.export-wrap {
 		position: relative;
 		display: inline-flex;
@@ -515,7 +576,8 @@
 		border: 1px solid rgba(255, 124, 124, 0.88);
 		background: linear-gradient(180deg, #d34b4b 0%, #bd3d3d 100%);
 		box-shadow: 0 0 0 1px rgba(204, 70, 70, 0.5);
-		overflow: hidden;
+		/* No overflow clipping here: the format menu hangs below the wrap. The two
+		   buttons round their own outer corners so their hover fills stay inside. */
 	}
 
 	.export-wrap:hover {
@@ -539,6 +601,7 @@
 	.export-main {
 		gap: 7px;
 		padding: 0 12px 0 11px;
+		border-radius: 7px 0 0 7px;
 	}
 
 	.export-main span {
@@ -552,10 +615,15 @@
 		fill: currentColor;
 	}
 
+	.export-label-short {
+		display: none;
+	}
+
 	.export-toggle {
 		width: 30px;
 		justify-content: center;
 		border-left: 1px solid rgba(255, 219, 219, 0.28);
+		border-radius: 0 7px 7px 0;
 	}
 
 	.export-toggle[aria-expanded='true'] {
@@ -640,6 +708,17 @@
 		background: rgba(255, 255, 255, 0.12);
 	}
 
+	.export-option:focus-visible {
+		outline: none;
+		background: rgba(255, 255, 255, 0.08);
+		color: #eef2fa;
+		box-shadow: var(--ring);
+	}
+
+	.export-menu:focus {
+		outline: none;
+	}
+
 	.export-option.is-selected {
 		background: rgba(255, 255, 255, 0.1);
 		color: #f3f6fd;
@@ -666,257 +745,98 @@
 	.control-bar-shell {
 		display: flex;
 		justify-content: center;
+		padding: 0 16px 16px;
 		pointer-events: none;
-		z-index: 6;
-		padding-top: 8px;
+		z-index: var(--z-dock);
 	}
 
+	/*
+	 * Floating dock, still its own grid row so it never covers the chart. No
+	 * backdrop-filter: the row has only the flat page behind it, and a filter here
+	 * would make the dock the backdrop root of the Layers popover and kill its blur.
+	 */
 	.control-bar {
-		width: 744px;
-		max-width: 744px;
+		position: relative;
 		display: flex;
 		align-items: center;
-		justify-content: center;
-		flex-wrap: wrap;
-		row-gap: 10px;
-		gap: 12px;
-		padding: 14px 18px;
-		border-radius: 20px 20px 0 0;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		background: linear-gradient(180deg, #141518 0%, #0f1012 100%);
-		box-shadow:
-			0 10px 24px rgba(0, 0, 0, 0.42),
-			0 1px 0 rgba(255, 255, 255, 0.06) inset;
-		backdrop-filter: blur(12px);
-		-webkit-backdrop-filter: blur(12px);
-		overflow: visible;
+		height: var(--h-dock);
+		padding: var(--pad-dock);
+		border-radius: var(--r-dock);
+		background: var(--dock);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 		pointer-events: auto;
 	}
 
+	/* 1 px gradient border, cut out of a padded layer with a mask. */
+	.control-bar::before {
+		content: '';
+		position: absolute;
+		inset: 0;
+		padding: 1px;
+		border-radius: inherit;
+		background: linear-gradient(
+			20deg,
+			rgba(255, 255, 255, 0.1),
+			rgba(255, 255, 255, 0.25) 20%,
+			rgba(255, 255, 255, 0.1)
+		);
+		-webkit-mask:
+			linear-gradient(#000 0 0) content-box,
+			linear-gradient(#000 0 0);
+		-webkit-mask-composite: xor;
+		mask:
+			linear-gradient(#000 0 0) content-box,
+			linear-gradient(#000 0 0);
+		mask-composite: exclude;
+		pointer-events: none;
+	}
+
 	.control-group {
-		display: inline-flex;
+		display: flex;
 		align-items: center;
-		gap: 8px;
-		flex-shrink: 0;
-	}
-
-	.projection-group {
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 6px;
-	}
-
-	.control-label {
-		color: #9299a6;
-		font-size: 0.66rem;
-		font-weight: 600;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-		white-space: nowrap;
-	}
-
-	.control-label-no-caps {
-		text-transform: none;
-		letter-spacing: 0;
+		gap: 4px;
 	}
 
 	.control-divider {
+		flex-shrink: 0;
 		width: 1px;
-		height: 24px;
-		background: linear-gradient(
-			180deg,
-			rgba(255, 255, 255, 0.04) 0%,
-			rgba(255, 255, 255, 0.22) 48%,
-			rgba(255, 255, 255, 0.04) 100%
-		);
-		flex-shrink: 0;
-	}
-
-	.projection-wrap {
-		position: relative;
-	}
-
-	.projection-trigger {
-		height: 28px;
-		min-width: 146px;
-		padding: 0 10px 0 12px;
-		border-radius: 999px;
-		border: 1px solid rgba(255, 255, 255, 0.13);
-		background: rgba(255, 255, 255, 0.03);
-		color: #d8deea;
-		font-size: 0.72rem;
-		font-weight: 600;
-		display: inline-flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-		text-transform: lowercase;
-		cursor: pointer;
-		transition:
-			border-color 0.16s ease,
-			background 0.16s ease,
-			color 0.16s ease;
-	}
-
-	.projection-trigger svg {
-		width: 14px;
-		height: 14px;
-		fill: #adb4bf;
-		flex-shrink: 0;
-		transition:
-			transform 0.14s ease,
-			fill 0.14s ease;
-	}
-
-	.projection-trigger:hover {
-		border-color: rgba(255, 255, 255, 0.28);
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2f9;
-	}
-
-	.projection-trigger[aria-expanded='true'] {
-		background: rgba(255, 255, 255, 0.1);
-		border-color: rgba(255, 255, 255, 0.3);
-	}
-
-	.projection-trigger[aria-expanded='true'] svg {
-		transform: rotate(180deg);
-		fill: #d1d7e2;
-	}
-
-	.projection-trigger:active {
-		background: rgba(255, 255, 255, 0.12);
-	}
-
-	.projection-trigger:focus-visible {
-		outline: 2px solid rgba(209, 215, 226, 0.48);
-		outline-offset: 2px;
-	}
-
-	.projection-menu {
-		position: absolute;
-		left: 0;
-		bottom: calc(100% + 6px);
-		width: 100%;
-		max-height: min(220px, calc(100vh - 24px));
-		overflow-y: auto;
-		padding: 4px;
-		border-radius: 9px;
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		background: linear-gradient(180deg, #1b1d22 0%, #14161b 100%);
-		box-shadow:
-			0 10px 24px rgba(0, 0, 0, 0.42),
-			0 1px 0 rgba(255, 255, 255, 0.08) inset;
-		display: grid;
-		gap: 2px;
-		z-index: 20;
-	}
-
-	.projection-option {
-		height: 30px;
-		padding: 0 9px;
-		border-radius: 6px;
-		border: 0;
-		background: transparent;
-		color: #c9ced7;
-		font-size: 0.72rem;
-		font-weight: 500;
-		letter-spacing: 0.01em;
-		line-height: 1;
-		display: grid;
-		grid-template-columns: 1fr auto;
-		align-items: center;
-		column-gap: 8px;
-		cursor: pointer;
-		text-transform: lowercase;
-		transition:
-			background 0.14s ease,
-			color 0.14s ease;
-	}
-
-	.projection-option-label {
-		text-align: left;
-	}
-
-	.projection-option-check {
-		color: #e7ebf4;
-		font-size: 0.66rem;
-		min-width: 10px;
-		text-align: right;
-		opacity: 0.95;
-	}
-
-	.projection-option:hover {
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2fa;
-	}
-
-	.projection-option:active {
-		background: rgba(255, 255, 255, 0.12);
-	}
-
-	.projection-option.is-selected {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f3f6fd;
-	}
-
-	.projection-wrap.is-lines .projection-trigger {
-		min-width: 0;
-		padding: 0 8px 0 12px;
-		text-transform: none;
-	}
-
-	.projection-wrap.is-lines .projection-menu {
-		width: max-content;
-		min-width: 100%;
-	}
-
-	.projection-wrap.is-lines .projection-option {
-		text-transform: none;
-		white-space: nowrap;
-		grid-template-columns: 1fr auto;
-		column-gap: 14px;
-	}
-
-	.projection-wrap.is-lines .projection-option-label {
-		white-space: nowrap;
-	}
-
-	.lines-tickbox {
-		width: 14px;
-		height: 14px;
-		border-radius: 3px;
-		border: 1px solid rgba(255, 255, 255, 0.32);
-		background: rgba(255, 255, 255, 0.04);
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		color: #0a0a0b;
-		transition:
-			background 0.14s ease,
-			border-color 0.14s ease;
-	}
-
-	.lines-tickbox.is-on {
-		background: #e7ebf4;
-		border-color: #e7ebf4;
-	}
-
-	.lines-tickbox svg {
-		width: 12px;
-		height: 12px;
-		display: block;
+		height: 20px;
+		margin: 0 6px;
+		background: var(--hairline);
 	}
 
 	@media (max-width: 743px) {
+		/* On a phone they only push Export off screen: Format does nothing yet, and About is
+		   mostly a list of keyboard shortcuts (ray.so hides it there too). */
+		.tool-btn {
+			display: none;
+		}
+
+		.export-main {
+			gap: 6px;
+			padding: 0 10px 0 9px;
+		}
+
+		/* "⤓ PNG ▾": the format replaces the label, which stays for screen readers. */
+		.export-label-full {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
+		}
+
+		.export-label-short {
+			display: inline;
+		}
+	}
+
+	/* Phones only: the compact dock with labels still fits up to the 743 px breakpoint. */
+	@media (max-width: 480px) {
 		.control-bar {
 			width: 100%;
-			max-width: 100%;
-			padding: 14px 18px;
-			gap: 12px;
-			border-radius: 0;
-			border-left: 0;
-			border-right: 0;
+			justify-content: center;
 		}
 	}
 </style>

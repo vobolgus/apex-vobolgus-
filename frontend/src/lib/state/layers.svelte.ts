@@ -8,15 +8,51 @@
 import type { ReferenceLinesState } from '$lib/renderer/types';
 
 export type ReferenceLineKey = keyof ReferenceLinesState;
+export type LayerKey = ReferenceLineKey | 'planets';
 
-/** Reference-line menu entries, in display order. */
-export const REFERENCE_LINE_OPTIONS: readonly { key: ReferenceLineKey; label: string }[] = [
-	{ key: 'constellations', label: 'Constellations' },
-	{ key: 'constellationBoundaries', label: 'Boundaries' },
-	{ key: 'equator', label: 'Celestial Equator' },
-	{ key: 'ecliptic', label: 'Ecliptic' },
-	{ key: 'galacticEquator', label: 'Galactic Equator' }
+export interface LayerOption {
+	key: LayerKey;
+	label: string;
+	/** One quiet line under the label, for layers whose effect is not obvious. */
+	note?: string;
+}
+
+export interface LayerGroup {
+	id: string;
+	label: string;
+	layers: readonly LayerOption[];
+}
+
+/** Layers popover contents, in display order. Only layers that render somewhere. */
+export const LAYER_GROUPS: readonly LayerGroup[] = [
+	{
+		id: 'constellations',
+		label: 'Constellations',
+		layers: [
+			{ key: 'constellations', label: 'Lines' },
+			{ key: 'constellationBoundaries', label: 'Boundaries' }
+		]
+	},
+	{
+		id: 'circles',
+		label: 'Circles',
+		layers: [
+			{ key: 'equator', label: 'Celestial equator' },
+			{ key: 'ecliptic', label: 'Ecliptic' },
+			{ key: 'galacticEquator', label: 'Galactic equator' }
+		]
+	},
+	{
+		id: 'bodies',
+		label: 'Bodies',
+		// The canvas does not draw planets, so the preview and PNG never show them.
+		layers: [{ key: 'planets', label: 'Planets', note: 'SVG/PDF only' }]
+	}
 ];
+
+const LAYER_KEYS: readonly LayerKey[] = LAYER_GROUPS.flatMap((group) =>
+	group.layers.map((layer) => layer.key)
+);
 
 export class LayerState {
 	planets = $state(false);
@@ -40,7 +76,27 @@ export class LayerState {
 		};
 	}
 
-	toggle(key: ReferenceLineKey) {
+	/** Number of enabled layers, shown in the Layers badge. */
+	get enabledCount(): number {
+		return LAYER_KEYS.filter((key) => this[key]).length;
+	}
+
+	toggle(key: LayerKey) {
 		this[key] = !this[key];
+	}
+
+	/** A group reads as on only when every one of its layers is on. */
+	isGroupOn(group: LayerGroup): boolean {
+		return group.layers.every((layer) => this[layer.key]);
+	}
+
+	/** Some, but not all, of the group's layers are on. */
+	isGroupMixed(group: LayerGroup): boolean {
+		const on = group.layers.filter((layer) => this[layer.key]).length;
+		return on > 0 && on < group.layers.length;
+	}
+
+	setGroup(group: LayerGroup, on: boolean) {
+		for (const layer of group.layers) this[layer.key] = on;
 	}
 }

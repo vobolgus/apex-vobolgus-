@@ -5,8 +5,5 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		allowedHosts: ['astro.vobolgus.com']
-	},
-	optimizeDeps: {
-		include: ['moveable']
 	}
 });

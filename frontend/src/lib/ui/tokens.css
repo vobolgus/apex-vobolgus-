@@ -1,0 +1,49 @@
+/*
+ * Design tokens for the generator chrome (dock, popovers, switches).
+ *
+ * The interface is monochrome: every state is a step of white over the dark
+ * page, and the only colour is `--accent`, reserved for Export. Text never
+ * goes below `--fg-3` (about 5:1 on `--dock`); `--fg-icon-off` is for
+ * non-text marks only.
+ */
+:root {
+	--page: #0a0a0b;
+	--dock: rgba(19, 20, 23, 0.92);
+	/* Near-opaque: popovers open over the white chart, a translucent fill would turn grey. */
+	--pop: rgba(23, 24, 27, 0.96);
+	/* Modal dialogs: opaque, they sit over a dimmed page. */
+	--panel: #17181b;
+
+	--fg-1: #f2f3f5;
+	--fg-2: rgba(255, 255, 255, 0.64);
+	--fg-3: rgba(255, 255, 255, 0.48);
+	--fg-icon-off: rgba(255, 255, 255, 0.4);
+
+	--fill-hover: rgba(255, 255, 255, 0.06);
+	--fill-press: rgba(255, 255, 255, 0.1);
+	--fill-on: rgba(255, 255, 255, 0.12);
+	--hairline: rgba(255, 255, 255, 0.08);
+	/* .40, not the report's .32: the outer ring needs 3:1 against the dock (WCAG 1.4.11). */
+	--ring: 0 0 0 2px var(--page), 0 0 0 4px rgba(255, 255, 255, 0.4);
+
+	--accent: #d34b4b;
+
+	--h-dock: 44px;
+	--h-ctl: 32px;
+	--h-row: 32px;
+	--pad-dock: 6px;
+
+	/* --r-dock = --r-ctl + --pad-dock, so the control corners sit concentric in the dock. */
+	--r-dock: 14px;
+	--r-ctl: 8px;
+	--r-pop: 12px;
+	--r-row: 6px;
+
+	--font-ui: 500 13px/16px Inter, system-ui, sans-serif;
+	--font-cap: 500 11px/14px Inter, system-ui, sans-serif;
+
+	--ease-ui: 120ms ease;
+
+	/* Above every chart overlay (the pinhole frame overlay sits at 4), so a popover is never covered by one. */
+	--z-dock: 6;
+}

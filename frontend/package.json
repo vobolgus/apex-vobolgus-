@@ -41,7 +41,6 @@
 		"vitest": "^4.1.7"
 	},
 	"dependencies": {
-		"flubber": "^0.4.2",
-		"moveable": "^0.53.0"
+		"flubber": "^0.4.2"
 	}
 }

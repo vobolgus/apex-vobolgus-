@@ -54,3 +54,45 @@ export const VISIBILITY_CULL_THRESHOLD = 0.001;
 // === Viewport stroke ===
 export const VIEWPORT_STROKE_WIDTH_STEREO = 2.8;
 export const VIEWPORT_STROKE_WIDTH_PINHOLE = 2.2;
+
+// === Chart canvas ===
+// Backing-store size of the chart canvas; the renderer works in these px and CSS
+// scales the canvas to the chart surface, so canvas px × S / 1200 = CSS px.
+export const CHART_CANVAS_BACKING_PX = 1200;
+
+// === Pinhole frame overlay (DOM resize handles over the canvas, all in CSS px) ===
+// Handles sit outside the frame: the centre line of their stroke runs this far out
+// from the frame outline, and corner brackets are concentric with its rounded corners.
+export const PINHOLE_HANDLE_GAP_PX = 5;
+export const PINHOLE_HANDLE_STROKE_PX = 3;
+// Straight part of a corner bracket after its arc.
+export const PINHOLE_BRACKET_ARM_PX = 14;
+export const PINHOLE_EDGE_PILL_LENGTH_PX = 24;
+// A side shorter than this drops its edge pill (5 × pill length), and one shorter
+// than PINHOLE_BRACKET_ARM_MIN_SIDE_PX drops the bracket arms along it.
+export const PINHOLE_EDGE_PILL_MIN_SIDE_PX = 120;
+export const PINHOLE_BRACKET_ARM_MIN_SIDE_PX = 40;
+// Hit areas. An edge hit spans the straight part of its side; `inset` of its
+// thickness lies inside the frame and the rest outside. Corner hits are squares
+// with the same outer extent as the edge hits. The coarse set is for touch.
+export const PINHOLE_EDGE_HIT_PX = 16;
+export const PINHOLE_EDGE_HIT_INSET_PX = 4;
+export const PINHOLE_CORNER_HIT_PX = 32;
+export const PINHOLE_EDGE_HIT_COARSE_PX = 32;
+export const PINHOLE_EDGE_HIT_INSET_COARSE_PX = 8;
+export const PINHOLE_CORNER_HIT_COARSE_PX = 44;
+// Pointer within this distance of the frame counts as "near" and wakes the handles up.
+export const PINHOLE_NEAR_MARGIN_PX = 24;
+// Room a resize keeps between the frame and the clipping edge of the chart area,
+// so handles and coarse hit areas stay on screen where the surface fills the width.
+export const PINHOLE_CLIP_MARGIN_PX = 36;
+// Readout pill under the frame.
+export const PINHOLE_READOUT_GAP_PX = 12;
+export const PINHOLE_READOUT_HEIGHT_PX = 24;
+// How long the readout stays up after a zoom or resize ends.
+export const PINHOLE_READOUT_LINGER_MS = 600;
+// Centre crosshair shown while dragging (arm-to-arm length).
+export const PINHOLE_CROSSHAIR_PX = 12;
+// Keyboard steps for the edge sliders, in degrees of field of view.
+export const PINHOLE_KEY_STEP_DEG = 1;
+export const PINHOLE_KEY_STEP_SHIFT_DEG = 5;

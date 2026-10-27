@@ -13,8 +13,8 @@ and are no longer built.
 - Real-time Canvas 2D preview of the Hipparcos catalog down to magnitude 6.5
   (about 8,900 stars), computed entirely in the browser.
 - Stereographic and pinhole projections with an animated morph between them
-  (projection menu or `Shift+P`). In pinhole mode the frame can be resized with
-  drag handles.
+  (projection switch in the bottom dock or `Shift+P`). In pinhole mode the frame
+  resizes by its corners and edges, or from the keyboard.
 - Free orientation: drag to rotate, pinch (or ctrl+wheel) to zoom, `W A S D` or
   arrow keys to pan, `Q`/`E` to roll, `Shift+I`/`Shift+O` to zoom, `Shift+N` to
   turn north up.
@@ -22,6 +22,8 @@ and are no longer built.
   equator, ecliptic, galactic equator.
 - Export: PNG straight from the canvas; SVG and PDF rendered by the backend
   (`POST /api/export`). The planets toggle applies to the backend export only.
+- About dialog (header button or `?`) with every shortcut; `⌘K`/`Ctrl+K` opens
+  the export menu and `⌘S`/`Ctrl+S` saves a PNG.
 
 Known gap: the page does not yet send the full `RenderConfig` that
 `POST /api/export` expects (the contract is in [`SPEC.md`](SPEC.md)), so

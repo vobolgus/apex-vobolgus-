@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- About dialog after ray.so's: a description and the full shortcut list, opened from the header or with `?`.
+- `⌘K`/`Ctrl+K` toggles the export menu (arrow keys move through the formats); `⌘S`/`Ctrl+S` saves a PNG.
+
 ### Changed
+- Bottom dock: a Stereo/Pinhole segmented control and a Layers popover with grouped switches replace the row of labelled toggles.
+- The pinhole frame has its own overlay (corner brackets, edge pills, a size readout while dragging, keyboard-resizable edges) instead of Moveable, which is no longer a dependency.
+- Header: the export format menu is visible again, and on narrow screens Export shrinks to "⤓ PNG ▾" so the header fits at 390 px.
 - Apex is now a single tool: the star-map generator is the only page and is served at `/`; the old `/generator` URL permanently redirects (308) to `/`.
 - `SPEC.md` narrowed to the generator; the original full specification is kept as `legacy/SPEC.md`.
 

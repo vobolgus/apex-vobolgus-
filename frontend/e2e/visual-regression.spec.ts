@@ -54,23 +54,9 @@ async function gotoGenerator(page: Page): Promise<Locator> {
 	return canvas;
 }
 
-async function openProjectionMenu(page: Page) {
-	const trigger = page.locator('button[aria-haspopup="listbox"]');
-	await expect(trigger).toBeVisible();
-	const expanded = await trigger.getAttribute('aria-expanded');
-	if (expanded !== 'true') {
-		await trigger.click();
-	}
-	await page.waitForSelector('[role="option"]');
-}
-
 async function selectProjection(page: Page, name: 'stereographic' | 'pinhole') {
-	await openProjectionMenu(page);
-	const target = name.toLowerCase();
-	const option = page
-		.locator('[role="option"]')
-		.filter({ hasText: new RegExp(target, 'i') })
-		.first();
+	// The projection is a two-option segment (role="radio"), named by the full projection name.
+	const option = page.getByRole('radio', { name: new RegExp(name, 'i') });
 	await expect(option).toBeVisible();
 	await option.click();
 }

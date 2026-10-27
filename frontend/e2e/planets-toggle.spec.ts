@@ -65,8 +65,10 @@ test.describe('planets toggle and export', () => {
 
 		interceptedRequest = null;
 
+		// Planets lives in the Layers popover of the dock.
+		const layersTrigger = page.getByRole('button', { name: /^Layers/ });
 		const planetsToggle = page.locator('button[role="switch"]', { hasText: 'Planets' });
-		await expect(planetsToggle).toBeVisible();
+		await openMenu(layersTrigger, planetsToggle);
 		await planetsToggle.click();
 		await expect(planetsToggle).toHaveAttribute('aria-checked', 'true');
 
