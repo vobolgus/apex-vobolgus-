@@ -50,6 +50,15 @@ export function spokenKeys(keys: readonly string[], apple: boolean): string {
 		.join(' ');
 }
 
+const ARIA_KEYS: Record<string, string> = { shift: 'Shift', ctrl: 'Control' };
+
+/** The keys as an `aria-keyshortcuts` value, e.g. "Meta+S". */
+export function ariaKeys(keys: readonly string[], apple: boolean): string {
+	return keys
+		.map((key) => (key === 'mod' ? (apple ? 'Meta' : 'Control') : (ARIA_KEYS[key] ?? key)))
+		.join('+');
+}
+
 /** ⌘ is the command modifier on Apple keyboards, Ctrl everywhere else. */
 export function isApplePlatform(nav: Pick<Navigator, 'platform' | 'userAgent'>): boolean {
 	return /Mac|iPhone|iPad|iPod/.test(nav.platform || nav.userAgent);

@@ -74,8 +74,8 @@
 				and the galactic equator.
 			</p>
 			<p>
-				When you’re ready, click Export Image in the top-right corner to save the chart as a PNG,
-				SVG or PDF.
+				When you’re ready, click Export in the top-right corner to save a PNG, or pick SVG or PDF
+				from the menu next to it.
 			</p>
 
 			<h3>Contribute</h3>

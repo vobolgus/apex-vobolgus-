@@ -12,7 +12,13 @@
 	import { loadFlubberInterpolator } from '$lib/flubber';
 	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
 	import { InputController } from '$lib/renderer/input-handlers';
-	import { isApplePlatform, isHelpShortcut, isModShortcut } from '$lib/shortcuts';
+	import {
+		ariaKeys,
+		isApplePlatform,
+		isHelpShortcut,
+		isModShortcut,
+		keyLabel
+	} from '$lib/shortcuts';
 	import { LayerState } from '$lib/state/layers.svelte';
 	import {
 		ProjectionTransition,
@@ -21,7 +27,16 @@
 	import { catalog, view } from '$lib/stores.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
 
-	const EXPORT_FORMATS = ['PNG', 'SVG', 'PDF'] as const satisfies readonly ExportFormat[];
+	/** The export menu: what each format is for, and its shortcut (⌘S always saves a PNG). */
+	const EXPORT_OPTIONS = [
+		{ format: 'PNG', note: 'For screens and sharing', keys: ['mod', 'S'] },
+		{ format: 'SVG', note: 'Vector, editable', keys: [] },
+		{ format: 'PDF', note: 'For print', keys: [] }
+	] as const satisfies readonly {
+		format: ExportFormat;
+		note: string;
+		keys: readonly string[];
+	}[];
 
 	let canvasEl: HTMLCanvasElement | null = null;
 	let chartAreaEl: HTMLElement | null = null;
@@ -323,22 +338,22 @@
 					title="About · ?"
 					onclick={() => setAboutOpen(true)}
 				>
-					<svg class="tool-icon" viewBox="0 0 16 16" aria-hidden="true">
+					<svg class="tool-icon tool-icon-info" viewBox="0 0 16 16" aria-hidden="true">
 						<circle cx="8" cy="8" r="6.25" />
 						<path d="M8 7.5v3.5M8 5.1v.01" />
 					</svg>
-					About
+					<svg class="tool-icon tool-icon-help" viewBox="0 0 16 16" aria-hidden="true">
+						<circle cx="8" cy="8" r="6.25" />
+						<path d="M6.4 6.3a1.7 1.7 0 1 1 2.3 1.6c-.5.2-.7.6-.7 1.1v.3M8 11.3v.01" />
+					</svg>
+					<span class="tool-label">About</span>
 				</button>
-				<button class="tool-btn" type="button">Format</button>
 				<div class="export-wrap" bind:this={exportMenu.element}>
 					<button class="export-main" type="button" onclick={() => runExport(selectedExportFormat)}>
-						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path
-								d="M8 1.75a.75.75 0 0 1 .75.75v5.69l1.97-1.97a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.22 7.28a.75.75 0 0 1 1.06-1.06l1.97 1.97V2.5A.75.75 0 0 1 8 1.75ZM2.75 12a.75.75 0 0 1 .75.75v.5h9v-.5a.75.75 0 0 1 1.5 0V13A1.75 1.75 0 0 1 12.25 14.75h-8.5A1.75 1.75 0 0 1 2 13v-.25a.75.75 0 0 1 .75-.75Z"
-							/>
+						<svg class="export-icon" viewBox="0 0 16 16" aria-hidden="true">
+							<path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
 						</svg>
-						<span class="export-label-full">Export Image</span>
-						<span class="export-label-short" aria-hidden="true">{selectedExportFormat}</span>
+						<span><span class="export-verb">Export</span> {selectedExportFormat}</span>
 					</button>
 					<button
 						bind:this={exportMenu.trigger}
@@ -347,12 +362,11 @@
 						aria-label="Choose export format"
 						aria-haspopup="menu"
 						aria-expanded={exportMenu.open}
+						aria-keyshortcuts={apple ? 'Meta+K' : 'Control+K'}
 						onclick={() => exportMenu.toggle()}
 					>
-						<svg viewBox="0 0 16 16" aria-hidden="true">
-							<path
-								d="M4.22 6.97a.75.75 0 0 1 1.06 0L8 9.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 8.03a.75.75 0 0 1 0-1.06Z"
-							/>
+						<svg class="export-icon" viewBox="0 0 16 16" aria-hidden="true">
+							<path d="M5 6.5l3 3 3-3" />
 						</svg>
 					</button>
 					{#if exportMenu.open}
@@ -364,28 +378,47 @@
 							tabindex="-1"
 							onkeydown={handleExportMenuKeydown}
 						>
-							{#each EXPORT_FORMATS as format (format)}
+							{#each EXPORT_OPTIONS as option (option.format)}
+								{@const checked = option.format === selectedExportFormat}
 								<button
 									class="export-option"
-									class:is-selected={format === selectedExportFormat}
 									type="button"
 									role="menuitemradio"
-									aria-checked={format === selectedExportFormat}
-									onclick={() => handleExportFormatSelect(format)}
+									aria-checked={checked}
+									aria-labelledby="export-{option.format}-name"
+									aria-describedby="export-{option.format}-note"
+									aria-keyshortcuts={option.keys.length ? ariaKeys(option.keys, apple) : undefined}
+									onclick={() => handleExportFormatSelect(option.format)}
 								>
-									<span class="export-option-icon" aria-hidden="true">
-										{#if format === 'PNG'}
-											◼
-										{:else if format === 'SVG'}
-											◇
+									<svg class="export-option-icon" viewBox="0 0 16 16" aria-hidden="true">
+										{#if option.format === 'PNG'}
+											<rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+											<path d="M2.5 10.5l3-3 3 3 2-2 3 3" />
+										{:else if option.format === 'SVG'}
+											<path d="M3 13l4-10 2 6 4-2" />
+											<circle cx="3" cy="13" r="1" />
+											<circle cx="13" cy="7" r="1" />
 										{:else}
-											▤
+											<path d="M4 2.5h5.5l3 3v8h-8.5z" />
+											<path d="M9.5 2.5v3h3" />
 										{/if}
+									</svg>
+									<span class="export-option-text">
+										<span class="export-option-name" id="export-{option.format}-name">
+											{option.format}
+										</span>
+										<span class="export-option-note" id="export-{option.format}-note">
+											{option.note}
+										</span>
 									</span>
-									<span class="export-option-label">{format}</span>
-									<span class="export-option-check" aria-hidden="true">
-										{format === selectedExportFormat ? '✓' : ''}
+									<span class="export-option-keys" aria-hidden="true">
+										{#each option.keys as key (key)}
+											<kbd>{keyLabel(key, apple)}</kbd>
+										{/each}
 									</span>
+									<svg class="export-option-check" viewBox="0 0 16 16" aria-hidden="true">
+										{#if checked}<path d="M3.5 8.5l3 3 6-7" />{/if}
+									</svg>
 								</button>
 							{/each}
 						</div>
@@ -498,6 +531,7 @@
 		align-items: baseline;
 		gap: 14px;
 		line-height: 1;
+		white-space: nowrap;
 	}
 
 	.ray-brand {
@@ -529,208 +563,295 @@
 		gap: 8px;
 	}
 
+	/* ray.so's transparent button: no border, a fill on hover. */
 	.tool-btn {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		height: 28px;
-		padding: 0 11px;
-		border-radius: 7px;
-		border: 1px solid transparent;
+		height: 30px;
+		padding: 0 10px;
+		border: 0;
+		border-radius: var(--r-ctl);
 		background: transparent;
-		color: #b8bec8;
-		font-size: 0.74rem;
-		font-weight: 600;
+		color: var(--fg-2);
+		font: var(--font-ui);
 		cursor: pointer;
-		text-decoration: none;
 		transition:
-			border-color 0.16s ease,
-			color 0.16s ease,
-			box-shadow 0.2s ease,
-			background 0.2s ease;
+			background var(--ease-ui),
+			color var(--ease-ui);
 	}
 
-	.tool-btn:hover {
-		border-color: rgba(255, 255, 255, 0.22);
-		background: rgba(255, 255, 255, 0.06);
-		color: #f1f3f6;
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+	@media (hover: hover) {
+		.tool-btn:hover {
+			background: var(--fill-hover);
+			color: var(--fg-1);
+		}
 	}
 
+	/* The ring is a box-shadow, which forced colors drop; the transparent outline then shows. */
+	.tool-btn:focus-visible {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		background: var(--fill-hover);
+		color: var(--fg-1);
+		box-shadow: var(--ring);
+	}
+
+	/* After :focus-visible: a key or click press shows on a focused button too. */
 	.tool-btn:active {
-		background: rgba(255, 255, 255, 0.08);
-		box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+		background: var(--fill-press);
+		color: var(--fg-1);
 	}
 
 	.tool-icon {
-		width: 14px;
-		height: 14px;
+		width: 16px;
+		height: 16px;
 		flex-shrink: 0;
 		fill: none;
 		stroke: currentColor;
 		stroke-width: 1.5;
 		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 
+	/* "ⓘ About" with a label; the bare "?" stands in for it on a phone. */
+	.tool-icon-help {
+		display: none;
+	}
+
+	/*
+	 * Export: ray.so's tinted primary, split into the main action and the format
+	 * menu. The wash and edge sit on the wrap; each half lays its own hover or
+	 * press overlay over them, rounding its outer corners so the fill stays
+	 * inside. No overflow clipping: the format menu hangs below.
+	 */
 	.export-wrap {
 		position: relative;
 		display: inline-flex;
-		align-items: center;
+		align-items: stretch;
 		height: 30px;
-		border-radius: 8px;
-		border: 1px solid rgba(255, 124, 124, 0.88);
-		background: linear-gradient(180deg, #d34b4b 0%, #bd3d3d 100%);
-		box-shadow: 0 0 0 1px rgba(204, 70, 70, 0.5);
-		/* No overflow clipping here: the format menu hangs below the wrap. The two
-		   buttons round their own outer corners so their hover fills stay inside. */
-	}
-
-	.export-wrap:hover {
-		background: linear-gradient(180deg, #df5757 0%, #c94848 100%);
-		border-color: rgba(255, 148, 148, 0.92);
+		border-radius: var(--r-ctl);
+		background: var(--accent-wash);
+		box-shadow: inset 0 0 0 1px var(--accent-edge);
+		color: var(--accent-fg);
 	}
 
 	.export-main,
 	.export-toggle {
-		height: 100%;
-		border: 0;
-		background: transparent;
-		color: #fff0f0;
 		display: inline-flex;
 		align-items: center;
+		border: 0;
+		background-color: transparent;
+		color: inherit;
+		font: var(--font-ui);
+		white-space: nowrap;
 		cursor: pointer;
-		font-size: 0.74rem;
-		font-weight: 600;
+		transition: background var(--ease-ui);
 	}
 
 	.export-main {
 		gap: 7px;
-		padding: 0 12px 0 11px;
-		border-radius: 7px 0 0 7px;
+		padding: 0 12px 0 10px;
+		border-radius: var(--r-ctl) 0 0 var(--r-ctl);
 	}
 
-	.export-main span {
-		color: #ffd1d1;
-	}
-
-	.export-main svg,
-	.export-toggle svg {
-		width: 14px;
-		height: 14px;
-		fill: currentColor;
-	}
-
-	.export-label-short {
-		display: none;
-	}
-
+	/* The divider stops 1 px short of each end, so it meets the wrap's edge instead of doubling it. */
 	.export-toggle {
-		width: 30px;
+		width: 28px;
 		justify-content: center;
-		border-left: 1px solid rgba(255, 219, 219, 0.28);
-		border-radius: 0 7px 7px 0;
+		border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+		background-image: linear-gradient(var(--accent-edge), var(--accent-edge));
+		background-position: left center;
+		background-repeat: no-repeat;
+		background-size: 1px calc(100% - 2px);
 	}
 
-	.export-toggle[aria-expanded='true'] {
-		background: rgba(255, 255, 255, 0.12);
+	@media (hover: hover) {
+		.export-main:hover,
+		.export-toggle:hover {
+			background-color: var(--accent-wash-hover);
+		}
 	}
 
-	.export-main:hover,
-	.export-toggle:hover {
-		background: rgba(255, 255, 255, 0.08);
+	.export-main:focus-visible,
+	.export-toggle:focus-visible {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		background-color: var(--accent-wash-hover);
+		box-shadow: var(--ring);
 	}
 
 	.export-main:active,
-	.export-toggle:active {
-		background: rgba(255, 255, 255, 0.14);
+	.export-toggle:active,
+	.export-toggle[aria-expanded='true'] {
+		background-color: var(--accent-wash-press);
 	}
 
+	/* Forced colors drop the wash and the inset edge: keep the button's outline. */
+	@media (forced-colors: active) {
+		.export-wrap {
+			outline: 1px solid ButtonText;
+		}
+	}
+
+	.export-icon {
+		width: 16px;
+		height: 16px;
+		flex-shrink: 0;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.export-toggle .export-icon {
+		width: 14px;
+		height: 14px;
+		transition: transform 160ms ease;
+	}
+
+	.export-toggle[aria-expanded='true'] .export-icon {
+		transform: rotate(180deg);
+	}
+
+	/* The dock's popover look: one family of menus across the page. */
 	.export-menu {
 		position: absolute;
 		right: 0;
 		top: calc(100% + 6px);
-		min-width: 138px;
-		padding: 4px;
-		border-radius: 9px;
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		background: linear-gradient(180deg, #1b1d22 0%, #14161b 100%);
-		box-shadow:
-			0 10px 24px rgba(0, 0, 0, 0.42),
-			0 1px 0 rgba(255, 255, 255, 0.08) inset;
+		z-index: 20;
 		display: grid;
 		gap: 2px;
-		z-index: 20;
-	}
-
-	.export-option {
-		height: 30px;
-		padding: 0 8px;
-		border-radius: 6px;
-		border: 0;
-		background: transparent;
-		color: #c9ced7;
-		font-size: 0.72rem;
-		font-weight: 400;
-		letter-spacing: 0.01em;
-		line-height: 1;
-		display: grid;
-		grid-template-columns: 14px 1fr auto;
-		align-items: center;
-		column-gap: 8px;
-		cursor: pointer;
-		transition:
-			background 0.14s ease,
-			color 0.14s ease;
-	}
-
-	.export-option-icon {
-		color: #8f96a1;
-		font-size: 0.6rem;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 14px;
-	}
-
-	.export-option-label {
-		text-align: left;
-	}
-
-	.export-option-check {
-		color: #e7ebf4;
-		font-size: 0.66rem;
-		min-width: 10px;
-		text-align: right;
-		opacity: 0.95;
-	}
-
-	.export-option:hover {
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2fa;
-	}
-
-	.export-option:active {
-		background: rgba(255, 255, 255, 0.12);
-	}
-
-	.export-option:focus-visible {
-		outline: none;
-		background: rgba(255, 255, 255, 0.08);
-		color: #eef2fa;
-		box-shadow: var(--ring);
+		width: min(280px, calc(100vw - 20px));
+		padding: 6px;
+		border: 1px solid var(--hairline);
+		border-radius: var(--r-pop);
+		background: var(--pop);
+		backdrop-filter: blur(20px);
+		-webkit-backdrop-filter: blur(20px);
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
 	}
 
 	.export-menu:focus {
 		outline: none;
 	}
 
-	.export-option.is-selected {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f3f6fd;
+	.export-option {
+		display: grid;
+		grid-template-columns: 16px minmax(0, 1fr) auto 16px;
+		align-items: center;
+		column-gap: 10px;
+		min-height: 44px;
+		padding: 6px 8px;
+		border: 0;
+		border-radius: var(--r-row);
+		background: transparent;
+		color: var(--fg-2);
+		text-align: left;
+		cursor: pointer;
+		transition:
+			background var(--ease-ui),
+			color var(--ease-ui);
 	}
 
-	.export-option.is-selected .export-option-icon {
-		color: #d5dbea;
+	@media (hover: hover) {
+		.export-option:hover {
+			background: var(--fill-hover);
+			color: var(--fg-1);
+		}
+	}
+
+	/*
+	 * Any focus fills the row: ⌘K moves focus here from a shortcut, which Chrome
+	 * does not count as :focus-visible, and the row must still show where it is.
+	 */
+	.export-option:focus {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		background: var(--fill-hover);
+		color: var(--fg-1);
+	}
+
+	.export-option:focus-visible {
+		box-shadow: var(--ring);
+	}
+
+	.export-option:active {
+		background: var(--fill-press);
+	}
+
+	.export-option[aria-checked='true'] {
+		color: var(--fg-1);
+	}
+
+	.export-option-icon,
+	.export-option-check {
+		width: 16px;
+		height: 16px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.export-option-text {
+		display: grid;
+		gap: 1px;
+		min-width: 0;
+	}
+
+	/* One line each, whatever the fallback font: the rows keep one height. */
+	.export-option-name,
+	.export-option-note {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.export-option-name {
+		color: var(--fg-1);
+		font: var(--font-ui);
+	}
+
+	.export-option-note {
+		color: var(--fg-3);
+		font:
+			400 12px/14px Inter,
+			system-ui,
+			sans-serif;
+	}
+
+	/* A lit row over the white chart takes --fg-3 under 4.5:1; --fg-2 keeps it readable. */
+	.export-option:is(:hover, :focus, :active) .export-option-note {
+		color: var(--fg-2);
+	}
+
+	.export-option-keys {
+		display: inline-flex;
+		gap: 3px;
+	}
+
+	.export-option-keys kbd {
+		display: inline-grid;
+		place-items: center;
+		min-width: 18px;
+		height: 18px;
+		padding: 0 4px;
+		border-radius: 4px;
+		background: var(--fill-on);
+		color: var(--fg-2);
+		font:
+			500 11px/1 Inter,
+			system-ui,
+			sans-serif;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.export-toggle .export-icon {
+			transition: none;
+		}
 	}
 
 	canvas {
@@ -811,10 +932,20 @@
 	}
 
 	@media (max-width: 743px) {
-		/* On a phone they only push Export off screen: Format does nothing yet, and About is
-		   mostly a list of keyboard shortcuts (ray.so hides it there too). */
+		/* "?" alone, a 32 px square; the label stays for screen readers. */
 		.tool-btn {
+			width: 32px;
+			height: 32px;
+			padding: 0;
+			justify-content: center;
+		}
+
+		.tool-icon-info {
 			display: none;
+		}
+
+		.tool-icon-help {
+			display: block;
 		}
 
 		.export-main {
@@ -822,8 +953,9 @@
 			padding: 0 10px 0 9px;
 		}
 
-		/* "⤓ PNG ▾": the format replaces the label, which stays for screen readers. */
-		.export-label-full {
+		/* "⤓ PNG ▾": the format alone, "Export" kept for screen readers. */
+		.tool-label,
+		.export-verb {
 			position: absolute;
 			width: 1px;
 			height: 1px;
@@ -831,9 +963,12 @@
 			clip-path: inset(50%);
 			white-space: nowrap;
 		}
+	}
 
-		.export-label-short {
-			display: inline;
+	/* The byline is the first thing to go when the header runs out of room. */
+	@media (max-width: 360px) {
+		.ray-meta-word {
+			display: none;
 		}
 	}
 

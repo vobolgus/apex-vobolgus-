@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	SHORTCUTS,
+	ariaKeys,
 	isApplePlatform,
 	isHelpShortcut,
 	isModShortcut,
@@ -33,6 +34,12 @@ describe('shortcut labels', () => {
 		expect(spokenKeys(['mod', 'K'], false)).toBe('Control K');
 		expect(spokenKeys(['shift', 'drag'], true)).toBe('Shift drag');
 		expect(spokenKeys(['?'], true)).toBe('Question mark');
+	});
+
+	it('writes aria-keyshortcuts values', () => {
+		expect(ariaKeys(['mod', 'S'], true)).toBe('Meta+S');
+		expect(ariaKeys(['mod', 'S'], false)).toBe('Control+S');
+		expect(ariaKeys(['shift', 'P'], true)).toBe('Shift+P');
 	});
 
 	it('lists every action once', () => {

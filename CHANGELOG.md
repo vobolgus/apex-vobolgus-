@@ -19,12 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The backend draws constellation lines as great-circle arcs and traces reference circles in 1° steps, with the preview's line widths and opacities.
 - Bottom dock: a Stereo/Pinhole segmented control and a Layers popover with grouped switches replace the row of labelled toggles.
 - The pinhole frame has its own overlay (corner brackets, edge pills, a size readout while dragging, keyboard-resizable edges) instead of Moveable, which is no longer a dependency.
-- Header: the export format menu is visible again, and on narrow screens Export shrinks to "⤓ PNG ▾" so the header fits at 390 px.
+- Header, after ray.so: Export is a tinted split button that names the format it saves ("Export PNG"), and its menu says what each format is for and shows ⌘S. About is a "?" icon on phones, and the header fits a 320 px screen.
 - Pinhole opens from a full-sky stereo view at 100° instead of the 120° maximum, so the frame can still be widened; switching straight back restores the view you left.
 - Apex is now a single tool: the star-map generator is the only page and is served at `/`; the old `/generator` URL permanently redirects (308) to `/`.
 - `SPEC.md` narrowed to the generator; the original full specification is kept as `legacy/SPEC.md`.
 
 ### Removed
+- The header's Format button, which did nothing.
 - Sky Quiz: game API (`/game/api/*`), question factory, SQLite game sessions (`sqlx` database and migrations) and scoring/ranks in `rust-core`.
 - AstraEtudes: orbital simulator API (`/api/compute`) and the RK4 mechanics in `rust-core`.
 - The 110 Messier photos (`/images/*`). The Messier catalog itself stays in `rust-core` for a future map layer.

@@ -27,6 +27,16 @@
 	--ring: 0 0 0 2px var(--page), 0 0 0 4px rgba(255, 255, 255, 0.4);
 
 	--accent: #d34b4b;
+	/*
+	 * Export is ray.so's tinted primary: a wash of the accent, a hairline of it and
+	 * pale red text. The hover and press washes are overlays laid on the rest wash,
+	 * not replacements for it (together about .28 and .36).
+	 */
+	--accent-wash: rgba(211, 75, 75, 0.16);
+	--accent-wash-hover: rgba(211, 75, 75, 0.14);
+	--accent-wash-press: rgba(211, 75, 75, 0.24);
+	--accent-edge: rgba(211, 75, 75, 0.38);
+	--accent-fg: #ff9d9d;
 
 	--h-dock: 44px;
 	--h-ctl: 32px;
