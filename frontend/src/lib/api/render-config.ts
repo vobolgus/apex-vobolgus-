@@ -50,6 +50,11 @@ export interface RenderConfig {
 		forward: Vec3Tuple;
 		width: number;
 		height: number;
+		/**
+		 * Length of one preview px in view units (backend default 1). The PDF document
+		 * sends the size in mm and mm per preview px, so stars keep their size in mm.
+		 */
+		px?: number;
 	};
 	layers: {
 		ecliptic: boolean;
@@ -70,6 +75,8 @@ export interface RenderConfig {
 		grid_color: string;
 		background_color: string;
 		chart_color: string;
+		/** Stroke colour of the sky's edge, 1 preview px wide; none when absent. */
+		chart_outline?: string;
 		font_family: string;
 		magnitude_scale: number;
 	};
