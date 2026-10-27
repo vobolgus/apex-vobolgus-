@@ -132,6 +132,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "pdf-writer",
  "rust-core",
  "serde",
  "serde_json",

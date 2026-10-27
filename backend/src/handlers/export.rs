@@ -12,9 +12,65 @@ use serde::Deserialize;
 /// Largest chart side a `view` may ask for; the preview's is about 1100 px.
 const MAX_VIEW_SIZE_PX: f64 = 20_000.0;
 
+/// Largest `view.px`: far beyond any real chart, it only keeps the numbers sane.
+const MAX_VIEW_PX: f64 = 1000.0;
+
 #[derive(Debug, Deserialize, Default)]
 pub struct ExportQuery {
     pub format: Option<String>,
+}
+
+/// The checks every chart passes before it is drawn, here and in a document.
+/// `Err` is the plain-text message of a 400.
+pub(crate) fn validate_config(config: &RenderConfig) -> Result<(), String> {
+    if config.projection != "stereo" && config.projection != "pinhole" {
+        return Err("projection must be 'stereo' or 'pinhole'".to_string());
+    }
+    if config.view.is_none() && (config.latitude.is_none() || config.longitude.is_none()) {
+        return Err("latitude and longitude are required without a view".to_string());
+    }
+    if let Some(latitude) = config.latitude
+        && !(-90.0..=90.0).contains(&latitude)
+    {
+        return Err("latitude must be in -90..=90".to_string());
+    }
+    if let Some(longitude) = config.longitude
+        && !(-180.0..=180.0).contains(&longitude)
+    {
+        return Err("longitude must be in -180..=180".to_string());
+    }
+    if let Some(view) = &config.view {
+        if !(view.width <= MAX_VIEW_SIZE_PX && view.height <= MAX_VIEW_SIZE_PX) {
+            return Err(format!(
+                "view width and height must be at most {MAX_VIEW_SIZE_PX} px"
+            ));
+        }
+        if let Some(px) = view.px
+            && !(px > 0.0 && px <= MAX_VIEW_PX)
+        {
+            return Err(format!("view px must be in (0, {MAX_VIEW_PX}]"));
+        }
+        if SvgGenerator::view_projection(config).is_none() {
+            return Err(
+                "view needs non-zero right, up and forward vectors, a positive size and a fov_deg \
+                 the projection can show"
+                    .to_string(),
+            );
+        }
+    }
+    if let Some(max_mag) = config.magnitude_limit
+        && !(0.0..=10.0).contains(&max_mag)
+    {
+        return Err("magnitude_limit must be in 0..=10".to_string());
+    }
+    Ok(())
+}
+
+/// usvg options with the system fonts, for turning chart SVG into PDF.
+pub(crate) fn svg_options() -> svg2pdf::usvg::Options<'static> {
+    let mut options = svg2pdf::usvg::Options::default();
+    options.fontdb_mut().load_system_fonts();
+    options
 }
 
 pub async fn export_pdf(
@@ -22,58 +78,7 @@ pub async fn export_pdf(
     Query(query): Query<ExportQuery>,
     Json(config): Json<RenderConfig>,
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
-    if config.projection != "stereo" && config.projection != "pinhole" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "projection must be 'stereo' or 'pinhole'".to_string(),
-        ));
-    }
-    if config.view.is_none() && (config.latitude.is_none() || config.longitude.is_none()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "latitude and longitude are required without a view".to_string(),
-        ));
-    }
-    if let Some(latitude) = config.latitude
-        && !(-90.0..=90.0).contains(&latitude)
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "latitude must be in -90..=90".to_string(),
-        ));
-    }
-    if let Some(longitude) = config.longitude
-        && !(-180.0..=180.0).contains(&longitude)
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "longitude must be in -180..=180".to_string(),
-        ));
-    }
-    if let Some(view) = &config.view {
-        if !(view.width <= MAX_VIEW_SIZE_PX && view.height <= MAX_VIEW_SIZE_PX) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("view width and height must be at most {MAX_VIEW_SIZE_PX} px"),
-            ));
-        }
-        if SvgGenerator::view_projection(&config).is_none() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "view needs non-zero right, up and forward vectors, a positive size and a fov_deg \
-                 the projection can show"
-                    .to_string(),
-            ));
-        }
-    }
-    if let Some(max_mag) = config.magnitude_limit
-        && !(0.0..=10.0).contains(&max_mag)
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "magnitude_limit must be in 0..=10".to_string(),
-        ));
-    }
+    validate_config(&config).map_err(|message| (StatusCode::BAD_REQUEST, message))?;
 
     // 1. Генерируем SVG
     let svg_str = SvgGenerator::render_map(&config, &state.hip_catalog);
@@ -88,8 +93,7 @@ pub async fn export_pdf(
     }
 
     // 2. Конвертируем в PDF через svg2pdf
-    let mut options = svg2pdf::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    let options = svg_options();
 
     let tree = svg2pdf::usvg::Tree::from_str(&svg_str, &options).map_err(|e| {
         (
@@ -168,6 +172,7 @@ mod tests {
                 grid_color: "#404040".to_string(),
                 background_color: "#05050A".to_string(),
                 chart_color: None,
+                chart_outline: None,
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
@@ -222,6 +227,7 @@ mod tests {
                 grid_color: "#404040".to_string(),
                 background_color: "#05050A".to_string(),
                 chart_color: None,
+                chart_outline: None,
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },

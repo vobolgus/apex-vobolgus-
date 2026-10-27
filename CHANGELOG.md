@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `POST /api/export/document` (and its SvelteKit proxy): charts placed on pages in mm come back as one multi-page PDF, each page exactly its requested size (A4 portrait or landscape) and an empty page blank. Pages are built as SVG with every chart nested under its own id prefix, converted with `svg2pdf::to_chunk` and assembled with `pdf-writer`.
+- `view.px` in `RenderConfig`: the length of one preview px in view units. Star and planet radii, line widths and text scale with it, so a chart sized in mm keeps its stars the same size on paper however large it is drawn.
+- `style.chart_outline` strokes the sky's edge 1 preview px wide, and `style.background_color: "none"` paints no background, for charts on white paper.
 - About dialog after ray.so's: a description and the full shortcut list, opened from the header or with `?`.
 - `⌘K`/`Ctrl+K` toggles the export menu (arrow keys move through the formats); `⌘S`/`Ctrl+S` saves a PNG.
 

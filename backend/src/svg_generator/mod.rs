@@ -174,6 +174,25 @@ fn preview_star_radius(v_mag: f32) -> f32 {
     (BASE_RADIUS_PX - MAG_COEFF * v_mag).max(MIN_RADIUS_PX)
 }
 
+/// Length of one preview px in chart units (`view.px`): everything sized in preview
+/// px (star and planet radii, line widths, text) is multiplied by it. 1 without a view.
+fn preview_px(config: &RenderConfig) -> f32 {
+    config
+        .view
+        .as_ref()
+        .and_then(|view| view.px)
+        .map_or(1.0, |px| px as f32)
+}
+
+/// Where a chart nested in a larger SVG goes, in the parent's units.
+#[derive(Debug, Clone, Copy)]
+pub struct Placement {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// RFC 3339 (`2025-06-01T22:00:00Z`, as in SPEC), `YYYY-MM-DD HH:MM:SS` or a bare
 /// date, read as UTC.
 fn parse_datetime(text: &str) -> Option<DateTime> {
@@ -220,9 +239,24 @@ impl SvgGenerator {
         )
     }
 
+    /// The chart as a standalone SVG document.
     pub fn render_map(config: &RenderConfig, hip_catalog: &HipCatalog) -> String {
+        Self::render_chart(config, hip_catalog, "", None)
+    }
+
+    /// The chart for a document holding several: every `id` it emits starts with
+    /// `id_prefix`, and with a `placement` its root `<svg>` sits in that box of the
+    /// parent SVG (aspect kept) instead of filling the viewport.
+    pub fn render_chart(
+        config: &RenderConfig,
+        hip_catalog: &HipCatalog,
+        id_prefix: &str,
+        placement: Option<Placement>,
+    ) -> String {
         let is_stereo = config.projection == "stereo";
         let view = Self::view_projection(config);
+        let px = preview_px(config);
+        let sky_mask = format!("{id_prefix}sky-mask");
 
         // Определяем размеры холста
         let (width, height) = if is_stereo {
@@ -247,16 +281,25 @@ impl SvgGenerator {
         // Pre-allocate to avoid O(n²) reallocations during SVG build.
         // Empirically derived from full-sky maps ~200KB; round to power-of-2.
         let mut svg = String::with_capacity(256 * 1024);
-        svg.push_str(&format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="100%" height="100%">"##,
-            canvas_width, canvas_height
-        ));
+        match placement {
+            None => svg.push_str(&format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}" width="100%" height="100%">"##,
+                canvas_width, canvas_height
+            )),
+            // Nested: the parent declares the namespace and the box.
+            Some(place) => svg.push_str(&format!(
+                r##"<svg x="{}" y="{}" width="{}" height="{}" viewBox="0 0 {} {}">"##,
+                place.x, place.y, place.width, place.height, canvas_width, canvas_height
+            )),
+        }
 
-        // Добавляем фон
-        svg.push_str(&format!(
-            r##"<rect width="100%" height="100%" fill="{}" />"##,
-            bg_color
-        ));
+        // Добавляем фон. "none" leaves it out: on a page the paper shows through.
+        if !bg_color.eq_ignore_ascii_case("none") {
+            svg.push_str(&format!(
+                r##"<rect width="100%" height="100%" fill="{}" />"##,
+                bg_color
+            ));
+        }
 
         // Для стереографической проекции создаем clip-path
         let center_x = canvas_width / 2.0;
@@ -268,8 +311,8 @@ impl SvgGenerator {
 
         if is_stereo {
             svg.push_str(&format!(
-                r##"<defs><clipPath id="sky-mask"><circle cx="{}" cy="{}" r="{}" /></clipPath></defs>"##,
-                center_x, center_y, sky_radius
+                r##"<defs><clipPath id="{}"><circle cx="{}" cy="{}" r="{}" /></clipPath></defs>"##,
+                sky_mask, center_x, center_y, sky_radius
             ));
             if let Some(ref chart_color) = config.style.chart_color {
                 svg.push_str(&format!(
@@ -277,7 +320,7 @@ impl SvgGenerator {
                     center_x, center_y, sky_radius, chart_color
                 ));
             }
-            svg.push_str(r##"<g clip-path="url(#sky-mask)">"##);
+            svg.push_str(&format!(r##"<g clip-path="url(#{})">"##, sky_mask));
         } else {
             if let Some(ref chart_color) = config.style.chart_color {
                 svg.push_str(&format!(
@@ -288,10 +331,10 @@ impl SvgGenerator {
             if view.is_some() {
                 // Lines run past the frame; keep them off the page around it in a PDF.
                 svg.push_str(&format!(
-                    r##"<defs><clipPath id="sky-mask"><rect width="{}" height="{}" /></clipPath></defs>"##,
-                    canvas_width, canvas_height
+                    r##"<defs><clipPath id="{}"><rect width="{}" height="{}" /></clipPath></defs>"##,
+                    sky_mask, canvas_width, canvas_height
                 ));
-                svg.push_str(r##"<g clip-path="url(#sky-mask)">"##);
+                svg.push_str(&format!(r##"<g clip-path="url(#{})">"##, sky_mask));
             } else {
                 svg.push_str(r##"<g>"##);
             }
@@ -367,10 +410,8 @@ impl SvgGenerator {
             }
         };
         // Stars and planets only go into the file when they reach the chart.
-        let on_chart = |px: f32, py: f32, r: f32| {
-            view.as_ref()
-                .is_none_or(|view| view.touches_chart(px, py, r))
-        };
+        let on_chart =
+            |x: f32, y: f32, r: f32| view.as_ref().is_none_or(|view| view.touches_chart(x, y, r));
 
         // 1. Отрисовка координатных сеток
         draw_coordinate_grids(&mut svg, config, grid_color, &project_point);
@@ -405,18 +446,18 @@ impl SvgGenerator {
         // 3. Звезды
         let mag_scale = config.style.magnitude_scale;
         for star in &stars {
-            if let Some((px, py)) = project_point(star.x, star.y, star.z) {
+            if let Some((cx, cy)) = project_point(star.x, star.y, star.z) {
                 let r = if view.is_some() {
                     preview_star_radius(star.v_mag) * mag_scale
                 } else {
                     (mag_scale * 1.3 * 10.0f32.powf(-0.16 * star.v_mag)).clamp(0.6, 12.0)
-                };
-                if !on_chart(px, py, r) {
+                } * px;
+                if !on_chart(cx, cy, r) {
                     continue;
                 }
                 svg.push_str(&format!(
                     r##"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{}" />"##,
-                    px, py, r, star_color
+                    cx, cy, r, star_color
                 ));
             }
         }
@@ -434,28 +475,36 @@ impl SvgGenerator {
                 }
 
                 let [x, y, z] = planet.unit_vector;
-                if let Some((px, py)) = project_point(x as f32, y as f32, z as f32) {
+                if let Some((cx, cy)) = project_point(x as f32, y as f32, z as f32) {
                     let slug = planet_name(planet.body);
                     let label = planet_label(planet.body);
-                    let r = planet_radius(&planet, mag_scale);
-                    if !on_chart(px, py, r) {
+                    let r = planet_radius(&planet, mag_scale) * px;
+                    if !on_chart(cx, cy, r) {
                         continue;
                     }
                     let color = planet_color(planet.body);
 
                     svg.push_str(&format!(
-                        r##"<circle id="planet-{}" data-planet="{}" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{}" stroke="#0008" stroke-width="0.5" />"##,
-                        slug, slug, px, py, r, color
+                        r##"<circle id="{}planet-{}" data-planet="{}" cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{}" stroke="#0008" stroke-width="{}" />"##,
+                        id_prefix,
+                        slug,
+                        slug,
+                        cx,
+                        cy,
+                        r,
+                        color,
+                        0.5 * px
                     ));
 
                     if config.layers.constellation_names {
                         svg.push_str(&format!(
-                            r##"<text data-planet-label="{}" x="{:.2}" y="{:.2}" fill="{}" font-family="{}" font-size="10" text-anchor="start">{}</text>"##,
+                            r##"<text data-planet-label="{}" x="{:.2}" y="{:.2}" fill="{}" font-family="{}" font-size="{}" text-anchor="start">{}</text>"##,
                             slug,
-                            px + r + 4.0,
-                            py - r - 2.0,
+                            cx + r + 4.0 * px,
+                            cy - r - 2.0 * px,
                             color,
                             font_family,
+                            10.0 * px,
                             label
                         ));
                     }
@@ -474,6 +523,32 @@ impl SvgGenerator {
         );
 
         svg.push_str("</g>");
+
+        // 6.1 The sky's edge, 1 preview px wide and inset by half of that, so the
+        // chart's own viewport does not clip half of the stroke away.
+        if let Some(ref outline) = config.style.chart_outline {
+            let stroke = px;
+            if is_stereo {
+                svg.push_str(&format!(
+                    r##"<circle cx="{}" cy="{}" r="{}" fill="none" stroke="{}" stroke-width="{}" />"##,
+                    center_x,
+                    center_y,
+                    (sky_radius - stroke / 2.0).max(0.0),
+                    outline,
+                    stroke
+                ));
+            } else {
+                svg.push_str(&format!(
+                    r##"<rect x="{}" y="{}" width="{}" height="{}" fill="none" stroke="{}" stroke-width="{}" />"##,
+                    stroke / 2.0,
+                    stroke / 2.0,
+                    (canvas_width - stroke).max(0.0),
+                    (canvas_height - stroke).max(0.0),
+                    outline,
+                    stroke
+                ));
+            }
+        }
 
         // 7. Оформление рамки для круглой стереографической карты.
         // Only for the observer's horizon chart: a view has no horizon to label.
@@ -527,11 +602,16 @@ impl SvgGenerator {
                 lon_deg.abs(),
                 if lon_deg >= 0.0 { "E" } else { "W" }
             );
-            let info_y = canvas_height - 40.0;
+            let info_y = canvas_height - 40.0 * px;
 
             svg.push_str(&format!(
-                r##"<text x="25" y="{}" fill="#A0A0A0" font-family="{}" font-size="11" opacity="0.8">Lat: {} | Lon: {}</text>"##,
-                info_y, font_family, lat_str, lon_str
+                r##"<text x="{}" y="{}" fill="#A0A0A0" font-family="{}" font-size="{}" opacity="0.8">Lat: {} | Lon: {}</text>"##,
+                25.0 * px,
+                info_y,
+                font_family,
+                11.0 * px,
+                lat_str,
+                lon_str
             ));
 
             let dt_display = config
@@ -540,16 +620,24 @@ impl SvgGenerator {
                 .unwrap_or("2024-06-14 06:10:00")
                 .to_string();
             svg.push_str(&format!(
-                r##"<text x="25" y="{}" fill="#A0A0A0" font-family="{}" font-size="11" opacity="0.8">Time: {} UTC</text>"##,
-                info_y + 16.0, font_family, dt_display
+                r##"<text x="{}" y="{}" fill="#A0A0A0" font-family="{}" font-size="{}" opacity="0.8">Time: {} UTC</text>"##,
+                25.0 * px,
+                info_y + 16.0 * px,
+                font_family,
+                11.0 * px,
+                dt_display
             ));
         }
 
         // 9. Подвал
         if let Some(ref footer) = config.footer_text {
             svg.push_str(&format!(
-                r##"<text x="{}" y="{}" fill="#606060" font-family="{}" font-size="10" text-anchor="middle">{}</text>"##,
-                canvas_width / 2.0, canvas_height - 15.0, font_family, footer
+                r##"<text x="{}" y="{}" fill="#606060" font-family="{}" font-size="{}" text-anchor="middle">{}</text>"##,
+                canvas_width / 2.0,
+                canvas_height - 15.0 * px,
+                font_family,
+                10.0 * px,
+                footer
             ));
         }
 
@@ -602,6 +690,7 @@ mod tests {
                 grid_color: "#404040".to_string(),
                 background_color: "#05050A".to_string(),
                 chart_color: None,
+                chart_outline: None,
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
@@ -757,6 +846,7 @@ mod tests {
             } else {
                 650.0
             },
+            px: None,
         });
         cfg.fov_deg = Some(if projection == "stereo" { 120.0 } else { 80.0 });
         cfg.style.background_color = "#0a0a0b".to_string();
@@ -835,6 +925,208 @@ mod tests {
         assert!(!render(&cfg).contains(boundary));
         cfg.layers.constellation_boundaries = true;
         assert!(render(&cfg).contains(boundary));
+    }
+
+    /// The elements of an SVG, each without its leading `<`.
+    fn elements(svg: &str) -> Vec<&str> {
+        svg.split('<').filter(|e| !e.is_empty()).collect()
+    }
+
+    fn attr_text<'a>(element: &'a str, name: &str) -> Option<&'a str> {
+        let at = element.find(&format!(" {name}=\""))? + name.len() + 3;
+        element[at..].split('"').next()
+    }
+
+    fn attr(element: &str, name: &str) -> Option<f32> {
+        attr_text(element, name)?.parse().ok()
+    }
+
+    fn without_attrs(element: &str, names: &[&str]) -> String {
+        let mut element = element.to_string();
+        for name in names {
+            if let Some(at) = element.find(&format!(" {name}=\"")) {
+                let value_end =
+                    at + name.len() + 3 + element[at + name.len() + 3..].find('"').unwrap();
+                element.replace_range(at..=value_end, "");
+            }
+        }
+        element
+    }
+
+    #[test]
+    fn view_px_scales_star_radii_and_line_widths_and_nothing_else() {
+        let mut cfg = view_config("stereo");
+        cfg.layers.constellations = true;
+        cfg.layers.constellation_boundaries = true;
+        cfg.layers.ecliptic = true;
+        cfg.layers.equator = true;
+        // Mid-June the Sun, Mercury, Venus and Jupiter are around Orion.
+        cfg.layers.planets = true;
+        let with_px = |px: Option<f64>| {
+            let mut cfg = cfg.clone();
+            cfg.view.as_mut().unwrap().px = px;
+            render(&cfg)
+        };
+        let base = with_px(None);
+        assert_eq!(base, with_px(Some(1.0)), "px defaults to 1");
+        let doubled = with_px(Some(2.0));
+        let (base, doubled) = (elements(&base), elements(&doubled));
+
+        let is_star = |e: &&str| e.starts_with("circle ") && e.contains(r##"fill="#000000""##);
+        let is_planet = |e: &&str| e.contains("data-planet=");
+        let stars = |svg: &[&str]| -> HashMap<(String, String), f32> {
+            svg.iter()
+                .filter(|e| is_star(e))
+                .map(|e| {
+                    let at = |name| attr_text(e, name).unwrap().to_string();
+                    ((at("cx"), at("cy")), attr(e, "r").unwrap())
+                })
+                .collect()
+        };
+
+        // Stars stay where they are at twice the radius. A star just off the chart
+        // may reach into it with the bigger radius, and only such a star is new.
+        let (base_stars, doubled_stars) = (stars(&base), stars(&doubled));
+        assert!(base_stars.len() > 100);
+        let view = SvgGenerator::view_projection(&cfg).unwrap();
+        for (position, r) in &doubled_stars {
+            match base_stars.get(position) {
+                // Radii are printed to 0.01.
+                Some(base_r) => assert!((r - 2.0 * base_r).abs() <= 0.015, "{position:?}"),
+                None => {
+                    let x: f32 = position.0.parse().unwrap();
+                    let y: f32 = position.1.parse().unwrap();
+                    assert!(!view.touches_chart(x, y, r / 2.0 - 0.02), "{position:?}");
+                }
+            }
+        }
+        assert!(base_stars.keys().all(|p| doubled_stars.contains_key(p)));
+
+        // Planets too, with their outline.
+        let planets = |svg: &[&str]| -> Vec<(String, f32, f32)> {
+            svg.iter()
+                .filter(|e| is_planet(e))
+                .map(|e| {
+                    let slug = attr_text(e, "data-planet").unwrap().to_string();
+                    (
+                        slug,
+                        attr(e, "r").unwrap(),
+                        attr(e, "stroke-width").unwrap(),
+                    )
+                })
+                .collect()
+        };
+        let (base_planets, doubled_planets) = (planets(&base), planets(&doubled));
+        assert!(base_planets.iter().any(|(slug, _, _)| slug == "sun"));
+        assert_eq!(base_planets.len(), doubled_planets.len());
+        for ((slug, r, width), (doubled_slug, doubled_r, doubled_width)) in
+            base_planets.iter().zip(&doubled_planets)
+        {
+            assert_eq!(slug, doubled_slug);
+            assert!((doubled_r - 2.0 * r).abs() <= 0.015, "{slug}");
+            assert_eq!(*doubled_width, 2.0 * width, "{slug}");
+        }
+
+        // Every other element is the same, but for its stroke width, which doubles.
+        let is_rest = |e: &&str| !is_star(e) && !is_planet(e);
+        let base_rest: Vec<&str> = base.into_iter().filter(is_rest).collect();
+        let doubled_rest: Vec<&str> = doubled.into_iter().filter(is_rest).collect();
+        assert_eq!(base_rest.len(), doubled_rest.len());
+        let mut lines = 0;
+        for (element, doubled) in base_rest.iter().zip(&doubled_rest) {
+            assert_eq!(
+                without_attrs(element, &["stroke-width"]),
+                without_attrs(doubled, &["stroke-width"])
+            );
+            if let Some(width) = attr(element, "stroke-width") {
+                assert_eq!(attr(doubled, "stroke-width"), Some(2.0 * width));
+                lines += 1;
+            }
+        }
+        assert!(lines > 50, "lines of every kind were compared, got {lines}");
+    }
+
+    #[test]
+    fn chart_outline_strokes_the_sky_edge_one_preview_px_wide_inside_it() {
+        let mut cfg = view_config("stereo");
+        assert!(!render(&cfg).contains("#c9ced6"));
+        cfg.style.chart_outline = Some("#c9ced6".to_string());
+        cfg.view.as_mut().unwrap().px = Some(0.5);
+        assert!(render(&cfg).contains(
+            r##"<circle cx="552" cy="552" r="551.75" fill="none" stroke="#c9ced6" stroke-width="0.5" />"##
+        ));
+
+        let mut cfg = view_config("pinhole");
+        cfg.style.chart_outline = Some("#c9ced6".to_string());
+        cfg.view.as_mut().unwrap().px = Some(2.0);
+        assert!(render(&cfg).contains(
+            r##"<rect x="1" y="1" width="1198" height="648" fill="none" stroke="#c9ced6" stroke-width="2" />"##
+        ));
+
+        // Without a view, 1 px around the 800 px chart's disc.
+        let mut cfg = baseline_config();
+        cfg.style.chart_outline = Some("#c9ced6".to_string());
+        assert!(render(&cfg).contains(
+            r##"<circle cx="400" cy="400" r="379.5" fill="none" stroke="#c9ced6" stroke-width="1" />"##
+        ));
+    }
+
+    #[test]
+    fn background_none_paints_nothing_behind_the_chart() {
+        let mut cfg = view_config("pinhole");
+        cfg.style.background_color = "none".to_string();
+        let svg = render(&cfg);
+        assert!(!svg.contains("fill=\"none\" />"), "no background rect");
+        assert_eq!(
+            svg.matches(r##"<rect width="100%" height="100%""##).count(),
+            1,
+            "only the sky's own fill"
+        );
+        assert!(svg.contains(r##"<rect width="100%" height="100%" fill="#ffffff" />"##));
+        svg2pdf::usvg::Tree::from_str(&svg, &svg2pdf::usvg::Options::default())
+            .expect("a chart without a background is still valid SVG");
+    }
+
+    #[test]
+    fn render_chart_prefixes_every_id_and_nests_at_the_placement() {
+        let mut cfg = view_config("stereo");
+        cfg.layers.planets = true;
+        let standalone = render(&cfg);
+        assert_eq!(
+            standalone,
+            SvgGenerator::render_chart(&cfg, hip_catalog(), "", None)
+        );
+        let nested = SvgGenerator::render_chart(
+            &cfg,
+            hip_catalog(),
+            "p1c2-",
+            Some(Placement {
+                x: 12.0,
+                y: 20.5,
+                width: 90.0,
+                height: 90.0,
+            }),
+        );
+        assert!(nested.starts_with(
+            r##"<svg x="12" y="20.5" width="90" height="90" viewBox="0 0 1104 1104">"##
+        ));
+
+        let ids = |svg: &str| -> Vec<String> {
+            svg.split(" id=\"")
+                .skip(1)
+                .map(|rest| rest.split('"').next().unwrap().to_string())
+                .collect()
+        };
+        let standalone_ids = ids(&standalone);
+        assert!(standalone_ids.contains(&"sky-mask".to_string()));
+        assert!(standalone_ids.iter().any(|id| id.starts_with("planet-")));
+        let prefixed: Vec<String> = standalone_ids
+            .iter()
+            .map(|id| format!("p1c2-{id}"))
+            .collect();
+        assert_eq!(ids(&nested), prefixed);
+        assert!(nested.contains(r##"clip-path="url(#p1c2-sky-mask)""##));
+        assert!(!nested.contains("url(#sky-mask)"));
     }
 
     /// Cross-language golden, as for the reference lines: the TypeScript preview is

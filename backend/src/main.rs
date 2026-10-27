@@ -1,6 +1,7 @@
 use anyhow::Context;
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use std::net::SocketAddr;
@@ -11,8 +12,13 @@ mod models;
 mod svg_generator;
 mod handlers {
     pub mod catalog;
+    pub mod document;
     pub mod export;
 }
+
+/// Request body limit of `/api/export/document`: 100 pages of 50 charts at about
+/// 1 KB of config each, with room. The 2 MB default would refuse a valid document.
+const DOCUMENT_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -44,6 +50,11 @@ fn build_app(state: AppState) -> Router {
         )
         // PDF Export
         .route("/api/export", post(handlers::export::export_pdf))
+        .route(
+            "/api/export/document",
+            post(handlers::document::export_document)
+                .layer(DefaultBodyLimit::max(DOCUMENT_BODY_LIMIT_BYTES)),
+        )
         .layer(cors)
         .with_state(state)
 }
@@ -209,5 +220,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(latitude_response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn smoke_export_document_route() {
+        let app = test_app().await;
+        let post = |body: Value| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/export/document")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+
+        let empty = app
+            .clone()
+            .oneshot(post(json!({ "pages": [] })))
+            .await
+            .unwrap();
+        assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
+        let message = to_bytes(empty.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&message).contains("1 to 100 pages"));
+
+        let blank = app
+            .oneshot(post(json!({
+                "pages": [{ "width_mm": 210, "height_mm": 297, "items": [] }]
+            })))
+            .await
+            .unwrap();
+        assert_eq!(blank.status(), StatusCode::OK);
+        assert_eq!(blank.headers()[header::CONTENT_TYPE], "application/pdf");
+        assert_eq!(
+            blank.headers()[header::CONTENT_DISPOSITION],
+            "attachment; filename=\"skycharts.pdf\""
+        );
+        let pdf = to_bytes(blank.into_body(), usize::MAX).await.unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
     }
 }

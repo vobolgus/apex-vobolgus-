@@ -90,6 +90,7 @@ formulas (`rust-core` `ViewProjection`, pinned to the preview by
 | --- | --- | --- |
 | `right`, `up`, `forward` | `[x, y, z]` | screen right, screen up and the chart centre in the equatorial frame (normalized by the server). Taken as given, so they also decide which way round the sky reads |
 | `width`, `height` | number | chart size in px, at most `20000`: the SVG `viewBox`. Stars use the preview's radii and lines its widths in these px; a stereo disc is as wide as the shorter side |
+| `px?` | number | length of one preview px in the units of `width`/`height`, in `(0, 1000]`, default `1`. Star and planet radii, line widths and text sizes are multiplied by it, nothing else changes. A document sends the chart size in mm and `px` = `186 / 1104` (mm per preview px), so stars keep their size on paper however large the chart is |
 
 `LayersConfig` (all `bool`; `constellation_boundaries` may be omitted, default `false`):
 
@@ -104,9 +105,13 @@ formulas (`rust-core` `ViewProjection`, pinned to the preview by
 `StyleConfig`:
 
 - `star_color`, `constellation_line_color`, `grid_color`, `background_color`,
-  `font_family` - strings; `background_color` fills the whole image
+  `font_family` - strings; `background_color` fills the whole image, `"none"` paints no
+  background at all (whatever the chart is drawn on, e.g. paper, shows through)
 - `chart_color?` - string, fill of the sky itself (the stereo disc or the pinhole frame);
   omitted, the background shows through
+- `chart_outline?` - string, a colour: strokes the sky's edge (the stereo disc or the
+  pinhole frame) 1 preview px wide (times `view.px`), just inside it. A white sky on white
+  paper needs it
 - `magnitude_scale` - number, star/planet size multiplier
 
 Example:
@@ -139,11 +144,50 @@ Validation (`400`, plain-text message):
 - `latitude` and `longitude` present when there is no `view`
 - `latitude` in `-90..=90`, `longitude` in `-180..=180` when given
 - optional `magnitude_limit` in `0..=10`
-- `view`: non-zero `right`, `up` and `forward`, `width` and `height` in `(0, 20000]`, and
-  `fov_deg` below `360` for `stereo` and below `180` for `pinhole`
+- `view`: non-zero `right`, `up` and `forward`, `width` and `height` in `(0, 20000]`, `px`
+  in `(0, 1000]` when given, and `fov_deg` below `360` for `stereo` and below `180` for
+  `pinhole`
 
 Other errors:
 
 - `422` - body does not match `RenderConfig` (missing required field, wrong type)
 - `400` - malformed JSON; `415` - missing `Content-Type: application/json`
 - `500` - SVG parsing or PDF conversion failed (plain-text message)
+
+## Document export
+
+- `POST /api/export/document` - several charts placed on pages, as one multi-page PDF
+  - Request: `Content-Type: application/json`, body up to 16 MB:
+
+    ```json
+    {
+      "pages": [
+        { "width_mm": 210, "height_mm": 297,
+          "items": [{ "x_mm": 12, "y_mm": 12, "width_mm": 90, "height_mm": 90, "config": { "...": "RenderConfig with a view" } }] },
+        { "width_mm": 297, "height_mm": 210, "items": [] }
+      ]
+    }
+    ```
+
+  - Response: `application/pdf`, `Content-Disposition: attachment; filename="skycharts.pdf"`,
+    one PDF page per entry of `pages`, in order, each exactly `width_mm × height_mm`
+    (1 mm = 72/25.4 pt; A4 is 595.28 × 841.89 pt). A page without items is a blank page
+- Geometry is in mm from the page's top-left corner, y down. Each chart is drawn into its
+  box with its `view.width × view.height` as the viewBox, aspect kept (centred if the box's
+  aspect differs). The generator sends `view.width/height` = the box in mm and `view.px`,
+  so star radii and line widths are fixed in mm whatever the chart's size; for paper it
+  uses `background_color: "none"`, a white `chart_color` and a `chart_outline`
+- How it is built: each page is an SVG in mm with every chart nested as an inner `<svg>`
+  under its own id prefix (so their clip paths cannot collide), converted with
+  `svg2pdf::to_chunk`; `pdf-writer` assembles the chunks into one page tree
+
+Validation (`400`, plain-text message naming the page and item, 1-based, e.g.
+`page 2, item 1: config needs a view`):
+
+- `1..=100` pages, `0..=50` items per page
+- page and item `width_mm`/`height_mm` positive, finite and at most `2000`
+- every item inside its page, with 1 mm of tolerance on each side
+- every item `config` has a `view` and passes the `/api/export` checks above
+
+Other errors as for `/api/export` (`422` for a body that does not match, `500` for a
+failed conversion; `413` above 16 MB).

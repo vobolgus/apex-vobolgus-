@@ -1,3 +1,4 @@
+use super::preview_px;
 use crate::models::RenderConfig;
 use rust_core::coords::ra_dec_to_unit_vector;
 use std::fmt::Write;
@@ -31,7 +32,8 @@ const GAL_TO_EQ_M21: f64 = 0.746_982_244_5;
 /// Stroke styling applied to one traced polyline.
 pub(super) struct PolylineStyle<'a> {
     pub(super) stroke: &'a str,
-    pub(super) width: &'a str,
+    /// In chart units: the preview's width in px times `view.px`.
+    pub(super) width: f32,
     pub(super) opacity: &'a str,
 }
 
@@ -165,30 +167,37 @@ pub(super) fn draw_coordinate_grids<F>(
 ) where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
+    // Passed down as `px`: line widths are preview px.
+    let px = preview_px(config);
+
     if config.layers.equatorial_grid {
-        draw_equatorial_grid(svg, grid_color, project_point);
+        draw_equatorial_grid(svg, grid_color, px, project_point);
     }
 
     if config.layers.equator {
-        draw_celestial_equator(svg, grid_color, project_point);
+        draw_celestial_equator(svg, grid_color, px, project_point);
     }
 
     if config.layers.ecliptic {
-        draw_ecliptic(svg, project_point);
+        draw_ecliptic(svg, px, project_point);
     }
 
     if config.layers.galactic_equator {
-        draw_galactic_equator(svg, project_point);
+        draw_galactic_equator(svg, px, project_point);
     }
 }
 
-pub(super) fn draw_equatorial_grid<F>(svg: &mut String, grid_color: &str, project_point: &F)
-where
+pub(super) fn draw_equatorial_grid<F>(
+    svg: &mut String,
+    grid_color: &str,
+    px: f32,
+    project_point: &F,
+) where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
     let style = PolylineStyle {
         stroke: grid_color,
-        width: "0.5",
+        width: 0.5 * px,
         opacity: "0.25",
     };
 
@@ -213,14 +222,18 @@ where
     }
 }
 
-pub(super) fn draw_celestial_equator<F>(svg: &mut String, grid_color: &str, project_point: &F)
-where
+pub(super) fn draw_celestial_equator<F>(
+    svg: &mut String,
+    grid_color: &str,
+    px: f32,
+    project_point: &F,
+) where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
     // Widths and opacities here and below are the preview's REFERENCE_LINE_STYLES.
     let style = PolylineStyle {
         stroke: grid_color,
-        width: "1",
+        width: px,
         opacity: "1",
     };
     draw_polyline(
@@ -231,13 +244,13 @@ where
     );
 }
 
-pub(super) fn draw_ecliptic<F>(svg: &mut String, project_point: &F)
+pub(super) fn draw_ecliptic<F>(svg: &mut String, px: f32, project_point: &F)
 where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
     let style = PolylineStyle {
         stroke: "#DC2626",
-        width: "1",
+        width: px,
         opacity: "0.95",
     };
     draw_polyline(
@@ -248,13 +261,13 @@ where
     );
 }
 
-pub(super) fn draw_galactic_equator<F>(svg: &mut String, project_point: &F)
+pub(super) fn draw_galactic_equator<F>(svg: &mut String, px: f32, project_point: &F)
 where
     F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
 {
     let style = PolylineStyle {
         stroke: "#B58CFF",
-        width: "1",
+        width: px,
         opacity: "0.9",
     };
     draw_polyline(
@@ -409,7 +422,7 @@ mod tests {
     fn nothing_visible_emits_no_path_element() {
         let project = |_x: f32, _y: f32, _z: f32| -> Option<(f32, f32)> { None };
         let mut svg = String::new();
-        draw_galactic_equator(&mut svg, &project);
+        draw_galactic_equator(&mut svg, 1.0, &project);
         assert!(svg.is_empty(), "no visible points must emit no <path>");
     }
 }

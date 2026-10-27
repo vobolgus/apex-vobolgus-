@@ -5,7 +5,7 @@ use rust_core::Star;
 use rust_core::coords::ra_dec_to_unit_vector;
 
 use super::grids::{PolylineStyle, draw_polyline, great_circle_points};
-use super::{ConstellationJson, localize_constellation};
+use super::{ConstellationJson, localize_constellation, preview_px};
 
 pub(super) fn draw_constellation_lines<F>(
     svg: &mut String,
@@ -25,7 +25,7 @@ pub(super) fn draw_constellation_lines<F>(
     // The preview's CONSTELLATION_LINE_STYLE.
     let style = PolylineStyle {
         stroke: const_color,
-        width: "0.6",
+        width: 0.6 * preview_px(config),
         opacity: "0.35",
     };
 
@@ -74,7 +74,7 @@ pub(super) fn draw_constellation_boundaries<F>(
     // The preview's CONSTELLATION_BOUNDARY_STYLE.
     let style = PolylineStyle {
         stroke: line_color,
-        width: "0.4",
+        width: 0.4 * preview_px(config),
         opacity: "0.15",
     };
 
@@ -113,6 +113,7 @@ pub(super) fn draw_constellation_names<F>(
     if !config.layers.constellation_names {
         return;
     }
+    let px = preview_px(config);
 
     for (abbr, const_data) in constellations {
         if let Some(target) = target_constellation
@@ -125,11 +126,11 @@ pub(super) fn draw_constellation_names<F>(
         let cy = const_data.center[1];
         let cz = const_data.center[2];
 
-        if let Some((px, py)) = project_point(cx, cy, cz) {
+        if let Some((x, y)) = project_point(cx, cy, cz) {
             let ru_name = localize_constellation(abbr, &const_data.name);
             svg.push_str(&format!(
-                r##"<text x="{:.2}" y="{:.2}" fill="#FFFFFF" font-family="{}" font-size="10" opacity="0.75" text-anchor="middle" dominant-baseline="middle">{}</text>"##,
-                px, py + 12.0, font_family, ru_name
+                r##"<text x="{:.2}" y="{:.2}" fill="#FFFFFF" font-family="{}" font-size="{}" opacity="0.75" text-anchor="middle" dominant-baseline="middle">{}</text>"##,
+                x, y + 12.0 * px, font_family, 10.0 * px, ru_name
             ));
         }
     }

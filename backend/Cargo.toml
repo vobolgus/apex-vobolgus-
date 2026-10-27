@@ -11,6 +11,8 @@ tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 svg2pdf = "0.12"
+# The version svg2pdf builds on: its chunks are assembled into one multi-page PDF.
+pdf-writer = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
 tower-http = { version = "0.5", features = ["cors"] }
 tower = { version = "0.5.3", features = ["util"] }
