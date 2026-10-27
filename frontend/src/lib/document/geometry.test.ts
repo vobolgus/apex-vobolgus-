@@ -9,12 +9,14 @@ import {
 	MIN_CHART_SIDE_MM,
 	overlaps,
 	pageSize,
+	placeFrame,
 	PRINT_MM_PER_PREVIEW_PX,
 	refitFrames,
 	sizeCandidates,
 	snapMove,
 	snapResize,
 	snapThresholdMm,
+	stepSize,
 	trackSize,
 	type ResizeAnchor,
 	type SnapGuide
@@ -624,6 +626,37 @@ describe('findPlacement', () => {
 		expectRect(next.frame, { x: 92.4, y: 12, w: 74.4, h: 186 });
 	});
 
+	it('puts a panorama too wide for half the width next to a chart, at its smallest size', () => {
+		// Past 2.25:1 every size is over 90 mm: 122 (two thirds of the width) is the smallest.
+		const disc = page('portrait', [{ x: 12, y: 12, w: 42, h: 42 }]);
+		expect(sizeCandidates('portrait', 2.3)[0]).toBe(122);
+		const placed = findPlacement([disc], 2.3);
+		expect(placed.pageIndex).toBe(0);
+		expectRect(placed.frame, { x: 60, y: 12, w: 122, h: 122 / 2.3 });
+
+		// On a landscape page past 3.34:1 (over 133.5 mm): 42 × 3.4 = 142.8.
+		const landscape = page('landscape', [{ x: 12, y: 12, w: 42, h: 42 }]);
+		const wide = findPlacement([landscape], 3.4);
+		expect(wide.pageIndex).toBe(0);
+		expectRect(wide.frame, { x: 60, y: 12, w: 142.8, h: 42 });
+	});
+
+	it('packs several panoramas onto one page instead of a page each', () => {
+		for (const aspect of [21 / 9, 3, 3.5]) {
+			const pages: DocPage[] = [];
+			for (let i = 0; i < 3; i++) {
+				const { pageIndex, frame } = findPlacement(pages, aspect);
+				const target = pageIndex === null ? page('portrait') : pages[pageIndex];
+				if (pageIndex === null) pages.push(target);
+				for (const existing of target.items) {
+					expect(overlaps(frame, existing.frame, GUTTER_MM)).toBe(false);
+				}
+				target.items.push(item(frame, aspect));
+			}
+			expect(pages, `aspect ${aspect}`).toHaveLength(1);
+		}
+	});
+
 	it('packs random charts into pages with no overlap', () => {
 		const random = rng(3);
 		for (let run = 0; run < 20; run++) {
@@ -677,6 +710,68 @@ describe('fitFrame', () => {
 			y: 20,
 			w: 80,
 			h: 40
+		});
+	});
+});
+
+describe('stepSize', () => {
+	it('steps a chart through the size candidates, its top-left kept', () => {
+		const frame = { x: 20, y: 30, w: 90, h: 90 };
+		expect(stepSize(frame, 1, 'portrait', 1)).toEqual({ x: 20, y: 30, w: 122, h: 122 });
+		expect(stepSize(frame, 1, 'portrait', -1)).toEqual({ x: 20, y: 30, w: 87, h: 87 });
+		// Off a candidate, the next one either way.
+		const odd = { x: 12, y: 12, w: 100, h: 100 };
+		expect(stepSize(odd, 1, 'portrait', 1)?.w).toBe(122);
+		expect(stepSize(odd, 1, 'portrait', -1)?.w).toBe(90);
+	});
+
+	it('moves a grown chart back into the content box', () => {
+		const grown = stepSize({ x: 108, y: 150, w: 90, h: 90 }, 1, 'portrait', 1)!;
+		expect(grown).toEqual({ x: 76, y: 150, w: 122, h: 122 });
+		expect(insideBox(grown, 'portrait')).toBe(true);
+	});
+
+	it('has no step past the largest or the smallest size', () => {
+		expect(stepSize({ x: 12, y: 12, w: 186, h: 186 }, 1, 'portrait', 1)).toBeNull();
+		expect(stepSize({ x: 12, y: 12, w: 42, h: 42 }, 1, 'portrait', -1)).toBeNull();
+	});
+
+	it('keeps the aspect', () => {
+		const frame = stepSize({ x: 12, y: 12, w: 90, h: 45 }, 2, 'portrait', 1)!;
+		expect(frame.w / frame.h).toBeCloseTo(2, 9);
+		expect(frame.w).toBe(122);
+	});
+});
+
+describe('placeFrame', () => {
+	it('keeps the chart at its own size in the first free spot', () => {
+		const others = [{ x: 12, y: 12, w: 90, h: 90 }];
+		expect(placeFrame({ x: 50, y: 200, w: 80, h: 80 }, 1, others, 'portrait')).toEqual({
+			x: 108,
+			y: 12,
+			w: 80,
+			h: 80
+		});
+	});
+
+	it('steps down through the sizes until it fits', () => {
+		// Under a full-width disc only 81 mm are left: 63.75 fits, 85 does not.
+		const others = [{ x: 12, y: 12, w: 186, h: 186 }];
+		expect(placeFrame({ x: 12, y: 12, w: 85, h: 85 }, 1, others, 'portrait')).toEqual({
+			x: 12,
+			y: 204,
+			w: 63.75,
+			h: 63.75
+		});
+	});
+
+	it('fits the chart into the box where it was when there is no room', () => {
+		const others = [{ x: 12, y: 12, w: 186, h: 273 }];
+		expect(placeFrame({ x: 150, y: 250, w: 90, h: 90 }, 1, others, 'portrait')).toEqual({
+			x: 108,
+			y: 195,
+			w: 90,
+			h: 90
 		});
 	});
 });

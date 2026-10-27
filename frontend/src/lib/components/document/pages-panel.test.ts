@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
-import { DocumentStore } from '$lib/document/document.svelte';
+import { DocumentStore, MAX_PAGES } from '$lib/document/document.svelte';
 import type { ChartSnapshot, DocItem } from '$lib/document/types';
 import PagesPanel from './PagesPanel.svelte';
 
@@ -209,6 +209,50 @@ describe('PagesPanel', () => {
 		expect(thumbs(ctx.target)).toHaveLength(2);
 	});
 
+	it("gives the focus to the restored page when the toast's Undo took it along", async () => {
+		const store = new DocumentStore(null);
+		store.addPage();
+		const second = store.addPage();
+		const ctx = setup(store);
+		cleanup = ctx.cleanup;
+
+		thumbs(ctx.target)[1].focus();
+		keydown(thumbs(ctx.target)[1], 'Delete');
+		await settle();
+		// The Undo button the toast drops as it closes: the focus falls to the body.
+		(document.activeElement as HTMLElement).blur();
+		const undo = ctx.notify.mock.lastCall![1] as () => void;
+		undo();
+		await settle();
+		await settle();
+		expect(document.activeElement).toBe(thumbs(ctx.target)[1]);
+		expect(document.activeElement?.closest('[data-page-id]')?.getAttribute('data-page-id')).toBe(
+			second
+		);
+	});
+
+	it('leaves the focus alone when an undo comes from somewhere else', async () => {
+		const store = new DocumentStore(null);
+		store.addPage();
+		store.addPage();
+		const ctx = setup(store);
+		cleanup = ctx.cleanup;
+		const elsewhere = document.createElement('button');
+		document.body.append(elsewhere);
+		try {
+			button(ctx.target, 'Delete page 2').click();
+			flushSync();
+			elsewhere.focus();
+			(ctx.notify.mock.lastCall![1] as () => void)();
+			await settle();
+			await settle();
+			expect(thumbs(ctx.target)).toHaveLength(2);
+			expect(document.activeElement).toBe(elsewhere);
+		} finally {
+			elsewhere.remove();
+		}
+	});
+
 	it('Delete on a focused thumbnail deletes the page and focuses the one in its place', async () => {
 		const store = new DocumentStore(null);
 		store.addPage();
@@ -283,6 +327,20 @@ describe('PagesPanel', () => {
 			'Page 1, 1 chart',
 			'Page 2, no charts'
 		]);
+		// The focus stays on ⊕; a screen reader hears what it did.
+		expect(ctx.target.querySelector('[role="status"]')?.textContent).toBe('Page 2 added');
+	});
+
+	it('turns ⊕ off once the document has the most pages it may', () => {
+		const store = new DocumentStore(null);
+		for (let i = 0; i < MAX_PAGES; i++) store.addPage();
+		const ctx = setup(store);
+		cleanup = ctx.cleanup;
+		const add = button(ctx.target, 'Add page');
+		expect(add.disabled).toBe(true);
+		expect(add.title).toBe('A PDF document has at most 100 pages');
+		add.click();
+		expect(store.pageCount).toBe(MAX_PAGES);
 	});
 
 	it('collapses to a tab with the page count and expands again', () => {

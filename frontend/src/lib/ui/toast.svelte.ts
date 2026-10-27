@@ -4,7 +4,8 @@
  * `show` replaces whatever is up and starts a 6 s timeout. The timeout pauses
  * while the pointer or the focus is on the toast (`pause`/`resume`), so a slow
  * reader or a keyboard user still reaches Undo. `undo` runs the action once and
- * dismisses the toast.
+ * dismisses the toast. `hold` shows a message with no timeout, for work still
+ * going on: it stays until it is dismissed or replaced.
  */
 
 export const TOAST_DURATION_MS = 6000;
@@ -26,6 +27,8 @@ export class ToastStore {
 	#remainingMs = 0;
 	#deadline = 0;
 	#paused = false;
+	/** The current toast has no timeout (`hold`). */
+	#held = false;
 
 	constructor(durationMs = TOAST_DURATION_MS) {
 		this.#durationMs = durationMs;
@@ -37,8 +40,19 @@ export class ToastStore {
 		this.current = undo ? { id: this.#nextId, message, undo } : { id: this.#nextId, message };
 		// A new toast is a new element: the pointer or focus that paused the old one is gone.
 		this.#paused = false;
+		this.#held = false;
 		this.#remainingMs = this.#durationMs;
 		this.#start();
+		return this.#nextId;
+	}
+
+	/** Show `message` until `dismiss(id)` (or the next toast); returns the toast's id. */
+	hold(message: string): number {
+		this.#nextId += 1;
+		this.current = { id: this.#nextId, message };
+		this.#clearTimer();
+		this.#paused = false;
+		this.#held = true;
 		return this.#nextId;
 	}
 
@@ -47,6 +61,7 @@ export class ToastStore {
 		if (!this.current || (id !== undefined && this.current.id !== id)) return;
 		this.#clearTimer();
 		this.#paused = false;
+		this.#held = false;
 		this.current = null;
 	}
 
@@ -73,7 +88,7 @@ export class ToastStore {
 	resume(): void {
 		if (!this.#paused) return;
 		this.#paused = false;
-		if (this.current) this.#start();
+		if (this.current && !this.#held) this.#start();
 	}
 
 	#start() {

@@ -13,6 +13,13 @@ import { findPlacement, fitFrame, refitFrames } from './geometry';
 import type { ChartSnapshot, DocItem, DocPage, PageOrientation, Rect } from './types';
 
 export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v1';
+/**
+ * The backend's limits (backend/src/handlers/document.rs): a document past them
+ * cannot be exported, so the editor does not build one.
+ */
+export const MAX_PAGES = 100;
+export const MAX_ITEMS_PER_PAGE = 50;
+export const MAX_CHARTS = 200;
 /** Thumbnails are saved while their total stays under this many chars (≈ bytes). */
 export const THUMB_BUDGET_CHARS = 2_000_000;
 const SAVE_DELAY_MS = 250;
@@ -68,6 +75,21 @@ export class DocumentStore {
 		return this.pages.reduce((sum, page) => sum + page.items.length, 0);
 	}
 
+	/** Whether another page fits under `MAX_PAGES`. */
+	get canAddPage(): boolean {
+		return this.pages.length < MAX_PAGES;
+	}
+
+	/**
+	 * Why a chart at `aspect` cannot be added, or null when it can: the document
+	 * holds `MAX_CHARTS`, or it would need a new page past `MAX_PAGES`.
+	 */
+	addChartBlocker(aspect: number): 'charts' | 'pages' | null {
+		if (this.chartCount >= MAX_CHARTS) return 'charts';
+		if (this.canAddPage) return null;
+		return findPlacement(this.pages, aspect).pageIndex === null ? 'pages' : null;
+	}
+
 	page(id: string): DocPage | undefined {
 		return this.pages.find((page) => page.id === id);
 	}
@@ -76,7 +98,10 @@ export class DocumentStore {
 		return this.pages.findIndex((page) => page.id === id);
 	}
 
-	/** Place a copy of `chart` where Add to PDF puts it, on a new page if it fits nowhere. */
+	/**
+	 * Place a copy of `chart` where Add to PDF puts it, on a new page if it fits
+	 * nowhere. Check `addChartBlocker` first: this does not.
+	 */
 	addChart(chart: ChartSnapshot, thumb?: string): AddChartResult {
 		const { pageIndex, frame } = findPlacement(this.pages, chart.aspect);
 		if (pageIndex === null) this.pages.push(emptyPage('portrait'));
@@ -96,10 +121,13 @@ export class DocumentStore {
 		return page.id;
 	}
 
-	/** Delete a page; the returned function puts it back where it was (once). */
-	removePage(id: string): () => void {
+	/**
+	 * Delete a page; the returned function puts it back where it was (once, and only
+	 * while the limits leave room) and says whether it did.
+	 */
+	removePage(id: string): () => boolean {
 		const index = this.pageIndex(id);
-		if (index < 0) return () => {};
+		if (index < 0) return () => false;
 		const removed = $state.snapshot(this.pages[index]);
 		const wasSelected = this.selectedPageId === id;
 		this.pages.splice(index, 1);
@@ -108,10 +136,12 @@ export class DocumentStore {
 		}
 		this.#scheduleSave();
 		return once(() => {
-			if (this.pageIndex(removed.id) >= 0) return;
+			if (this.pageIndex(removed.id) >= 0 || !this.canAddPage) return false;
+			if (this.chartCount + removed.items.length > MAX_CHARTS) return false;
 			this.pages.splice(Math.min(index, this.pages.length), 0, removed);
 			if (wasSelected) this.selectedPageId = removed.id;
 			this.#scheduleSave();
+			return true;
 		});
 	}
 
@@ -140,12 +170,16 @@ export class DocumentStore {
 		return true;
 	}
 
-	/** Move a chart to `toPageId` (on top of its charts) at `frame`, fitted like `updateItem`. */
+	/**
+	 * Move a chart to `toPageId` (on top of its charts) at `frame`, fitted like
+	 * `updateItem`. A page holding `MAX_ITEMS_PER_PAGE` takes no more.
+	 */
 	moveItem(itemId: string, toPageId: string, frame: Rect): boolean {
 		const from = this.pages.find((page) => page.items.some((it) => it.id === itemId));
 		const to = this.page(toPageId);
 		if (!from || !to) return false;
 		if (from === to) return this.updateItem(toPageId, itemId, frame);
+		if (to.items.length >= MAX_ITEMS_PER_PAGE) return false;
 		const index = from.items.findIndex((it) => it.id === itemId);
 		const item = $state.snapshot(from.items[index]);
 		from.items.splice(index, 1);
@@ -154,20 +188,27 @@ export class DocumentStore {
 		return true;
 	}
 
-	/** Delete a chart; the returned function puts it back on its page if that still exists (once). */
-	removeItem(pageId: string, itemId: string): () => void {
+	/**
+	 * Delete a chart; the returned function puts it back on its page (once, if that
+	 * page still exists and the limits leave room) and says whether it did.
+	 */
+	removeItem(pageId: string, itemId: string): () => boolean {
 		const page = this.page(pageId);
 		const index = page ? page.items.findIndex((it) => it.id === itemId) : -1;
-		if (!page || index < 0) return () => {};
+		if (!page || index < 0) return () => false;
 		const removed = $state.snapshot(page.items[index]);
 		page.items.splice(index, 1);
 		this.#scheduleSave();
 		return once(() => {
 			const target = this.page(pageId);
-			if (!target || this.pages.some((p) => p.items.some((it) => it.id === removed.id))) return;
+			if (!target || this.pages.some((p) => p.items.some((it) => it.id === removed.id))) {
+				return false;
+			}
+			if (target.items.length >= MAX_ITEMS_PER_PAGE || this.chartCount >= MAX_CHARTS) return false;
 			const frame = fitFrame(removed.frame, removed.chart.aspect, target.orientation);
 			target.items.splice(Math.min(index, target.items.length), 0, { ...removed, frame });
 			this.#scheduleSave();
+			return true;
 		});
 	}
 
@@ -235,12 +276,13 @@ function emptyPage(orientation: PageOrientation): DocPage {
 	return { id: createId(), orientation, items: [] };
 }
 
-function once(fn: () => void): () => void {
+/** `fn` the first time; false every time after. */
+function once(fn: () => boolean): () => boolean {
 	let done = false;
 	return () => {
-		if (done) return;
+		if (done) return false;
 		done = true;
-		fn();
+		return fn();
 	};
 }
 

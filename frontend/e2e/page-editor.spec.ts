@@ -123,7 +123,7 @@ test('a dragged chart snaps to a grid line', async ({ page }) => {
 test('a chart dragged onto the next page moves there, Escape closes', async ({ page }) => {
 	const editor = await seedAndOpen(page);
 	const chart = editor.getByRole('button', { name: /^Chart 2 of 2,/ });
-	const next = editor.getByRole('button', { name: 'Show page 2, 0 charts' });
+	const next = editor.getByRole('button', { name: 'Show page 2, no charts' });
 	await drag(page, centre((await chart.boundingBox())!), centre((await next.boundingBox())!));
 
 	await expect
@@ -153,4 +153,64 @@ test('a chart let go off every page goes back where it was', async ({ page }) =>
 	await page.waitForTimeout(400);
 	expect(await savedFrame(page, 'e2e-a')).toEqual({ x: 12, y: 12, w: 60, h: 60 });
 	await expect(editor).toBeVisible();
+});
+
+test('the toast clears the strip of mini pages, so a click on a page reaches it', async ({
+	page
+}) => {
+	const editor = await seedAndOpen(page);
+	await editor.getByRole('button', { name: /^Chart 1 of 2,/ }).focus();
+	await page.keyboard.press('Delete');
+	const toast = page.locator('.toast').filter({ hasText: 'Chart removed' });
+	await expect(toast).toBeVisible();
+	const toastBox = (await toast.boundingBox())!;
+	const stripBox = (await editor.getByRole('navigation', { name: 'All pages' }).boundingBox())!;
+	expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(stripBox.y);
+
+	// The top of a mini page is the mini page's, not the toast's.
+	const mini = editor.getByRole('button', { name: 'Go to page 2, no charts' });
+	const miniBox = (await mini.boundingBox())!;
+	await page.mouse.click(miniBox.x + miniBox.width / 2, miniBox.y + 4);
+	await expect(mini).toHaveAttribute('aria-current', 'page');
+});
+
+test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ does nothing', async ({
+	browser
+}) => {
+	const context = await browser.newContext({
+		viewport: { width: 390, height: 844 },
+		hasTouch: true,
+		isMobile: true
+	});
+	const page = await context.newPage();
+	try {
+		await page.goto('/');
+		await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
+			STORAGE_KEY,
+			DOCUMENT
+		] as const);
+		await page.reload();
+		await page.waitForSelector('canvas');
+		await page.waitForLoadState('networkidle').catch(() => undefined);
+		// Collapsed on a phone: open the panel, then the page.
+		await page.getByRole('button', { name: /^PDF pages/ }).click();
+		await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
+		const editor = page.getByRole('dialog', { name: 'PDF document' });
+		await expect(editor).toBeVisible();
+
+		const item = editor.locator('.slot[data-role="current"] [data-item-id="e2e-b"]');
+		const box = (await item.boundingBox())!;
+		// Where the ⊖ sits once the chart is selected.
+		await page.touchscreen.tap(box.x + 30, box.y + 30);
+		await expect(editor.getByRole('button', { name: /^Chart 2 of 2,/ })).toBeFocused();
+		await page.waitForTimeout(400);
+		expect((await savedPages(page)).map((items) => items.map((it) => it.id))).toEqual([
+			['e2e-a', 'e2e-b'],
+			[]
+		]);
+		// Selected, its toolbar is there for whoever cannot drag.
+		await expect(item.getByRole('button', { name: 'Make chart 2 larger' })).toBeVisible();
+	} finally {
+		await context.close();
+	}
 });

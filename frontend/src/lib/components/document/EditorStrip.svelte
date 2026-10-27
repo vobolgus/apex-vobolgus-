@@ -6,26 +6,26 @@
 	 * Scrolls sideways when the pages do not fit, also under a plain mouse wheel,
 	 * and keeps the current page in view.
 	 */
+	import { MAX_PAGES } from '$lib/document/document.svelte';
 	import { pageSize } from '$lib/document/geometry';
+	import { chartCountLabel } from '$lib/document/labels';
 	import type { DocPage } from '$lib/document/types';
 
 	interface Props {
 		pages: readonly DocPage[];
 		currentId: string;
+		/** Whether the document has room for another page. */
+		canAdd?: boolean;
 		onselect: (pageId: string) => void;
 		onadd: () => void;
 	}
 
-	let { pages, currentId, onselect, onadd }: Props = $props();
+	let { pages, currentId, canAdd = true, onselect, onadd }: Props = $props();
 
 	/** Height of a portrait mini page, px; a landscape one is this wide. */
 	const MINI_PX = 40;
 
 	let scrollerEl = $state<HTMLDivElement>();
-
-	function chartWord(count: number): string {
-		return count === 1 ? '1 chart' : `${count} charts`;
-	}
 
 	function miniSize(page: DocPage) {
 		const { w, h } = pageSize(page.orientation);
@@ -71,7 +71,7 @@
 						class="mini"
 						type="button"
 						aria-current={page.id === currentId ? 'page' : undefined}
-						aria-label="Go to page {index + 1}, {chartWord(page.items.length)}"
+						aria-label="Go to page {index + 1}, {chartCountLabel(page.items.length)}"
 						title="Page {index + 1}"
 						onclick={() => onselect(page.id)}
 					>
@@ -111,7 +111,14 @@
 				</li>
 			{/each}
 			<li>
-				<button class="add" type="button" aria-label="Add page" title="Add page" onclick={onadd}>
+				<button
+					class="add"
+					type="button"
+					aria-label="Add page"
+					title={canAdd ? 'Add page' : `A PDF document has at most ${MAX_PAGES} pages`}
+					disabled={!canAdd}
+					onclick={onadd}
+				>
 					<span class="add-box">
 						<svg viewBox="0 0 16 16" aria-hidden="true">
 							<circle cx="8" cy="8" r="6.25" />
@@ -228,6 +235,12 @@
 		box-shadow: var(--ring);
 	}
 
+	.add:disabled {
+		background: transparent;
+		color: var(--fg-icon-off);
+		cursor: default;
+	}
+
 	.add-box svg {
 		width: 20px;
 		height: 20px;
@@ -237,9 +250,18 @@
 		stroke-linecap: round;
 	}
 
+	/* The current page is filled, so an outline means the focus, on it or on another. */
 	@media (forced-colors: active) {
 		.mini[aria-current] {
-			outline: 2px solid Highlight;
+			forced-color-adjust: none;
+			background: Highlight;
+			color: HighlightText;
+		}
+
+		.mini:focus-visible,
+		.add:focus-visible {
+			outline: 2px solid CanvasText;
+			outline-offset: 2px;
 		}
 	}
 

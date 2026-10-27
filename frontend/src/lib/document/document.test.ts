@@ -5,10 +5,13 @@ import {
 	createId,
 	DOCUMENT_STORAGE_KEY,
 	DocumentStore,
+	MAX_CHARTS,
+	MAX_ITEMS_PER_PAGE,
+	MAX_PAGES,
 	THUMB_BUDGET_CHARS,
 	type DocumentStorage
 } from './document.svelte';
-import type { ChartSnapshot, DocPage, Rect } from './types';
+import type { ChartSnapshot, DocItem, DocPage, Rect } from './types';
 
 function chart(aspect = 1): ChartSnapshot {
 	return {
@@ -31,6 +34,11 @@ function chart(aspect = 1): ChartSnapshot {
 		aspect,
 		createdAt: '2026-10-27T12:00:00.000Z'
 	};
+}
+
+/** A chart filling a portrait page's content box: nothing else fits beside it. */
+function fullItem(id: string): DocItem {
+	return { id, chart: chart(186 / 273), frame: { x: 12, y: 12, w: 186, h: 273 } };
 }
 
 function memoryStorage(limit = Infinity) {
@@ -149,13 +157,13 @@ describe('DocumentStore', () => {
 			expect(doc.pages.map((p) => p.id)).toEqual([b, c]);
 			expect(doc.selectedPageId).toBe(b);
 
-			undo();
+			expect(undo()).toBe(true);
 			expect(doc.pages.map((p) => p.id)).toEqual([a, b, c]);
 			expect(JSON.stringify(doc.page(a)?.items)).toBe(items);
 			expect(doc.selectedPageId).toBe(a);
 
 			doc.removePage(c);
-			undo();
+			expect(undo()).toBe(false);
 			expect(doc.pages.map((p) => p.id)).toEqual([a, b]);
 		});
 
@@ -252,9 +260,9 @@ describe('DocumentStore', () => {
 
 			const undo = doc.removeItem(a.pageId, b.itemId);
 			expect(page().items.map((i) => i.id)).toEqual([a.itemId, c.itemId]);
-			undo();
+			expect(undo()).toBe(true);
 			expect(page().items.map((i) => i.id)).toEqual([a.itemId, b.itemId, c.itemId]);
-			undo();
+			expect(undo()).toBe(false);
 			expect(page().items).toHaveLength(3);
 		});
 
@@ -263,9 +271,59 @@ describe('DocumentStore', () => {
 			const { pageId, itemId } = doc.addChart(chart());
 			const undo = doc.removeItem(pageId, itemId);
 			doc.removePage(pageId);
-			undo();
+			expect(undo()).toBe(false);
 			expect(doc.pages).toEqual([]);
 			expect(doc.removeItem(pageId, itemId)).toBeTypeOf('function');
+		});
+	});
+
+	describe('limits', () => {
+		it('matches the backend: 100 pages, 50 charts on a page, 200 in all', () => {
+			expect([MAX_PAGES, MAX_ITEMS_PER_PAGE, MAX_CHARTS]).toEqual([100, 50, 200]);
+		});
+
+		it('has room for pages up to the limit', () => {
+			const doc = new DocumentStore(null);
+			for (let i = 0; i < MAX_PAGES - 1; i++) doc.addPage();
+			expect(doc.canAddPage).toBe(true);
+			doc.addPage();
+			expect(doc.canAddPage).toBe(false);
+		});
+
+		it('says why a chart cannot be added', () => {
+			const doc = new DocumentStore(null);
+			expect(doc.addChartBlocker(1)).toBeNull();
+			for (let i = 0; i < MAX_PAGES; i++) doc.addPage();
+			// The pages are empty: a chart still fits on one.
+			expect(doc.addChartBlocker(1)).toBeNull();
+			for (const page of doc.pages) {
+				page.items.push(...Array.from({ length: 2 }, (_, i) => fullItem(`${page.id}-${i}`)));
+			}
+			// 200 charts.
+			expect(doc.addChartBlocker(1)).toBe('charts');
+			doc.pages.forEach((page) => page.items.splice(1));
+			// 100 full pages and no room for a new one.
+			expect(doc.addChartBlocker(1)).toBe('pages');
+		});
+
+		it('moves no chart onto a full page', () => {
+			const doc = new DocumentStore(null);
+			const { itemId } = doc.addChart(chart());
+			const full = doc.addPage();
+			doc
+				.page(full)!
+				.items.push(...Array.from({ length: MAX_ITEMS_PER_PAGE }, (_, i) => fullItem(`f-${i}`)));
+			expect(doc.moveItem(itemId, full, { x: 12, y: 12, w: 90, h: 90 })).toBe(false);
+			expect(doc.pages[0].items.map((it) => it.id)).toEqual([itemId]);
+		});
+
+		it('brings no page back past the page limit', () => {
+			const doc = new DocumentStore(null);
+			const first = doc.addPage();
+			const undo = doc.removePage(first);
+			for (let i = 0; i < MAX_PAGES; i++) doc.addPage();
+			expect(undo()).toBe(false);
+			expect(doc.pageCount).toBe(MAX_PAGES);
 		});
 	});
 

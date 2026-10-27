@@ -13,7 +13,8 @@
 	import { PROJECTION_SEGMENTS } from '$lib/components/dock/options';
 	import SegmentedControl from '$lib/components/dock/SegmentedControl.svelte';
 	import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
-	import { DocumentStore } from '$lib/document/document.svelte';
+	import { DocumentStore, MAX_CHARTS, MAX_PAGES } from '$lib/document/document.svelte';
+	import { plural } from '$lib/document/labels';
 	import { exportDocument, snapshotChart } from '$lib/document/render';
 	import { loadFlubberInterpolator } from '$lib/flubber';
 	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
@@ -32,7 +33,7 @@
 	} from '$lib/state/projection-transition.svelte';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
-	import { toast } from '$lib/ui/toast.svelte';
+	import { toast, type ToastItem } from '$lib/ui/toast.svelte';
 
 	/** The export menu: what each format is for, and its shortcut (⌘S always saves a PNG). */
 	const EXPORT_OPTIONS = [
@@ -87,13 +88,17 @@
 	let narrow = $state(false);
 	/** Read out after Add to PDF (the thumbnail's flash is the visual cue). */
 	let addAnnouncement = $state('');
+	/** A document export is on its way: its row waits for it, a second click starts nothing. */
+	let documentExporting = $state(false);
 	const modalOpen = $derived(aboutOpen || editorPageId !== null);
 	// On a phone the panel floats over the chart, which it may cover; on a wide screen the chart moves aside.
 	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
 	const documentNote = $derived(
-		documentStore.pageCount === 0
-			? 'Add a chart first'
-			: `${documentStore.pageCount} ${documentStore.pageCount === 1 ? 'page' : 'pages'} · A4`
+		documentExporting
+			? 'Preparing…'
+			: documentStore.pageCount === 0
+				? 'Add a chart first'
+				: `${plural(documentStore.pageCount, 'page')} · A4`
 	);
 
 	const notify = (message: string, undo?: () => void) => {
@@ -153,7 +158,8 @@
 		const handleChartGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
 
 		const handleKeyDown = (event: KeyboardEvent) => {
-			// ⌘Z/Ctrl+Z takes back what the toast offers to undo, from anywhere (also the editor).
+			// ⌘Z/Ctrl+Z takes back what the toast offers to undo, from anywhere; the editor,
+			// which keeps its keys from the page, does the same through its `undo`.
 			if (isModShortcut(event, 'KeyZ', apple) && toast.current?.undo) {
 				event.preventDefault();
 				if (!event.repeat) toast.undo();
@@ -324,6 +330,16 @@
 	function addToPdf() {
 		const chartView = currentChartView();
 		const chart = snapshotChart(chartView, layers);
+		// The backend's limits: a document past them would not export.
+		const blocker = documentStore.addChartBlocker(chart.aspect);
+		if (blocker) {
+			toast.show(
+				blocker === 'charts'
+					? `The PDF document is full: it holds ${MAX_CHARTS} charts at most`
+					: `No room left: a PDF document has ${MAX_PAGES} pages at most`
+			);
+			return;
+		}
 		const thumb = canvasEl ? chartThumbnail(canvasEl, chartView) : undefined;
 		const { pageId } = documentStore.addChart(chart, thumb);
 		documentStore.selectedPageId = pageId;
@@ -337,17 +353,35 @@
 		setTimeout(() => (addAnnouncement = message), 50);
 	}
 
+	/**
+	 * The whole document as one PDF. A slow export says so until it is done (a held
+	 * toast); an Undo that toast covered comes back afterwards, unless something newer
+	 * took its place. The row is off meanwhile, so a second click starts nothing.
+	 */
 	async function runDocumentExport() {
-		exportMenu.close();
-		if (documentStore.pageCount === 0) return;
-		let progressId: number | null = null;
-		const progress = setTimeout(() => {
-			progressId = toast.show('Preparing the PDF…');
+		exportMenu.dismiss();
+		if (documentStore.pageCount === 0 || documentExporting) return;
+		documentExporting = true;
+		const progress: { id: number | null; covered: ToastItem | null } = { id: null, covered: null };
+		const timer = setTimeout(() => {
+			progress.covered = toast.current;
+			progress.id = toast.hold('Preparing the PDF…');
 		}, EXPORT_PROGRESS_DELAY_MS);
-		const ok = await exportDocument(documentStore.pages);
-		clearTimeout(progress);
-		if (progressId !== null) toast.dismiss(progressId);
-		if (!ok) toast.show('Couldn’t export the PDF. Try again in a moment.');
+		const result = await exportDocument(documentStore.pages);
+		clearTimeout(timer);
+		documentExporting = false;
+		const progressShowing = progress.id !== null && toast.current?.id === progress.id;
+		if (progress.id !== null) toast.dismiss(progress.id);
+		if (!result.ok) {
+			// A refusal (a 400) names its reason: trying again would not help.
+			toast.show(
+				result.message
+					? `Couldn’t export the PDF: ${result.message}`
+					: 'Couldn’t export the PDF. Try again in a moment.'
+			);
+		} else if (progressShowing && progress.covered?.undo) {
+			toast.show(progress.covered.message, progress.covered.undo);
+		}
 	}
 
 	function openEditor(pageId: string) {
@@ -360,7 +394,8 @@
 
 	function handleExportFormatSelect(format: ExportFormat) {
 		selectedExportFormat = format;
-		exportMenu.close();
+		// From the keyboard, the focus goes back to the menu's button, not to <body>.
+		exportMenu.dismiss();
 		runExport(format);
 	}
 
@@ -550,7 +585,7 @@
 								class="export-option"
 								type="button"
 								role="menuitem"
-								disabled={documentStore.pageCount === 0}
+								disabled={documentStore.pageCount === 0 || documentExporting}
 								aria-labelledby="export-document-name"
 								aria-describedby="export-document-note"
 								onclick={runDocumentExport}
@@ -618,8 +653,10 @@
 	pageId={editorPageId}
 	onclose={() => (editorPageId = null)}
 	{notify}
+	undo={() => toast.undo()}
+	{apple}
 />
-<Toast store={toast} modal={modalOpen} />
+<Toast store={toast} modal={modalOpen} {apple} />
 <p class="sr-only" role="status">{addAnnouncement}</p>
 
 <style>

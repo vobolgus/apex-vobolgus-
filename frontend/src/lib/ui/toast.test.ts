@@ -97,6 +97,28 @@ describe('ToastStore', () => {
 		expect(toast.current).toBeNull();
 	});
 
+	it('holds a message with no timeout until it is dismissed', () => {
+		const toast = new ToastStore();
+		const id = toast.hold('Preparing the PDF…');
+		vi.advanceTimersByTime(60_000);
+		expect(toast.current).toEqual({ id, message: 'Preparing the PDF…' });
+		// Hovering and leaving it does not start a clock either.
+		toast.pause();
+		toast.resume();
+		vi.advanceTimersByTime(60_000);
+		expect(toast.current?.id).toBe(id);
+		toast.dismiss(id);
+		expect(toast.current).toBeNull();
+	});
+
+	it('times out a toast shown after a held one', () => {
+		const toast = new ToastStore();
+		toast.hold('Preparing the PDF…');
+		toast.show('Couldn’t export the PDF.');
+		vi.advanceTimersByTime(TOAST_DURATION_MS);
+		expect(toast.current).toBeNull();
+	});
+
 	it('takes another duration', () => {
 		const toast = new ToastStore(100);
 		toast.show('Quick');

@@ -16,9 +16,9 @@ mod handlers {
     pub mod export;
 }
 
-/// Request body limit of `/api/export/document`: 100 pages of 50 charts at about
-/// 1 KB of config each, with room. The 2 MB default would refuse a valid document.
-const DOCUMENT_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+/// Request body limit of `/api/export/document`: 200 charts (the most a document
+/// holds) at about 1 KB of config each and 100 pages, with plenty of room.
+const DOCUMENT_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {

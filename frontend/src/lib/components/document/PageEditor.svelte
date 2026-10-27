@@ -12,20 +12,30 @@
 	 * by their corners (`snapResize`, aspect locked); let go over a neighbouring page,
 	 * a chart moves there, under the pointer; anywhere off the pages it goes back.
 	 * The store is written once, on release. From the keyboard a chart nudges by 1 mm
-	 * (Shift: 10) and Delete removes it; ←/→ elsewhere change the page.
+	 * (Shift: 10), + and − step its size, Page Up/Down move it to the page before or
+	 * after, and Delete removes it; ←/→ elsewhere change the page. A selected chart's
+	 * toolbar does the same without a drag.
+	 *
+	 * ⌘Z / Ctrl+Z is the toast's Undo, as on the page behind (which the modal keeps
+	 * from these keys): a chart removed here, or a page deleted in the panel.
 	 */
 	import { tick } from 'svelte';
-	import type { DocumentStore } from '$lib/document/document.svelte';
+	import { MAX_ITEMS_PER_PAGE, type DocumentStore } from '$lib/document/document.svelte';
 	import {
 		fitFrame,
 		pageSize,
+		placeFrame,
 		snapMove,
 		snapResize,
 		snapThresholdMm,
+		stepSize,
 		type ResizeAnchor,
 		type SnapGuide
 	} from '$lib/document/geometry';
+	import { plural } from '$lib/document/labels';
 	import type { DocItem, DocPage, PageOrientation, Rect } from '$lib/document/types';
+	import { isModShortcut } from '$lib/shortcuts';
+	import type { ChartAction } from './EditorItem.svelte';
 	import EditorPage, { type PageDrag } from './EditorPage.svelte';
 	import EditorStrip from './EditorStrip.svelte';
 	import {
@@ -39,6 +49,8 @@
 		offsetBox,
 		resizeRect,
 		screenToMm,
+		sizeStep,
+		spokenSize,
 		type Box,
 		type Point,
 		type Size,
@@ -53,9 +65,13 @@
 		onclose: () => void;
 		/** Show a toast, with an Undo button when `undo` is given. */
 		notify: (message: string, undo?: () => void) => void;
+		/** ⌘Z / Ctrl+Z: run the toast's Undo, if it has one. */
+		undo: () => void;
+		/** ⌘ is the command modifier (Apple), not Ctrl. */
+		apple: boolean;
 	}
 
-	let { store, pageId, onclose, notify }: Props = $props();
+	let { store, pageId, onclose, notify, undo, apple }: Props = $props();
 
 	/** A press must travel this far, px, before it drags: a click selects without snapping. */
 	const DRAG_SLOP_PX = 3;
@@ -84,8 +100,8 @@
 	let returningId = $state<string | null>(null);
 	let flash = $state.raw<{ pageId: string; guides: SnapGuide[] } | null>(null);
 	let flashTimer: ReturnType<typeof setTimeout> | undefined;
-	/** The last removal, for ⌘Z / Ctrl+Z: the toast's Undo is not the only way back. */
-	let lastRemoval: { pageId: string; itemId: string; undo: () => void } | null = null;
+	/** The strip's height, px: the toast, lodged in the dialog, sits above it. */
+	let stripHeight = $state(0);
 	/** True from the press on the backdrop to the click: a drag that ends there is no click. */
 	let pressedOnBackdrop = false;
 
@@ -128,10 +144,6 @@
 
 	const chartCount = $derived(store.chartCount);
 	const summary = $derived(`${plural(pages.length, 'page')} · ${plural(chartCount, 'chart')} · A4`);
-
-	function plural(count: number, word: string): string {
-		return `${count} ${word}${count === 1 ? '' : 's'}`;
-	}
 
 	$effect(() => {
 		if (index >= 0) lastIndex = index;
@@ -179,10 +191,12 @@
 		return () => window.removeEventListener('keydown', onKeydown, true);
 	});
 
+	// The strip grows a scrollbar with more pages, which shrinks the stage: measured with it.
 	function measureStage() {
 		if (!stageEl) return;
 		const { clientWidth: w, clientHeight: h } = stageEl;
 		stageSize = w > 0 && h > 0 ? { w, h } : FALLBACK_STAGE;
+		stripHeight = dialogEl?.querySelector<HTMLElement>('[data-strip]')?.offsetHeight ?? 0;
 	}
 
 	function closeEditor() {
@@ -194,7 +208,6 @@
 		clearTimeout(flashTimer);
 		flash = null;
 		animated = false;
-		lastRemoval = null;
 		store.flush();
 		if (pageId !== null) onclose();
 	}
@@ -223,11 +236,12 @@
 		void tick().then(() => (announcement = message));
 	}
 
-	function setCurrent(id: string, focusStrip = false) {
+	/** Show page `id`; `quiet` when the caller says something itself. */
+	function setCurrent(id: string, focusStrip = false, quiet = false) {
 		const at = store.pageIndex(id);
 		// Mid-drag (a second finger on the strip) the pages stay put under the chart.
 		if (at < 0 || session) return;
-		if (id !== current?.id) announce(`Page ${at + 1} of ${pages.length}`);
+		if (id !== current?.id && !quiet) announce(`Page ${at + 1} of ${pages.length}`);
 		currentId = id;
 		if (focusStrip) {
 			void tick().then(() =>
@@ -242,7 +256,7 @@
 	}
 
 	function addPage() {
-		if (session) return;
+		if (session || !store.canAddPage) return;
 		const id = store.addPage();
 		setCurrent(id);
 		announce(`Page ${pages.length} added`);
@@ -261,15 +275,13 @@
 			else closeEditor();
 			return;
 		}
-		const mod = event.metaKey || event.ctrlKey;
-		if (mod && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'z') {
-			if (lastRemoval) {
-				event.preventDefault();
-				undoRemoval();
-			}
+		// By the key's place, not its character: Ctrl+Z on a Russian layout types "я".
+		if (isModShortcut(event, 'KeyZ', apple)) {
+			event.preventDefault();
+			if (!event.repeat && !session) undo();
 			return;
 		}
-		if (mod || event.altKey || session) return;
+		if (event.metaKey || event.ctrlKey || event.altKey || session) return;
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		const target = event.target as Element | null;
 		// A focused chart takes the arrows itself; a text field would want them too.
@@ -488,6 +500,9 @@
 			announce(`Chart moved to page ${store.pageIndex(view.targetId) + 1}`);
 			// Its element is gone with it: keep the focus on this page.
 			void tick().then(focusPaper);
+		} else {
+			snapBack(s.itemId);
+			announce(`Page ${store.pageIndex(view.targetId) + 1} is full`);
 		}
 	}
 
@@ -565,17 +580,56 @@
 	function handleItemKeydown(event: KeyboardEvent, item: DocItem) {
 		if (event.metaKey || event.ctrlKey || event.altKey) return;
 		const delta = nudgeDelta(event.key, event.shiftKey);
-		if (delta) {
-			event.preventDefault();
-			event.stopPropagation();
-			if (!session) nudge(item, delta);
+		const step = sizeStep(event.key, event.code);
+		let action: (() => void) | null = null;
+		if (delta) action = () => nudge(item, delta);
+		else if (step !== 0) action = () => handleItemAction(item, step > 0 ? 'larger' : 'smaller');
+		else if (event.key === 'PageUp') action = () => handleItemAction(item, 'prev');
+		else if (event.key === 'PageDown') action = () => handleItemAction(item, 'next');
+		else if (event.key === 'Delete' || event.key === 'Backspace') action = () => removeChart(item);
+		if (!action) return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (!session) action();
+	}
+
+	/** The toolbar's buttons and their keys: a size step, or a move to the page either side. */
+	function handleItemAction(item: DocItem, action: ChartAction) {
+		if (session) return;
+		if (action === 'smaller' || action === 'larger') resizeStep(item, action === 'larger' ? 1 : -1);
+		else moveToPage(item, action === 'prev' ? -1 : 1);
+	}
+
+	function resizeStep(item: DocItem, direction: 1 | -1) {
+		const page = current;
+		if (!page) return;
+		const frame = stepSize(item.frame, item.chart.aspect, page.orientation, direction);
+		if (!frame) {
+			announce(direction > 0 ? 'Already the largest size' : 'Already the smallest size');
 			return;
 		}
-		if (event.key === 'Delete' || event.key === 'Backspace') {
-			event.preventDefault();
-			event.stopPropagation();
-			if (!session) removeChart(item);
+		store.updateItem(page.id, item.id, frame);
+		announce(spokenSize(frame));
+	}
+
+	/** To the page before or after, where it fits clear of the charts there (`placeFrame`). */
+	function moveToPage(item: DocItem, by: -1 | 1) {
+		const target = pages[index + by];
+		const number = index + by + 1;
+		if (!target) {
+			announce(by < 0 ? 'No page before this one' : 'No page after this one');
+			return;
 		}
+		if (target.items.length >= MAX_ITEMS_PER_PAGE) {
+			announce(`Page ${number} is full`);
+			return;
+		}
+		const others = target.items.map((it) => it.frame);
+		const frame = placeFrame(item.frame, item.chart.aspect, others, target.orientation);
+		if (!store.moveItem(item.id, target.id, frame)) return;
+		setCurrent(target.id, false, true);
+		announce(`Chart moved to page ${number}`);
+		void tick().then(() => focusChart(item.id));
 	}
 
 	/** Moves by `delta` mm through `snapMove` with no reach: it only clamps, and shows the lines it lands on. */
@@ -596,9 +650,8 @@
 		const page = current;
 		if (!page) return;
 		const at = page.items.findIndex((it) => it.id === item.id);
-		const undo = store.removeItem(page.id, item.id);
-		lastRemoval = { pageId: page.id, itemId: item.id, undo };
-		notify('Chart removed', undo);
+		const restore = store.removeItem(page.id, item.id);
+		notify('Chart removed', () => undoRemoval(page.id, item.id, restore));
 		// The focus goes to the chart that took its place, else the one before, else the page.
 		void tick().then(() => {
 			const charts = chartElements();
@@ -608,18 +661,22 @@
 		});
 	}
 
-	function undoRemoval() {
-		const removal = lastRemoval;
-		lastRemoval = null;
-		if (!removal) return;
-		removal.undo();
-		if (removal.pageId !== current?.id) setCurrent(removal.pageId);
+	/**
+	 * The toast's Undo for a chart removed here (its button or ⌘Z): back on its page,
+	 * which the editor shows, with the focus on it. Nothing to say if it did not come
+	 * back, or the editor has closed meanwhile.
+	 */
+	function undoRemoval(pageId: string, itemId: string, restore: () => boolean) {
+		if (!restore() || !open) return;
+		if (pageId !== current?.id) setCurrent(pageId, false, true);
 		announce('Chart restored');
-		void tick().then(() =>
-			dialogEl
-				?.querySelector<HTMLElement>(`[data-item-id="${removal.itemId}"] [role="button"]`)
-				?.focus({ preventScroll: true })
-		);
+		void tick().then(() => focusChart(itemId));
+	}
+
+	function focusChart(itemId: string) {
+		dialogEl
+			?.querySelector<HTMLElement>(`[data-item-id="${itemId}"] [role="button"]`)
+			?.focus({ preventScroll: true });
 	}
 
 	function chartElements(): HTMLElement[] {
@@ -642,6 +699,7 @@
 	bind:this={dialogEl}
 	class="editor"
 	class:is-animated={animated}
+	style:--strip-h={stripHeight > 0 ? `${stripHeight}px` : undefined}
 	aria-labelledby="{id}-title"
 	aria-describedby="{id}-summary"
 	onkeydown={handleKeydown}
@@ -682,6 +740,8 @@
 					<EditorPage
 						page={slot.page}
 						number={slot.number}
+						prevPage={slot.role === 'current' && prev ? slot.number - 1 : null}
+						nextPage={slot.role === 'current' && next ? slot.number + 1 : null}
 						role={slot.role}
 						box={slot.box}
 						labelHeight={EDITOR_LAYOUT.labelHeight}
@@ -695,6 +755,7 @@
 						onresizestart={startResize}
 						onitemkeydown={handleItemKeydown}
 						onremove={removeChart}
+						onitemaction={handleItemAction}
 					/>
 				{/each}
 			</div>
@@ -702,13 +763,15 @@
 			<EditorStrip
 				{pages}
 				currentId={current.id}
+				canAdd={store.canAddPage}
 				onselect={(id) => setCurrent(id)}
 				onadd={addPage}
 			/>
 
 			<p class="sr-only" id={hintId}>
-				Drag to move it, or use the arrow keys, with Shift for 10 millimetres. Drag a corner to
-				resize it. Delete removes it.
+				Drag to move it, or use the arrow keys, with Shift for 10 millimetres; Page Up and Page Down
+				move it to the page before or after. Drag a corner to resize it, or press plus or minus.
+				Delete removes it.
 			</p>
 			<p class="sr-only" aria-live="polite">{announcement}</p>
 		</div>
@@ -716,28 +779,15 @@
 </dialog>
 
 <style>
-	/*
-	 * The editor's tokens: paper and ink for the white pages, on top of the app's.
-	 * Kept here, not in tokens.css: nothing else draws on paper.
-	 */
+	/* The paper and ink tokens are the app's (tokens.css), shared with the pages panel. */
 	.editor {
-		--paper: #ffffff;
-		--paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.45);
-		--paper-fg: rgba(10, 10, 11, 0.56);
-		--paper-fg-2: rgba(10, 10, 11, 0.46);
-		/* The chart outline the paper style draws (render.ts), for placeholders. */
-		--paper-chart: #f4f5f7;
-		--paper-chart-pulse: #eceef1;
-		--paper-chart-edge: #c9ced6;
-		--paper-chart-mini: #d5d9df;
-		--paper-edge: rgba(10, 10, 11, 0.3);
-		--paper-margin: rgba(10, 10, 11, 0.22);
-		--ink: #0a0a0b;
-		--guide: rgba(10, 10, 11, 0.72);
-		/* The app's ring turned inside out: a white gap and a dark ring, for focus on paper. */
-		--ring-paper: 0 0 0 2px #ffffff, 0 0 0 4px var(--ink);
-		/* The minus's hover and press: the accent a step stronger. */
-		--accent-strong: #e05a5a;
+		/* The dialog's distance from the window's edge. */
+		--editor-inset: 12px;
+		/*
+		 * The toast lodges in the dialog while it is open (Toast.svelte): above the
+		 * strip of mini pages, which would otherwise sit under it.
+		 */
+		--toast-bottom: calc(var(--editor-inset) + var(--strip-h, 88px) + 12px);
 
 		position: fixed;
 		inset: 0;
@@ -746,7 +796,7 @@
 		height: auto;
 		max-width: none;
 		max-height: none;
-		margin: 12px;
+		margin: var(--editor-inset);
 		padding: 0;
 		overflow: hidden;
 		border: 1px solid var(--hairline);
@@ -920,7 +970,7 @@
 	/* A phone: the whole screen, no frame of dimmed app around it. */
 	@media (max-width: 743px) {
 		.editor {
-			margin: 0;
+			--editor-inset: 0px;
 			border: 0;
 			border-radius: 0;
 		}

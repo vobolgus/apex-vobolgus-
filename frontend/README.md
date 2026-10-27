@@ -10,14 +10,17 @@ Current scope:
   - control panel + live preview canvas
   - loads the full catalog (`/api/catalog/full`, stars ≤ 6.5m), constellation
     figures and boundaries
-  - PNG export from the canvas; SVG/PDF via the backend API (the UI payload is
-    not a full `RenderConfig` yet, see the root README)
+  - PNG export from the canvas; SVG/PDF via the backend API, from the
+    preview's own camera
+  - the PDF document: Add to PDF, the pages panel, the page editor and the
+    "PDF document" export (`src/lib/document/`, `src/lib/components/document/`)
 - Internal API proxy routes:
   - `GET /api/catalog/bright`
   - `GET /api/catalog/full`
   - `GET /api/constellations`
   - `GET /api/constellation-boundaries`
   - `POST /api/export`
+  - `POST /api/export/document` (the multi-page PDF, streamed back)
 
 ## Requirements
 

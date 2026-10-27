@@ -23,12 +23,17 @@ and are no longer built.
 - Export: PNG straight from the canvas; SVG and PDF rendered by the backend
   (`POST /api/export`) from the preview's own camera, so they show the same chart.
   The planets toggle applies to the backend export only.
+- PDF document: **+ Add to PDF** places the chart as the preview shows it on the
+  first A4 page with room (a new page if none). A pages panel on the left lists the
+  pages (delete with Undo, add, collapse), and a click on a page opens the page
+  editor: the page and its neighbours side by side, charts that move, resize and
+  snap to the page's grid and to each other, move between pages, and a strip of
+  every page. Stars keep their size in mm however large a chart is. The export
+  menu's "PDF document" row downloads every page as one PDF
+  (`POST /api/export/document`); a document holds up to 100 pages and 200 charts.
+  It is kept in `localStorage`.
 - About dialog (header button or `?`) with every shortcut; `⌘K`/`Ctrl+K` opens
-  the export menu and `⌘S`/`Ctrl+S` saves a PNG.
-
-Known gap: the page does not yet send the full `RenderConfig` that
-`POST /api/export` expects (the contract is in [`SPEC.md`](SPEC.md)), so
-SVG/PDF downloads from the UI do not work yet. PNG export does.
+  the export menu, `⌘S`/`Ctrl+S` saves a PNG and `⌘Z`/`Ctrl+Z` undoes a deletion.
 
 ## Stack
 
@@ -68,7 +73,9 @@ SVG/PDF downloads from the UI do not work yet. PNG export does.
 
 Backend endpoints used by the page: `GET /api/catalog/full`,
 `GET /api/constellations`, `GET /api/constellation-boundaries`,
-`POST /api/export` (PDF by default, SVG with `?format=svg`). The backend also
+`POST /api/export` (PDF by default, SVG with `?format=svg`; the page editor's
+chart previews are these SVGs) and `POST /api/export/document` (the PDF
+document, one multi-page PDF). The backend also
 serves `GET /api/catalog/bright` and a `GET /` health probe. Details are in
 [`backend/API.md`](backend/API.md).
 
@@ -123,8 +130,8 @@ rust-core/                 astronomy core library
   src/projections/         stereographic and pinhole
   src/planets.rs           Sun, Moon and planet positions
 backend/                   Axum server
-  src/handlers/            catalog.rs, export.rs
-  src/svg_generator/       SVG map renderer behind /api/export
+  src/handlers/            catalog.rs, export.rs, document.rs (the PDF document)
+  src/svg_generator/       SVG map renderer behind /api/export and the document
   assets/constellations/   constellation figures and boundaries (JSON)
   assets/golden/           reference-geometry fixture shared by Rust and TS tests
   API.md                   HTTP API reference
@@ -133,6 +140,7 @@ frontend/                  SvelteKit app
   src/routes/generator/    redirect from the old /generator URL to /
   src/routes/api/          server-side proxies to the backend
   src/lib/                 renderer, math, state, components, API clients
+  src/lib/document/        the PDF document: layout engine, store, render configs
   e2e/                     Playwright visual regression tests
 legacy/                    archived features, reference only (see legacy/README.md)
 SPEC.md                    product specification (generator only)

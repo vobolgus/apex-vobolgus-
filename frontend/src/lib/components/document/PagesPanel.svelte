@@ -12,8 +12,9 @@
 	 * propagating, so the window-level sky rotation does not act on them too.
 	 */
 	import { tick } from 'svelte';
-	import type { DocumentStore } from '$lib/document/document.svelte';
+	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
 	import { A4_WIDTH_MM } from '$lib/document/geometry';
+	import { chartCountLabel } from '$lib/document/labels';
 	import PageThumbnail from './PageThumbnail.svelte';
 
 	interface Props {
@@ -41,6 +42,8 @@
 	const id = $props.id();
 	let listEl = $state<HTMLOListElement>();
 	let panelWidth = $state(0);
+	/** Polite live region: a page added from ⊕ has no other cue but the flash. */
+	let announcement = $state('');
 
 	const count = $derived(store.pages.length);
 	const open = $derived(store.panelOpen);
@@ -50,11 +53,6 @@
 		// Written only on a change, so the page's layout is not invalidated for nothing.
 		if (footprint !== next) footprint = next;
 	});
-
-	function chartsLabel(n: number): string {
-		if (n === 0) return 'no charts';
-		return n === 1 ? '1 chart' : `${n} charts`;
-	}
 
 	function thumbButtons(): HTMLButtonElement[] {
 		return listEl ? Array.from(listEl.querySelectorAll<HTMLButtonElement>('.thumb')) : [];
@@ -76,7 +74,9 @@
 		if (index < 0) return;
 		const hadFocus = listEl?.contains(document.activeElement) ?? false;
 		const undo = store.removePage(pageId);
-		notify(`Page ${index + 1} deleted`, undo);
+		notify(`Page ${index + 1} deleted`, () => {
+			if (undo()) void focusRestored(pageId);
+		});
 		if (!hadFocus) return;
 		// The focused button went with its page: give the focus to the page now in its place.
 		await tick();
@@ -86,9 +86,31 @@
 		else onemptied?.();
 	}
 
+	/**
+	 * After an undo, the restored page's thumbnail takes the focus when the focus
+	 * was in the panel or went with the toast's Undo button; elsewhere it stays.
+	 */
+	async function focusRestored(pageId: string) {
+		const before = document.activeElement;
+		await tick();
+		const lost = !before?.isConnected || document.activeElement === document.body;
+		if (!lost && !listEl?.contains(before)) return;
+		store.panelOpen = true;
+		await tick();
+		cellFor(pageId)?.querySelector<HTMLElement>('.thumb')?.focus();
+	}
+
 	async function addPage() {
+		if (!store.canAddPage) return;
 		const pageId = store.addPage();
+		announce(`Page ${store.pageIndex(pageId) + 1} added`);
 		await reveal(pageId);
+	}
+
+	function announce(message: string) {
+		// Cleared first, so the same words twice are read twice.
+		announcement = '';
+		void tick().then(() => (announcement = message));
 	}
 
 	/**
@@ -174,7 +196,7 @@
 							<button
 								class="thumb"
 								type="button"
-								aria-label="Page {index + 1}, {chartsLabel(page.items.length)}"
+								aria-label="Page {index + 1}, {chartCountLabel(page.items.length)}"
 								aria-current={selected ? 'true' : undefined}
 								aria-keyshortcuts="Delete"
 								onclick={() => onopen(page.id)}
@@ -198,7 +220,14 @@
 				{/each}
 			</ol>
 			<div class="foot">
-				<button class="add" type="button" aria-label="Add page" title="Add page" onclick={addPage}>
+				<button
+					class="add"
+					type="button"
+					aria-label="Add page"
+					title={store.canAddPage ? 'Add page' : `A PDF document has at most ${MAX_PAGES} pages`}
+					disabled={!store.canAddPage}
+					onclick={addPage}
+				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<circle cx="8" cy="8" r="6.25" />
 						<path d="M8 5.25v5.5M5.25 8h5.5" />
@@ -222,6 +251,7 @@
 				<span class="count" aria-hidden="true">{count}</span>
 			{/if}
 		</button>
+		<p class="sr-only" role="status">{announcement}</p>
 	</div>
 {/if}
 
@@ -545,6 +575,21 @@
 		background: var(--fill-press);
 	}
 
+	.add:disabled {
+		color: var(--fg-icon-off);
+		background: transparent;
+		cursor: default;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+
 	.tab:active {
 		color: var(--fg-1);
 	}
@@ -553,6 +598,13 @@
 		.panel,
 		.tab {
 			border-color: CanvasText;
+		}
+
+		/* Forced colours drop the pill's fill: keep the selected page marked. */
+		.selected .number {
+			forced-color-adjust: none;
+			background: Highlight;
+			color: HighlightText;
 		}
 	}
 

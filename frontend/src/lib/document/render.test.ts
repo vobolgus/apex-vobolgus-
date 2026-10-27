@@ -219,7 +219,7 @@ describe('backend calls', () => {
 			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [stereoItem()] }];
 
-			await expect(exportDocument(pages)).resolves.toBe(true);
+			await expect(exportDocument(pages)).resolves.toEqual({ ok: true });
 
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -234,22 +234,45 @@ describe('backend calls', () => {
 			expect(revoked).toEqual([created[0]]);
 		});
 
-		it('logs a failed export and downloads nothing', async () => {
+		it('logs a failed export, downloads nothing and passes on why it was refused', async () => {
 			mockFetch(() => ({ ok: false, status: 400, text: async () => 'too many pages' }));
 			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
 			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
-			await expect(exportDocument(pages)).resolves.toBe(false);
+			await expect(exportDocument(pages)).resolves.toEqual({
+				ok: false,
+				message: 'too many pages'
+			});
 
 			expect(click).not.toHaveBeenCalled();
 			expect(error).toHaveBeenCalledTimes(1);
 			expect(String(error.mock.calls[0][0])).toContain('400 too many pages');
 		});
 
+		it("reads the refusal out of the proxy's JSON error", async () => {
+			const body = JSON.stringify({ message: 'a document needs 1 to 100 pages, got 101' });
+			mockFetch(() => ({ ok: false, status: 400, text: async () => body }));
+			vi.spyOn(console, 'error').mockImplementation(() => {});
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
+			await expect(exportDocument(pages)).resolves.toEqual({
+				ok: false,
+				message: 'a document needs 1 to 100 pages, got 101'
+			});
+		});
+
+		it('has no reason to give when the backend failed or is away', async () => {
+			vi.spyOn(console, 'error').mockImplementation(() => {});
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
+			mockFetch(() => ({ ok: false, status: 500, text: async () => 'PDF conversion error' }));
+			await expect(exportDocument(pages)).resolves.toEqual({ ok: false, message: null });
+			mockFetch(() => Promise.reject(new TypeError('Failed to fetch')));
+			await expect(exportDocument(pages)).resolves.toEqual({ ok: false, message: null });
+		});
+
 		it('does not call the backend for an empty document', async () => {
 			const fetchMock = mockFetch();
-			await expect(exportDocument([])).resolves.toBe(false);
+			await expect(exportDocument([])).resolves.toEqual({ ok: false, message: null });
 			expect(fetchMock).not.toHaveBeenCalled();
 		});
 	});
@@ -303,6 +326,22 @@ describe('backend calls', () => {
 			await expect(itemPreviewUrl(sized(40))).resolves.toBe(firstUrl);
 			await itemPreviewUrl(sized(41));
 			expect(fetchMock).toHaveBeenCalledTimes(PREVIEW_CACHE_LIMIT + 2);
+		});
+
+		it('keeps an evicted URL that an image still shows until none does', async () => {
+			mockFetch();
+			const shown = { images: [{ src: 'blob:test/0' }] };
+			vi.stubGlobal('document', shown);
+			const sized = (w: number) => stereoItem({ x: 12, y: 12, w, h: w });
+			for (let i = 0; i <= PREVIEW_CACHE_LIMIT; i++) await itemPreviewUrl(sized(40 + i));
+			await Promise.resolve();
+			// The oldest went out of the cache, but a page still draws it.
+			expect(revoked).toEqual([]);
+
+			shown.images = [];
+			await itemPreviewUrl(sized(500));
+			await Promise.resolve();
+			expect(revoked).toEqual(['blob:test/0', 'blob:test/1']);
 		});
 
 		it('does not cache a failure', async () => {

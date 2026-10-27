@@ -157,7 +157,7 @@ Other errors:
 ## Document export
 
 - `POST /api/export/document` - several charts placed on pages, as one multi-page PDF
-  - Request: `Content-Type: application/json`, body up to 16 MB:
+  - Request: `Content-Type: application/json`, body up to 2 MB:
 
     ```json
     {
@@ -184,10 +184,12 @@ Other errors:
 Validation (`400`, plain-text message naming the page and item, 1-based, e.g.
 `page 2, item 1: config needs a view`):
 
-- `1..=100` pages, `0..=50` items per page
+- `1..=100` pages, `0..=50` items per page, at most `200` charts in the whole document (a
+  chart costs about the same to draw whatever its size, so this caps the work and the file)
 - page and item `width_mm`/`height_mm` positive, finite and at most `2000`
 - every item inside its page, with 1 mm of tolerance on each side
 - every item `config` has a `view` and passes the `/api/export` checks above
 
 Other errors as for `/api/export` (`422` for a body that does not match, `500` for a
-failed conversion; `413` above 16 MB).
+failed conversion; `413` above 2 MB). At most two documents are converted at once; a
+third request waits for one of them to finish.

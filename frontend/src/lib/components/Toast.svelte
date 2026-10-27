@@ -7,18 +7,27 @@
 	 * page editor would sit under the backdrop with a dead Undo. The host is a
 	 * manual popover instead: it lives in the top layer, and while a modal is open
 	 * it moves into that dialog (and back when it closes), so it stays on top and
-	 * stays live. Browsers without popovers get a fixed, high z-index box.
+	 * stays live. Browsers without popovers get a fixed, high z-index box. A dialog
+	 * with its own bar at the bottom sets `--toast-bottom`, so the toast clears it.
+	 *
+	 * Undo shows and announces its shortcut, ⌘Z / Ctrl+Z, which works from wherever
+	 * the focus is: the button itself is many Tab stops away from what was deleted.
 	 */
 	import { tick, untrack } from 'svelte';
+	import { ariaKeys, keyLabel, spokenKeys } from '$lib/shortcuts';
 	import type { ToastItem, ToastStore } from '$lib/ui/toast.svelte';
 
 	interface Props {
 		store: ToastStore;
 		/** Whether a modal dialog is open; the toast re-homes itself when this changes. */
 		modal?: boolean;
+		/** ⌘ on Apple platforms, Ctrl elsewhere, for the Undo shortcut. */
+		apple?: boolean;
 	}
 
-	let { store, modal = false }: Props = $props();
+	let { store, modal = false, apple = true }: Props = $props();
+
+	const UNDO_KEYS = ['mod', 'Z'] as const;
 
 	let host = $state<HTMLDivElement>();
 	/** Where the host lives without a modal: its place in the page. */
@@ -133,7 +142,19 @@
 					<span class="message">{shown.message}</span>
 					{#if shown.undo}
 						<span class="divider" aria-hidden="true"></span>
-						<button class="undo" type="button" onclick={() => store.undo()}>Undo</button>
+						<button
+							class="undo"
+							type="button"
+							aria-label="Undo"
+							aria-keyshortcuts={ariaKeys(UNDO_KEYS, apple)}
+							onclick={() => store.undo()}
+						>
+							Undo
+							<kbd class="keys" aria-hidden="true"
+								>{UNDO_KEYS.map((key) => keyLabel(key, apple)).join(apple ? '' : '+')}</kbd
+							>
+						</button>
+						<span class="sr-only">, or press {spokenKeys(UNDO_KEYS, apple)}</span>
 					{/if}
 				</div>
 			{/key}
@@ -145,7 +166,7 @@
 	/* Undo the popover UA box (inset 0, margin auto, border, Canvas colours). */
 	.toast-host {
 		position: fixed;
-		inset: auto 0 calc(16px + var(--h-dock) + 12px) 0;
+		inset: auto 0 var(--toast-bottom, calc(16px + var(--h-dock) + 12px)) 0;
 		z-index: 1000;
 		width: auto;
 		height: auto;
@@ -199,7 +220,10 @@
 	}
 
 	.undo {
+		display: inline-flex;
 		flex-shrink: 0;
+		align-items: center;
+		gap: 8px;
 		height: var(--h-row);
 		padding: 0 10px;
 		border: 0;
@@ -227,6 +251,30 @@
 
 	.undo:active {
 		background: var(--fill-press);
+	}
+
+	/* The shortcut, as the export menu prints its keys. */
+	.keys {
+		color: var(--fg-3);
+		font: var(--font-cap);
+		font-family: inherit;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* A phone has no ⌘Z to press. */
+	@media (hover: none) and (pointer: coarse) {
+		.keys {
+			display: none;
+		}
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
 	}
 
 	@keyframes toast-in {

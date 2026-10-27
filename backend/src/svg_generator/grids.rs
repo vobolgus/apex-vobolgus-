@@ -34,6 +34,8 @@ pub(super) struct PolylineStyle<'a> {
     pub(super) stroke: &'a str,
     /// In chart units: the preview's width in px times `view.px`.
     pub(super) width: f32,
+    /// Written as `stroke-opacity`, the same on a path with no fill: element `opacity`
+    /// makes svg2pdf wrap every path in a transparency group of its own.
     pub(super) opacity: &'a str,
 }
 
@@ -149,7 +151,7 @@ pub(super) fn draw_polyline<F>(
     if !path.is_empty() {
         let _ = write!(
             svg,
-            r##"<path d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{}" />"##,
+            r##"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-opacity="{}" />"##,
             path, style.stroke, style.width, style.opacity
         );
     }

@@ -365,9 +365,10 @@ export function snapResize(
  * box. Sizes are tried from the preferred width down to a third of the content
  * width (from `sizeCandidates`): preferred is the full content width for an empty
  * page, half of it (one of two columns) otherwise. A chart too tall to be a third
- * as wide still gets its largest size that fits. Within a page the largest size
- * wins, then top-to-bottom, left-to-right. On a new (portrait) page the chart gets
- * the full content width, capped by the height.
+ * as wide still gets its largest size that fits; one too wide to be half as wide
+ * (a panorama past 2.25:1 on a portrait page) tries its sizes from the smallest up.
+ * Within a page the largest size wins, then top-to-bottom, left-to-right. On a new
+ * (portrait) page the chart gets the full content width, capped by the height.
  */
 export function findPlacement(
 	pages: readonly DocPage[],
@@ -378,9 +379,10 @@ export function findPlacement(
 		const box = contentBox(orientation);
 		const preferred = items.length === 0 ? box.w : trackSize(box.w, 2);
 		const smallest = Math.min(trackSize(box.w, 3), maxWidth(box, aspect));
-		const widths = sizeCandidates(orientation, aspect)
-			.filter((w) => w <= preferred + EPS && w >= smallest - EPS)
-			.reverse();
+		const sizes = sizeCandidates(orientation, aspect);
+		const fitting = sizes.filter((w) => w <= preferred + EPS && w >= smallest - EPS).reverse();
+		// Every size of a wide chart is over half the width: the smallest that fits, then.
+		const widths = fitting.length > 0 ? fitting : sizes;
 		const obstacles = items.map((item) => item.frame);
 		const frame = findSpot(orientation, aspect, obstacles, widths);
 		if (frame) return { pageIndex, frame };
@@ -443,11 +445,49 @@ export function fitFrame(frame: Rect, aspect: number, o: PageOrientation): Rect 
 }
 
 /**
- * A page's frames after it turned to `o`. Frames still inside the content box stay.
- * Each one that is not is placed again like Add to PDF places a chart, clear of the
- * frames settled so far: from its own width (capped by the box) down through the
- * size candidates, top-to-bottom, left-to-right. With no room left it is scaled down
- * into the box where it was (`fitFrame`), which may overlap; the editor can fix that.
+ * The frame one size step larger (`1`) or smaller (`-1`): the next size candidate
+ * past its width, its top-left kept where the content box allows (`fitFrame`). Null
+ * when there is no size further that way.
+ */
+export function stepSize(
+	frame: Rect,
+	aspect: number,
+	o: PageOrientation,
+	direction: 1 | -1
+): Rect | null {
+	const sizes = sizeCandidates(o, aspect);
+	const w =
+		direction > 0
+			? sizes.find((size) => size > frame.w + EPS)
+			: [...sizes].reverse().find((size) => size < frame.w - EPS);
+	return w === undefined ? null : fitFrame({ ...frame, w, h: w / aspect }, aspect, o);
+}
+
+/**
+ * Where a chart goes on a page when nothing points at a spot (a turn of the page, a
+ * move from the keyboard): like Add to PDF places one, clear of `others`, from its
+ * own width (capped by the box) down through the size candidates, top-to-bottom,
+ * left-to-right. With no room it is scaled down into the box where it was
+ * (`fitFrame`), which may overlap; the editor can fix that.
+ */
+export function placeFrame(
+	frame: Rect,
+	aspect: number,
+	others: readonly Rect[],
+	o: PageOrientation
+): Rect {
+	const own = Math.min(frame.w, maxWidth(contentBox(o), aspect));
+	const widths = uniqueSorted([
+		own,
+		...sizeCandidates(o, aspect).filter((w) => w <= own + EPS)
+	]).reverse();
+	return findSpot(o, aspect, others, widths) ?? fitFrame(frame, aspect, o);
+}
+
+/**
+ * A page's frames after it turned to `o`. Frames still inside the content box stay;
+ * each one that is not is placed again (`placeFrame`), clear of the frames settled
+ * so far.
  */
 export function refitFrames(
 	items: readonly { frame: Rect; aspect: number }[],
@@ -458,12 +498,7 @@ export function refitFrames(
 	const settled = result.filter((frame): frame is Rect => frame !== null);
 	items.forEach(({ frame, aspect }, i) => {
 		if (result[i]) return;
-		const own = Math.min(frame.w, maxWidth(box, aspect));
-		const widths = uniqueSorted([
-			own,
-			...sizeCandidates(o, aspect).filter((w) => w <= own + EPS)
-		]).reverse();
-		const placed = findSpot(o, aspect, settled, widths) ?? fitFrame(frame, aspect, o);
+		const placed = placeFrame(frame, aspect, settled, o);
 		result[i] = placed;
 		settled.push(placed);
 	});

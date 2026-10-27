@@ -14,6 +14,7 @@ use axum::{
 };
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use rust_core::catalog::HipCatalog;
+use tokio::sync::Semaphore;
 
 use crate::AppState;
 use crate::handlers::export::{svg_options, validate_config};
@@ -22,6 +23,15 @@ use crate::svg_generator::{Placement, SvgGenerator};
 
 const MAX_PAGES: usize = 100;
 const MAX_ITEMS_PER_PAGE: usize = 50;
+/// Charts in the whole document. A chart costs about the same to draw whatever its
+/// size (every star to the magnitude limit, roughly 1 MB of PDF), so the work and the
+/// file are capped here: the page and item counts alone would allow 5000.
+const MAX_CHARTS: usize = 200;
+/// Documents converted at once; the next ones wait their turn instead of adding
+/// another few hundred MB to the peak.
+const CONCURRENT_EXPORTS: usize = 2;
+
+static EXPORT_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_EXPORTS);
 /// Largest page or chart side in mm: past any printer, short of straining the renderer.
 const MAX_SIDE_MM: f64 = 2000.0;
 /// How far a chart may stick out of its page, in mm: rounding in the client's layout.
@@ -43,6 +53,12 @@ pub(crate) fn validate_document(document: &DocumentRequest) -> Result<(), String
     if !(1..=MAX_PAGES).contains(&pages) {
         return Err(format!(
             "a document needs 1 to {MAX_PAGES} pages, got {pages}"
+        ));
+    }
+    let charts: usize = document.pages.iter().map(|page| page.items.len()).sum();
+    if charts > MAX_CHARTS {
+        return Err(format!(
+            "a document holds at most {MAX_CHARTS} charts, got {charts}"
         ));
     }
     for (page_index, page) in document.pages.iter().enumerate() {
@@ -173,17 +189,28 @@ pub async fn export_document(
 ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
     validate_document(&document).map_err(|message| (StatusCode::BAD_REQUEST, message))?;
 
-    // Up to 100 pages of charts: keep the conversion off the async workers.
+    // A blocking task cannot be cancelled, so a document converted for a client that
+    // has gone still holds its permit until it is done.
+    let permit = EXPORT_PERMITS.acquire().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("PDF export failed: {e}"),
+        )
+    })?;
+    // Up to 200 charts: keep the conversion off the async workers.
     let hip_catalog = state.hip_catalog.clone();
-    let pdf_bytes = tokio::task::spawn_blocking(move || document_pdf(&document, &hip_catalog))
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("PDF export failed: {e}"),
-            )
-        })?
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let pdf_bytes = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        document_pdf(&document, &hip_catalog)
+    })
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("PDF export failed: {e}"),
+        )
+    })?
+    .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -306,6 +333,32 @@ mod tests {
             pages: vec![a4(false, items)],
         });
         assert!(message.starts_with("page 1:") && message.contains("at most 50 items"));
+    }
+
+    #[test]
+    fn rejects_more_than_two_hundred_charts_in_the_document() {
+        let full_page = || {
+            a4(
+                false,
+                (0..MAX_ITEMS_PER_PAGE)
+                    .map(|_| item(12.0, 12.0, 40.0, 40.0, "stereo"))
+                    .collect(),
+            )
+        };
+        let mut pages: Vec<DocumentPage> = (0..MAX_CHARTS / MAX_ITEMS_PER_PAGE)
+            .map(|_| full_page())
+            .collect();
+        pages.push(a4(true, vec![]));
+        let mut document = DocumentRequest { pages };
+        assert_eq!(validate_document(&document), Ok(()), "200 charts are fine");
+
+        document.pages[4]
+            .items
+            .push(item(12.0, 12.0, 40.0, 40.0, "stereo"));
+        assert_eq!(
+            rejected(&document),
+            "a document holds at most 200 charts, got 201"
+        );
     }
 
     #[test]

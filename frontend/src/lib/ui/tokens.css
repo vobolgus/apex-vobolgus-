@@ -17,11 +17,27 @@
 	/* The dock's fill made opaque, for the pages panel, which may float over the white chart. */
 	--dock-solid: #131417;
 
-	/* PDF pages: white paper lifted off the dark page. */
+	/* PDF pages: white paper lifted off the dark page (the panel's thumbnails, the editor). */
 	--paper: #ffffff;
 	--paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.35);
-	/* A chart's edge on paper: the PDF's `chart_outline`. */
+	/* The editor's pages are larger and lifted further. */
+	--paper-shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.45);
+	/* Text on paper: at least 4.5:1 on white (.56 is 4.55:1, .6 is 5.2:1). */
+	--paper-fg: rgba(10, 10, 11, 0.56);
+	--paper-fg-2: rgba(10, 10, 11, 0.6);
+	/* A chart's edge on paper: the PDF's `chart_outline` (PAPER_STYLE in document/render.ts). */
 	--paper-chart-edge: #c9ced6;
+	/* A chart not loaded yet, and a chart on a mini page. */
+	--paper-chart: #f4f5f7;
+	--paper-chart-pulse: #eceef1;
+	--paper-chart-mini: #d5d9df;
+	/* A chart's frame on hover, the content box while dragging, snap guides. */
+	--paper-edge: rgba(10, 10, 11, 0.3);
+	--paper-margin: rgba(10, 10, 11, 0.22);
+	--ink: #0a0a0b;
+	--guide: rgba(10, 10, 11, 0.72);
+	/* The app's ring turned inside out: a white gap and a dark ring, for focus on paper. */
+	--ring-paper: 0 0 0 2px #ffffff, 0 0 0 4px var(--ink);
 
 	--fg-1: #f2f3f5;
 	--fg-2: rgba(255, 255, 255, 0.64);

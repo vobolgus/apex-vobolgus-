@@ -231,6 +231,17 @@ export function nudgeDelta(key: string, shift: boolean): Point | null {
 	}
 }
 
+/**
+ * The size step a key asks for: 1 for + (or =, the same key without Shift), −1 for
+ * −, also on the number pad; 0 for any other key. By the character typed, which
+ * puts them where the keycaps say on every layout.
+ */
+export function sizeStep(key: string, code: string): 1 | -1 | 0 {
+	if (key === '+' || key === '=' || code === 'NumpadAdd') return 1;
+	if (key === '-' || key === '−' || code === 'NumpadSubtract') return -1;
+	return 0;
+}
+
 /** "90 by 90 mm": a chart's size for its accessible name, to the millimetre. */
 export function spokenSize(frame: Rect): string {
 	return `${Math.round(frame.w)} by ${Math.round(frame.h)} mm`;

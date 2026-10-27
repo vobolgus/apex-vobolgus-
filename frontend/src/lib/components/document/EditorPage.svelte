@@ -24,7 +24,8 @@
 	 */
 	import { contentBox, pageSize, type ResizeAnchor } from '$lib/document/geometry';
 	import type { DocItem, DocPage, PageOrientation } from '$lib/document/types';
-	import EditorItem from './EditorItem.svelte';
+	import { chartCountLabel } from '$lib/document/labels';
+	import EditorItem, { type ChartAction } from './EditorItem.svelte';
 	import EditorOrientation from './EditorOrientation.svelte';
 	import type { Box, SlotRole } from './editor-geometry';
 
@@ -32,6 +33,9 @@
 		page: DocPage;
 		/** 1-based. */
 		number: number;
+		/** 1-based numbers of the pages either side, null where there is none. */
+		prevPage: number | null;
+		nextPage: number | null;
 		role: SlotRole;
 		/** The paper, stage px. */
 		box: Box;
@@ -48,11 +52,14 @@
 		onresizestart: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
 		onitemkeydown: (event: KeyboardEvent, item: DocItem) => void;
 		onremove: (item: DocItem) => void;
+		onitemaction: (item: DocItem, action: ChartAction) => void;
 	}
 
 	let {
 		page,
 		number,
+		prevPage,
+		nextPage,
 		role,
 		box,
 		labelHeight,
@@ -65,14 +72,15 @@
 		onmovestart,
 		onresizestart,
 		onitemkeydown,
-		onremove
+		onremove,
+		onitemaction
 	}: Props = $props();
 
 	const current = $derived(role === 'current');
 	const size = $derived(pageSize(page.orientation));
 	const margin = $derived(contentBox(page.orientation));
 	const count = $derived(page.items.length);
-	const chartWord = $derived(count === 1 ? '1 chart' : `${count} charts`);
+	const chartWord = $derived(chartCountLabel(count));
 
 	function itemState(item: DocItem) {
 		if (drag?.itemId === item.id) return drag.kind;
@@ -135,6 +143,9 @@
 				{index}
 				{count}
 				page={size}
+				orientation={page.orientation}
+				{prevPage}
+				{nextPage}
 				frame={dragged ?? item.frame}
 				interactive={current}
 				mode={itemState(item)}
@@ -143,17 +154,17 @@
 				{onresizestart}
 				onkeydown={onitemkeydown}
 				{onremove}
+				onaction={onitemaction}
 			/>
 		{/each}
 
-		{#if count === 0 && !drag?.target}
+		<!-- Only on the current page: a neighbour is dimmed, which would take its words under 4.5:1. -->
+		{#if count === 0 && current && !drag?.target}
 			<div class="empty" aria-hidden="true">
 				<span class="empty-title">Empty page</span>
-				{#if current}
-					<span class="empty-note"
-						>Drag a chart here from a neighbouring page, or use Add to PDF.</span
-					>
-				{/if}
+				<span class="empty-note"
+					>Drag a chart here from a neighbouring page, or use Add to PDF.</span
+				>
 			</div>
 		{/if}
 
@@ -268,7 +279,7 @@
 		position: relative;
 		border-radius: 2px;
 		background: var(--paper);
-		box-shadow: var(--paper-shadow);
+		box-shadow: var(--paper-shadow-lg);
 		outline: none;
 	}
 
@@ -276,7 +287,7 @@
 	.paper:focus-visible {
 		outline: 2px solid transparent;
 		outline-offset: 2px;
-		box-shadow: var(--ring), var(--paper-shadow);
+		box-shadow: var(--ring), var(--paper-shadow-lg);
 	}
 
 	.slot:not([data-role='current']) .paper {
@@ -296,7 +307,7 @@
 		box-shadow:
 			0 0 0 2px var(--panel),
 			0 0 0 4px var(--fg-1),
-			var(--paper-shadow);
+			var(--paper-shadow-lg);
 	}
 
 	.empty {

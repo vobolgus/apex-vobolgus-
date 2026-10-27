@@ -4,11 +4,11 @@ import { flushSync, mount, unmount } from 'svelte';
 import { ToastStore } from '$lib/ui/toast.svelte';
 import Toast from './Toast.svelte';
 
-function setup() {
+function setup(apple = true) {
 	const target = document.createElement('div');
 	document.body.append(target);
 	const store = new ToastStore();
-	const component = mount(Toast, { target, props: { store } });
+	const component = mount(Toast, { target, props: { store, apple } });
 	flushSync();
 	const region = target.querySelector('[role="status"]')!;
 	const cleanup = () => {
@@ -48,12 +48,33 @@ describe('Toast', () => {
 
 		expect(ctx.region.querySelector('.message')?.textContent).toBe('Page 2 deleted');
 		const button = ctx.region.querySelector<HTMLButtonElement>('button.undo')!;
-		expect(button.textContent).toBe('Undo');
+		expect(button.getAttribute('aria-label')).toBe('Undo');
 		button.click();
 		flushSync();
 		expect(undo).toHaveBeenCalledOnce();
 		expect(ctx.store.current).toBeNull();
 		expect(ctx.region.querySelector('.toast')).toBeNull();
+	});
+
+	it('shows and announces the Undo shortcut for the platform', async () => {
+		const mac = setup(true);
+		cleanup = mac.cleanup;
+		mac.store.show('Page 2 deleted', () => {});
+		await shown();
+		const button = mac.region.querySelector('button.undo')!;
+		expect(button.getAttribute('aria-keyshortcuts')).toBe('Meta+Z');
+		expect(button.querySelector('kbd')?.textContent).toBe('⌘Z');
+		expect(mac.region.textContent).toContain('or press Command Z');
+		mac.cleanup();
+
+		const other = setup(false);
+		cleanup = other.cleanup;
+		other.store.show('Page 2 deleted', () => {});
+		await shown();
+		const otherButton = other.region.querySelector('button.undo')!;
+		expect(otherButton.getAttribute('aria-keyshortcuts')).toBe('Control+Z');
+		expect(otherButton.querySelector('kbd')?.textContent).toBe('Ctrl+Z');
+		expect(other.region.textContent).toContain('or press Control Z');
 	});
 
 	it('has no Undo when the action cannot be undone', async () => {

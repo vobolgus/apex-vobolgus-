@@ -128,9 +128,20 @@
 		stroke-width: 1.5;
 	}
 
+	/*
+	 * The checked option is filled, so its outline stays free for the focus: the
+	 * checked option is the group's tab stop and always the one focused.
+	 */
 	@media (forced-colors: active) {
 		.option[aria-checked='true'] {
-			outline: 1px solid Highlight;
+			forced-color-adjust: none;
+			background: Highlight;
+			color: HighlightText;
+		}
+
+		.option:focus-visible {
+			outline: 2px solid CanvasText;
+			outline-offset: 2px;
 		}
 	}
 </style>

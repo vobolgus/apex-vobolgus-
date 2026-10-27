@@ -14,6 +14,7 @@ import {
 	resizeRect,
 	screenToMm,
 	sizeLabel,
+	sizeStep,
 	spokenSize,
 	type Box
 } from './editor-geometry';
@@ -267,6 +268,15 @@ describe('keys and words', () => {
 		expect(nudgeDelta('ArrowUp', true)).toEqual({ x: 0, y: -10 });
 		expect(nudgeDelta('ArrowDown', true)).toEqual({ x: 0, y: 10 });
 		expect(nudgeDelta('Enter', false)).toBeNull();
+	});
+
+	it('reads + and − as a size step, with or without Shift, also on the number pad', () => {
+		expect(sizeStep('+', 'Equal')).toBe(1);
+		expect(sizeStep('=', 'Equal')).toBe(1);
+		expect(sizeStep('+', 'NumpadAdd')).toBe(1);
+		expect(sizeStep('-', 'Minus')).toBe(-1);
+		expect(sizeStep('-', 'NumpadSubtract')).toBe(-1);
+		expect(sizeStep('z', 'KeyZ')).toBe(0);
 	});
 
 	it('says and shows a size to the millimetre', () => {

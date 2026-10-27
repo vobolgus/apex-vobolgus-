@@ -555,11 +555,11 @@ impl SvgGenerator {
         if is_stereo && view.is_none() {
             if config.layers.zenith {
                 svg.push_str(&format!(
-                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1.0" opacity="0.5" />"##,
+                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1.0" stroke-opacity="0.5" />"##,
                     center_x - 8.0, center_y, center_x + 8.0, center_y, grid_color
                 ));
                 svg.push_str(&format!(
-                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1.0" opacity="0.5" />"##,
+                    r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1.0" stroke-opacity="0.5" />"##,
                     center_x, center_y - 8.0, center_x, center_y + 8.0, grid_color
                 ));
             }
@@ -771,7 +771,7 @@ mod tests {
 
         let svg = render(&cfg);
 
-        assert!(svg.contains("stroke-width=\"0.5\" opacity=\"0.25\""));
+        assert!(svg.contains("stroke-width=\"0.5\" stroke-opacity=\"0.25\""));
         assert!(count_occurrences(&svg, "<path d=") > 0);
     }
 
@@ -821,7 +821,7 @@ mod tests {
         let svg = render(&cfg);
 
         // Lines are great-circle arcs in the constellation line style.
-        assert!(svg.contains(r##"stroke="#808080" stroke-width="0.6" opacity="0.35""##));
+        assert!(svg.contains(r##"stroke="#808080" stroke-width="0.6" stroke-opacity="0.35""##));
         assert!(svg.contains("Орион"));
     }
 
@@ -921,7 +921,7 @@ mod tests {
     fn view_draws_constellation_boundaries_when_asked() {
         let mut cfg = view_config("stereo");
         cfg.style.constellation_line_color = "#000000".to_string();
-        let boundary = r##"stroke="#000000" stroke-width="0.4" opacity="0.15""##;
+        let boundary = r##"stroke="#000000" stroke-width="0.4" stroke-opacity="0.15""##;
         assert!(!render(&cfg).contains(boundary));
         cfg.layers.constellation_boundaries = true;
         assert!(render(&cfg).contains(boundary));
@@ -954,7 +954,7 @@ mod tests {
     }
 
     #[test]
-    fn view_px_scales_star_radii_and_line_widths_and_nothing_else() {
+    fn view_px_scales_star_radii_and_line_widths_in_place() {
         let mut cfg = view_config("stereo");
         cfg.layers.constellations = true;
         cfg.layers.constellation_boundaries = true;
@@ -1028,6 +1028,7 @@ mod tests {
         }
 
         // Every other element is the same, but for its stroke width, which doubles.
+        // (This view draws no text; `view_px_scales_text_sizes_and_label_offsets`.)
         let is_rest = |e: &&str| !is_star(e) && !is_planet(e);
         let base_rest: Vec<&str> = base.into_iter().filter(is_rest).collect();
         let doubled_rest: Vec<&str> = doubled.into_iter().filter(is_rest).collect();
@@ -1044,6 +1045,71 @@ mod tests {
             }
         }
         assert!(lines > 50, "lines of every kind were compared, got {lines}");
+    }
+
+    #[test]
+    fn view_px_scales_text_sizes_and_label_offsets() {
+        let mut cfg = view_config("stereo");
+        cfg.layers.constellations = true;
+        cfg.layers.constellation_names = true;
+        cfg.layers.planets = true;
+        cfg.latitude = Some(55.75);
+        cfg.longitude = Some(37.62);
+        cfg.print_info = Some(true);
+        cfg.footer_text = Some("Skycharts".to_string());
+        let with_px = |px: Option<f64>| {
+            let mut cfg = cfg.clone();
+            cfg.view.as_mut().unwrap().px = px;
+            render(&cfg)
+        };
+        let (base, doubled) = (with_px(None), with_px(Some(2.0)));
+        let (base, doubled) = (elements(&base), elements(&doubled));
+        fn texts<'a>(svg: &[&'a str]) -> Vec<&'a str> {
+            svg.iter()
+                .copied()
+                .filter(|e| e.starts_with("text "))
+                .collect()
+        }
+        let planet = |svg: &[&str], slug: &str| -> (f32, f32) {
+            let circle = svg
+                .iter()
+                .find(|e| attr_text(e, "data-planet") == Some(slug))
+                .unwrap();
+            (attr(circle, "cx").unwrap(), attr(circle, "cy").unwrap())
+        };
+        let (base_texts, doubled_texts) = (texts(&base), texts(&doubled));
+        assert_eq!(base_texts.len(), doubled_texts.len());
+        let close = |a: f32, b: f32| (a - b).abs() <= 0.02;
+        let (mut names, mut labels, mut info) = (0, 0, 0);
+        for (text, twice) in base_texts.iter().zip(&doubled_texts) {
+            let size = attr(text, "font-size").unwrap();
+            assert_eq!(attr(twice, "font-size"), Some(2.0 * size), "{text}");
+            let (x, y) = (attr(text, "x").unwrap(), attr(text, "y").unwrap());
+            let (x2, y2) = (attr(twice, "x").unwrap(), attr(twice, "y").unwrap());
+            if let Some(slug) = attr_text(text, "data-planet-label") {
+                // Off the planet's disc, which grows too: the offset from its centre doubles.
+                let (cx, cy) = planet(&base, slug);
+                let (cx2, cy2) = planet(&doubled, slug);
+                assert!(close(x2 - cx2, 2.0 * (x - cx)), "{text}");
+                assert!(close(cy2 - y2, 2.0 * (cy - y)), "{text}");
+                labels += 1;
+            } else if text.contains(r##"fill="#A0A0A0""##) || text.contains(r##"fill="#606060""##) {
+                // The info lines and the footer: their distance from the bottom edge doubles.
+                assert!(close(1104.0 - y2, 2.0 * (1104.0 - y)), "{text}");
+                let centred = text.contains(r##"text-anchor="middle""##);
+                assert!(close(x2, if centred { x } else { 2.0 * x }), "{text}");
+                info += 1;
+            } else {
+                // A constellation name: 12 preview px under its centre, which stays.
+                assert!(close(x2, x) && close(y2 - y, 12.0), "{text}");
+                names += 1;
+            }
+        }
+        assert!(
+            names > 0 && labels > 0,
+            "names {names}, planet labels {labels}"
+        );
+        assert_eq!(info, 3, "two info lines and the footer");
     }
 
     #[test]

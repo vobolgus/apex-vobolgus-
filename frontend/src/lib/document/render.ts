@@ -16,7 +16,11 @@ import {
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
 import type { ChartSnapshot, DocItem, DocPage } from './types';
 
-/** Overrides of the preview's style for a chart on white paper. */
+/**
+ * Overrides of the preview's style for a chart on white paper. The outline is
+ * `--paper-chart-edge` in tokens.css, which draws the same edge on screen: keep
+ * the two alike.
+ */
 export const PAPER_STYLE = {
 	background_color: 'none',
 	chart_color: '#ffffff',
@@ -44,6 +48,9 @@ export interface DocumentPageRequest {
 export interface DocumentRequest {
 	pages: DocumentPageRequest[];
 }
+
+/** How a document export went; `message` is the backend's reason for refusing it. */
+export type DocumentExportResult = { ok: true } | { ok: false; message: string | null };
 
 /** A frozen copy of what the preview shows now, for Add to PDF. */
 export function snapshotChart(
@@ -107,10 +114,12 @@ export function documentRequest(pages: readonly DocPage[]): DocumentRequest {
 
 /**
  * Download the whole document as one PDF. Errors are logged rather than thrown, as
- * `exportChart` does; the result says whether a file was downloaded.
+ * `exportChart` does; the result says whether a file was downloaded and, when the
+ * backend refused the document (a 400, which trying again will not change), why.
  */
-export async function exportDocument(pages: readonly DocPage[]): Promise<boolean> {
-	if (pages.length === 0) return false;
+export async function exportDocument(pages: readonly DocPage[]): Promise<DocumentExportResult> {
+	if (pages.length === 0) return { ok: false, message: null };
+	let message: string | null = null;
 	try {
 		const response = await fetch('/api/export/document', {
 			method: 'POST',
@@ -118,7 +127,9 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<boolean
 			body: JSON.stringify(documentRequest(pages))
 		});
 		if (!response.ok) {
-			throw new Error(`Document export failed: ${response.status} ${await response.text()}`);
+			const text = await response.text();
+			if (response.status === 400) message = refusal(text);
+			throw new Error(`Document export failed: ${response.status} ${text}`);
 		}
 		const url = URL.createObjectURL(await response.blob());
 		const link = document.createElement('a');
@@ -126,15 +137,36 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<boolean
 		link.href = url;
 		link.click();
 		URL.revokeObjectURL(url);
-		return true;
+		return { ok: true };
 	} catch (error) {
 		console.error(error);
-		return false;
+		return { ok: false, message };
 	}
+}
+
+/** The backend's plain-text reason, which the proxy wraps as `{ "message": … }`. */
+function refusal(body: string): string | null {
+	let text = body;
+	try {
+		const parsed: unknown = JSON.parse(body);
+		if (typeof parsed === 'object' && parsed !== null && 'message' in parsed) {
+			text = String(parsed.message);
+		}
+	} catch {
+		// Plain text already.
+	}
+	text = text.trim();
+	return text === '' ? null : text;
 }
 
 // Insertion order is recency: a hit moves to the end, eviction takes the first.
 const previews = new Map<string, Promise<string>>();
+/**
+ * Evicted URLs an image still shows. A page that becomes current in the editor
+ * draws a new <img> with the URL its chart already had, which a revoked URL would
+ * break; these are revoked once no image shows them.
+ */
+const retired = new Set<string>();
 
 /**
  * An object URL of the chart's SVG at its current size, cached by the JSON of its
@@ -157,7 +189,13 @@ export function itemPreviewUrl(item: DocItem): Promise<string> {
 	for (const [key, evicted] of previews) {
 		if (previews.size <= PREVIEW_CACHE_LIMIT) break;
 		previews.delete(key);
-		revokeWhenSettled(evicted);
+		evicted.then(
+			(href) => {
+				retired.add(href);
+				revokeUnshown();
+			},
+			() => {}
+		);
 	}
 	return url;
 }
@@ -166,6 +204,20 @@ export function itemPreviewUrl(item: DocItem): Promise<string> {
 export function clearPreviewCache(): void {
 	for (const url of previews.values()) revokeWhenSettled(url);
 	previews.clear();
+	for (const href of retired) URL.revokeObjectURL(href);
+	retired.clear();
+}
+
+/** Revoke the retired URLs that no image in the document shows any more. */
+function revokeUnshown() {
+	const shown = new Set(
+		typeof document === 'undefined' ? [] : Array.from(document.images, (image) => image.src)
+	);
+	for (const href of retired) {
+		if (shown.has(href)) continue;
+		retired.delete(href);
+		URL.revokeObjectURL(href);
+	}
 }
 
 async function fetchPreview(body: string): Promise<string> {
