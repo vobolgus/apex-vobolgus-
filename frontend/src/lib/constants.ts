@@ -23,6 +23,9 @@ export const MIN_FOV_DEG_STEREO = 20;
 export const MAX_FOV_DEG_STEREO = 180;
 export const MIN_FOV_DEG_PINHOLE = 20;
 export const MAX_FOV_DEG_PINHOLE = 120;
+// Pinhole starts here, and a switch from a wider stereo view starts no wider than
+// this, so the frame keeps room to widen: at MAX_FOV_DEG_PINHOLE it could only shrink.
+export const PINHOLE_FOV_DEG_DEFAULT = 100;
 // Pinhole viewport size as a fraction of `radius` (= min(canvas_w, canvas_h) * 0.46).
 // Width is derived as aspect * height; both must stay within the chart-surface.
 export const PINHOLE_HEIGHT_FRAC_DEFAULT = 1.18;

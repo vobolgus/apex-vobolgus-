@@ -39,6 +39,8 @@ const ANIMATION_TOTAL_MS = 1200;
 const ANIMATION_MID_MS = 310;
 
 async function gotoGenerator(page: Page): Promise<Locator> {
+	// Fake timers that still run in real time until a test pauses them (see `runMorphTo`).
+	await page.clock.install();
 	await page.setViewportSize({ ...VIEWPORT });
 	await page.goto('/');
 	await page.waitForSelector('canvas');
@@ -59,6 +61,22 @@ async function selectProjection(page: Page, name: 'stereographic' | 'pinhole') {
 	const option = page.getByRole('radio', { name: new RegExp(name, 'i') });
 	await expect(option).toBeVisible();
 	await option.click();
+}
+
+/**
+ * Switch to `name` and stop the morph `ms` into it, on the same frame every run.
+ * The clock is paused for the switch and the frames up to `ms` run on fake
+ * time. Fake frames fire on a 16 ms grid of `performance.now()`, so the switch
+ * is moved onto a grid line first: the last frame is then always as far in.
+ */
+async function runMorphTo(page: Page, name: 'stereographic' | 'pinhole', ms: number) {
+	const now = await page.evaluate(() => Date.now());
+	await page.clock.pauseAt(now + 1000);
+	const ticks = await page.evaluate(() => performance.now());
+	const toGridMs = (16 - (ticks % 16)) % 16;
+	if (toGridMs > 0) await page.clock.runFor(toGridMs);
+	await selectProjection(page, name);
+	await page.clock.runFor(ms);
 }
 
 async function dragCanvas(page: Page, canvas: Locator) {
@@ -94,14 +112,10 @@ test.describe('generator visual regression', () => {
 
 	test('stereo-to-pinhole-mid', async ({ page }) => {
 		await gotoGenerator(page);
-		await selectProjection(page, 'pinhole');
-		await page.waitForTimeout(ANIMATION_MID_MS);
+		await runMorphTo(page, 'pinhole', ANIMATION_MID_MS);
 		const buffer = await page.screenshot({ animations: 'allow' });
 		expect(buffer).toMatchSnapshot('stereo-to-pinhole-mid.png', {
-			// Mid-transition screenshot lands on a slightly different animation frame
-			// run-to-run; observed natural diff is ~5400 px (ratio 0.01). The 0.02 budget
-			// keeps it stable while still catching real regressions.
-			maxDiffPixelRatio: 0.02
+			maxDiffPixelRatio: 0.001
 		});
 	});
 
@@ -109,12 +123,10 @@ test.describe('generator visual regression', () => {
 		await gotoGenerator(page);
 		await selectProjection(page, 'pinhole');
 		await page.waitForTimeout(ANIMATION_TOTAL_MS);
-		await selectProjection(page, 'stereographic');
-		await page.waitForTimeout(ANIMATION_MID_MS);
+		await runMorphTo(page, 'stereographic', ANIMATION_MID_MS);
 		const buffer = await page.screenshot({ animations: 'allow' });
 		expect(buffer).toMatchSnapshot('pinhole-to-stereo-mid.png', {
-			// Same mid-transition flake budget as stereo-to-pinhole-mid (see above).
-			maxDiffPixelRatio: 0.02
+			maxDiffPixelRatio: 0.001
 		});
 	});
 

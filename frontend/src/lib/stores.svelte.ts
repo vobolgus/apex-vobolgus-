@@ -1,4 +1,8 @@
-import { PINHOLE_ASPECT_RATIO_DEFAULT, PINHOLE_HEIGHT_FRAC_DEFAULT } from './constants';
+import {
+	PINHOLE_ASPECT_RATIO_DEFAULT,
+	PINHOLE_FOV_DEG_DEFAULT,
+	PINHOLE_HEIGHT_FRAC_DEFAULT
+} from './constants';
 import type { Quaternion } from './math/quaternion';
 
 export interface CatalogStar {
@@ -28,7 +32,7 @@ export interface ConstellationData {
 class ViewState {
 	orientation = $state<Quaternion>({ x: 0, y: 0, z: 0, w: 1 });
 	stereoFovDeg = $state(180);
-	pinholeFovDeg = $state(100);
+	pinholeFovDeg = $state(PINHOLE_FOV_DEG_DEFAULT);
 	pinholeAspectRatio = $state(PINHOLE_ASPECT_RATIO_DEFAULT);
 	pinholeHeightFrac = $state(PINHOLE_HEIGHT_FRAC_DEFAULT);
 }

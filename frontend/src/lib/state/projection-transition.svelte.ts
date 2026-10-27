@@ -6,7 +6,11 @@
  * also carries the field of view across, so the visible scale does not jump.
  */
 
-import { PROJECTION_TRANSITION_MIN_MS, PROJECTION_TRANSITION_MS } from '$lib/constants';
+import {
+	PINHOLE_FOV_DEG_DEFAULT,
+	PROJECTION_TRANSITION_MIN_MS,
+	PROJECTION_TRANSITION_MS
+} from '$lib/constants';
 import { pinholeFovToStereoFov, stereoFovToPinholeFov } from '$lib/math/projection';
 import { getProjectionBlend } from '$lib/renderer/canvas-renderer';
 import type { ProjectionAnimationState } from '$lib/renderer/types';
@@ -27,6 +31,13 @@ export class ProjectionTransition {
 	private to = 0;
 	private startMs = 0;
 	private durationMs = PROJECTION_TRANSITION_MS;
+	/**
+	 * What the last switch carried: the field of view it set in `mode` and the one
+	 * it left in the other mode. Switching straight back, with no zoom or frame
+	 * resize in between, restores the left one, because the carry is clamped at
+	 * wide angles and would not round-trip (stereo 180° → pinhole → stereo 123°).
+	 */
+	private carried: { mode: ProjectionMode; fovDeg: number; leftFovDeg: number } | null = null;
 
 	private get animation(): ProjectionAnimationState {
 		return {
@@ -65,11 +76,7 @@ export class ProjectionTransition {
 		this.tick(nowMs);
 		const currentBlend = this.blend;
 
-		if (nextMode === 'pinhole' && this.mode === 'stereographic') {
-			view.pinholeFovDeg = stereoFovToPinholeFov(view.stereoFovDeg);
-		} else if (nextMode === 'stereographic' && this.mode === 'pinhole') {
-			view.stereoFovDeg = pinholeFovToStereoFov(view.pinholeFovDeg);
-		}
+		if (nextMode !== this.mode) this.carryFov(nextMode);
 		this.mode = nextMode;
 
 		if (Math.abs(targetBlend - currentBlend) <= BLEND_EPSILON) {
@@ -88,4 +95,28 @@ export class ProjectionTransition {
 		this.animating = true;
 		this.blend = currentBlend;
 	}
+
+	/**
+	 * Carry the field of view into `nextMode` by matching the central scale. Into
+	 * pinhole it is capped at the default, which a full-sky stereo view would
+	 * exceed: the frame then opens with room to widen, at the cost of a zoom-in
+	 * during the morph.
+	 */
+	private carryFov(nextMode: ProjectionMode) {
+		const leftFovDeg = fovDeg(this.mode);
+		const carried = this.carried;
+		const nextFovDeg =
+			carried && carried.mode === this.mode && carried.fovDeg === leftFovDeg
+				? carried.leftFovDeg
+				: nextMode === 'pinhole'
+					? Math.min(stereoFovToPinholeFov(leftFovDeg), PINHOLE_FOV_DEG_DEFAULT)
+					: pinholeFovToStereoFov(leftFovDeg);
+		if (nextMode === 'pinhole') view.pinholeFovDeg = nextFovDeg;
+		else view.stereoFovDeg = nextFovDeg;
+		this.carried = { mode: nextMode, fovDeg: nextFovDeg, leftFovDeg };
+	}
+}
+
+function fovDeg(mode: ProjectionMode): number {
+	return mode === 'pinhole' ? view.pinholeFovDeg : view.stereoFovDeg;
 }
