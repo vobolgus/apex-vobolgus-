@@ -377,6 +377,8 @@ describe('PageEditor', () => {
 
 		key(second, 'ArrowRight');
 		expect(update).toHaveBeenLastCalledWith('p2', 'b', { x: 13, y: 120, w: 80, h: 50 });
+		// Moved by hand: Add to PDF leaves this page's charts where they are from now on.
+		expect(ctx.store.page('p2')!.manual).toBe(true);
 
 		key(second, 'ArrowDown', { shiftKey: true });
 		expect(update).toHaveBeenLastCalledWith('p2', 'b', { x: 13, y: 130, w: 80, h: 50 });
@@ -451,12 +453,19 @@ describe('PageEditor', () => {
 		cleanup = ctx.cleanup;
 		const orientation = vi.spyOn(ctx.store, 'setOrientation');
 		const group = ctx.dialog.querySelector('[role="radiogroup"][aria-label="Page 2 orientation"]')!;
+		const before = ctx.store.page('p2')!.items.map((it) => ({ ...it.frame }));
 		click(group.querySelector('[role="radio"][aria-label="Landscape"]')!);
 		expect(orientation).toHaveBeenCalledWith('p2', 'landscape');
 		expect(ctx.store.page('p2')!.orientation).toBe('landscape');
 		expect(group.querySelector('[aria-checked="true"]')?.getAttribute('aria-label')).toBe(
 			'Landscape'
 		);
+		// Its charts are laid out again on the turned page; turning back puts them where they were.
+		const turned = ctx.store.page('p2')!.items.map((it) => it.frame);
+		turned.forEach((frame) => expect(frame.x + frame.w).toBeLessThanOrEqual(285 + 1e-9));
+		expect(turned).not.toEqual(before);
+		click(group.querySelector('[role="radio"][aria-label="Portrait"]')!);
+		expect(ctx.store.page('p2')!.items.map((it) => it.frame)).toEqual(before);
 	});
 
 	it('closes itself when the document has no page left to show', () => {

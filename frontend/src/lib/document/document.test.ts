@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { contentBox } from './geometry';
+import { aloneFrame } from './arrange';
+import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, overlaps } from './geometry';
 import {
 	createId,
 	DOCUMENT_STORAGE_KEY,
@@ -84,10 +85,10 @@ describe('DocumentStore', () => {
 	});
 
 	describe('addChart', () => {
-		it('opens a portrait page for the first chart, at the full width', () => {
+		it('opens a portrait page for the first disc, at the full width, centred', () => {
 			const doc = new DocumentStore(null);
 			const result = doc.addChart(chart(), 'data:image/png;base64,AAAA');
-			expect(result.newPage).toBe(true);
+			expect(result).toMatchObject({ newPage: true, relaid: false });
 			expect(doc.pageCount).toBe(1);
 			const [page] = doc.pages;
 			expect(result.pageId).toBe(page.id);
@@ -95,25 +96,131 @@ describe('DocumentStore', () => {
 			expect(page.items).toHaveLength(1);
 			expect(page.items[0]).toMatchObject({
 				id: result.itemId,
-				frame: { x: 12, y: 12, w: 186, h: 186 },
+				frame: { x: 12, y: 55.5, w: 186, h: 186 },
 				thumb: 'data:image/png;base64,AAAA'
 			});
 		});
 
-		it('fills the existing pages before opening another', () => {
+		it('opens a landscape page for a wide pinhole, a portrait one for anything else', () => {
+			for (const aspect of [1.61, 3]) {
+				const doc = new DocumentStore(null);
+				doc.addChart(chart(aspect));
+				expect(doc.pages[0].orientation, `${aspect}`).toBe('landscape');
+				expect(doc.pages[0].items[0].frame).toEqual(aloneFrame(aspect, 'landscape'));
+			}
+			for (const snapshot of [chart(), { ...chart(1.61), aspect: 1 }, chart(0.6)]) {
+				const doc = new DocumentStore(null);
+				doc.addChart(snapshot);
+				expect(doc.pages[0].orientation).toBe('portrait');
+			}
+		});
+
+		it('lays a page out again to fit a second disc, keeping each chart’s thumbnail', () => {
 			const doc = new DocumentStore(null);
-			const first = doc.addChart(chart());
-			const second = doc.addChart(chart());
-			expect(second).toMatchObject({ pageId: first.pageId, newPage: false });
-			expect(doc.pages[0].items[1].frame).toEqual({ x: 12, y: 204, w: 63.75, h: 63.75 });
+			const first = doc.addChart(chart(), 'data:image/png;base64,FIRST');
+			const second = doc.addChart(chart(), 'data:image/png;base64,SECOND');
+			expect(second).toMatchObject({ pageId: first.pageId, newPage: false, relaid: true });
+			expect(doc.pages[0].items).toMatchObject([
+				{ id: first.itemId, frame: { x: 38.25, y: 12, w: 133.5, h: 133.5 } },
+				{ id: second.itemId, frame: { x: 38.25, y: 151.5, w: 133.5, h: 133.5 } }
+			]);
+			expect(doc.pages[0].items.map((it) => it.thumb)).toEqual([
+				'data:image/png;base64,FIRST',
+				'data:image/png;base64,SECOND'
+			]);
+			expect(doc.pages[0].layout).toEqual({ tree: { dir: 'V', kids: [0, 1] }, sizing: 'uniform' });
+			// A third disc gets a page of its own: two discs a page.
+			expect(doc.addChart(chart())).toMatchObject({ newPage: true });
+			expect(doc.chartCount).toBe(3);
+		});
+
+		it('uses an empty page that is already there, as it is', () => {
+			const doc = new DocumentStore(null);
+			const pageId = doc.addPage('landscape');
+			expect(doc.addChart(chart())).toMatchObject({ pageId, newPage: false, relaid: false });
+			expect(doc.pages[0].orientation).toBe('landscape');
+			expect(doc.pages[0].items[0].frame).toEqual({ x: 55.5, y: 12, w: 186, h: 186 });
+		});
+
+		it('moves nothing on a hand-arranged page: the chart takes its free spot', () => {
+			const doc = new DocumentStore(null);
+			const { pageId, itemId } = doc.addChart(chart());
+			doc.updateItem(pageId, itemId, { x: 12, y: 12, w: 120, h: 120 });
+			expect(doc.addChart(chart(3))).toMatchObject({ pageId, relaid: false });
+			const [disc, strip] = doc.pages[0].items.map((it) => it.frame);
+			expect(disc).toEqual({ x: 12, y: 12, w: 120, h: 120 });
+			expect(strip).toEqual({ x: 12, y: 180.5, w: 186, h: 62 });
+			expect(doc.pages[0].manual).toBe(true);
+			expect(doc.pages[0].layout).toBeUndefined();
+		});
+
+		it('undoes an Add that laid the page out again: every frame, the order and the layout', () => {
+			const doc = new DocumentStore(null);
+			doc.addChart(chart());
+			doc.addChart(chart(1.61));
+			const page = doc.pages[0];
+			const before = JSON.parse(JSON.stringify(page));
+			// The 1.61 joined the disc: both 164.7 wide.
+			page.items.forEach((it) => expect(it.frame.w).toBeCloseTo(164.7, 1));
+
+			const added = doc.addChart(chart(3));
+			expect(added).toMatchObject({ pageId: page.id, newPage: false, relaid: true });
+			expect(doc.pages[0].items).toHaveLength(3);
+			expect(doc.pages[0].layout).not.toEqual(before.layout);
+
+			expect(added.undo()).toBe(true);
+			expect(JSON.parse(JSON.stringify(doc.pages[0]))).toEqual(before);
+			expect(added.undo()).toBe(false);
+			expect(doc.pages[0].items).toHaveLength(2);
+		});
+
+		it('undoes an Add that opened a page by removing it, and moves the selection off it', () => {
+			const doc = new DocumentStore(null);
+			doc.addChart(chart());
+			doc.addChart(chart());
+			const third = doc.addChart(chart());
+			expect(third.newPage).toBe(true);
+			doc.selectedPageId = third.pageId;
+			expect(third.undo()).toBe(true);
+			expect(doc.pageCount).toBe(1);
+			expect(doc.selectedPageId).toBe(doc.pages[0].id);
 			expect(doc.chartCount).toBe(2);
 		});
 
-		it('uses an empty page that is already there', () => {
+		it('restores a turned page’s memo and hand flag when its Add is undone', () => {
 			const doc = new DocumentStore(null);
-			const pageId = doc.addPage('landscape');
-			expect(doc.addChart(chart())).toMatchObject({ pageId, newPage: false });
-			expect(doc.pages[0].items[0].frame).toEqual({ x: 12, y: 12, w: 186, h: 186 });
+			const { pageId, itemId } = doc.addChart(chart());
+			doc.updateItem(pageId, itemId, { x: 12, y: 12, w: 120, h: 120 });
+			doc.setOrientation(pageId, 'landscape');
+			const before = JSON.parse(JSON.stringify(doc.pages[0]));
+			expect(before.turnMemo.manual).toBe(true);
+			const added = doc.addChart(chart());
+			expect(added.pageId).toBe(pageId);
+			expect(doc.pages[0].turnMemo).toBeUndefined();
+			expect(added.undo()).toBe(true);
+			expect(JSON.parse(JSON.stringify(doc.pages[0]))).toEqual(before);
+			// The memo is back: turning back restores the hand layout.
+			doc.setOrientation(pageId, 'portrait');
+			expect(doc.pages[0].items[0].frame).toEqual({ x: 12, y: 12, w: 120, h: 120 });
+			expect(doc.pages[0].manual).toBe(true);
+		});
+
+		it('refuses the undo once the page has changed since the Add', () => {
+			const doc = new DocumentStore(null);
+			const first = doc.addChart(chart());
+			const second = doc.addChart(chart());
+			doc.updateItem(first.pageId, first.itemId, { x: 12, y: 12, w: 90, h: 90 });
+			const items = JSON.stringify(doc.pages[0].items);
+			expect(second.undo()).toBe(false);
+			expect(JSON.stringify(doc.pages[0].items)).toBe(items);
+
+			// Nor once the page is turned, or the chart is gone.
+			const third = doc.addChart(chart());
+			doc.setOrientation(third.pageId, 'landscape');
+			expect(third.undo()).toBe(false);
+			const fourth = doc.addChart(chart());
+			doc.removeItem(fourth.pageId, fourth.itemId);
+			expect(fourth.undo()).toBe(false);
 		});
 
 		it('stores a frozen copy of the chart', () => {
@@ -185,21 +292,64 @@ describe('DocumentStore', () => {
 			expect(doc.pageCount).toBe(1);
 		});
 
-		it('turns a page and places the charts that fell off it again', () => {
+		it('turns a page: a column of charts becomes a row, and turning back restores it', () => {
 			const doc = new DocumentStore(null);
 			const id = doc.addPage();
 			doc.addChart(chart());
 			doc.updateItem(id, doc.pages[0].items[0].id, { x: 12, y: 12, w: 133.5, h: 133.5 });
 			doc.addChart(chart());
 			doc.updateItem(id, doc.pages[0].items[1].id, { x: 12, y: 151.5, w: 133.5, h: 133.5 });
+			expect(doc.pages[0].manual).toBe(true);
 
 			doc.setOrientation(id, 'landscape');
 			const page = doc.pages[0];
 			expect(page.orientation).toBe('landscape');
 			expect(page.items.map((item) => item.frame)).toEqual([
-				{ x: 12, y: 12, w: 133.5, h: 133.5 },
-				{ x: 151.5, y: 12, w: 133.5, h: 133.5 }
+				{ x: 12, y: 38.25, w: 133.5, h: 133.5 },
+				{ x: 151.5, y: 38.25, w: 133.5, h: 133.5 }
 			]);
+			// A turn re-flows the page: it is the arranger's again, and remembers the hand layout.
+			expect(page.manual).toBeUndefined();
+			expect(page.layout).toEqual({ tree: { dir: 'H', kids: [0, 1] }, sizing: 'uniform' });
+			expect(page.turnMemo).toMatchObject({ orientation: 'portrait', manual: true });
+
+			doc.setOrientation(id, 'portrait');
+			expect(doc.pages[0].items.map((item) => item.frame)).toEqual([
+				{ x: 12, y: 12, w: 133.5, h: 133.5 },
+				{ x: 12, y: 151.5, w: 133.5, h: 133.5 }
+			]);
+			expect(doc.pages[0].manual).toBe(true);
+			expect(doc.pages[0].layout).toBeUndefined();
+		});
+
+		it('lays a turned page out afresh once something else changed on it', () => {
+			const doc = new DocumentStore(null);
+			const { pageId } = doc.addChart(chart());
+			doc.addChart(chart());
+			doc.setOrientation(pageId, 'landscape');
+			expect(doc.pages[0].turnMemo).toBeDefined();
+			const [first] = doc.pages[0].items;
+			doc.removeItem(pageId, first.id);
+			expect(doc.pages[0].turnMemo).toBeUndefined();
+			expect(doc.pages[0].layout).toBeUndefined();
+			doc.setOrientation(pageId, 'portrait');
+			expect(doc.pages[0].items[0].frame).toEqual({ x: 12, y: 55.5, w: 186, h: 186 });
+		});
+
+		it('turns a page of more than eight charts with rotateLayout, and back', () => {
+			const doc = new DocumentStore(null);
+			const id = doc.addPage();
+			const discs = Array.from({ length: 9 }, (_, i) => ({
+				id: `d${i}`,
+				chart: chart(),
+				frame: { x: 12 + (i % 3) * 63, y: 12 + Math.floor(i / 3) * 63, w: 57, h: 57 }
+			}));
+			doc.page(id)!.items.push(...discs);
+			doc.setOrientation(id, 'landscape');
+			const turned = doc.pages[0].items.map((it) => it.frame);
+			turned.forEach((frame) => expectInside(frame, doc.pages[0]));
+			doc.setOrientation(id, 'portrait');
+			expect(doc.pages[0].items.map((it) => it.frame)).toEqual(discs.map((d) => d.frame));
 		});
 
 		it('scales a chart down into a turned page', () => {
@@ -218,6 +368,7 @@ describe('DocumentStore', () => {
 	describe('items', () => {
 		it('keeps an updated frame inside the page at the chart aspect', () => {
 			const doc = new DocumentStore(null);
+			doc.addPage();
 			const { pageId, itemId } = doc.addChart(chart(2));
 			expect(doc.updateItem(pageId, itemId, { x: 150, y: 270, w: 100, h: 10 })).toBe(true);
 			const { frame } = doc.pages[0].items[0];
@@ -239,6 +390,33 @@ describe('DocumentStore', () => {
 			expect(moved.map((item) => item.id)).toEqual([itemId]);
 			expect(moved[0].frame).toEqual({ x: 99, y: 12, w: 186, h: 186 });
 			expect(moved[0].chart).toEqual(chart());
+			// A drop is a hand arrangement of the page it lands on; the page it left is not.
+			expect(doc.page(to)!.manual).toBe(true);
+			expect(doc.page(from)!.manual).toBeUndefined();
+		});
+
+		it('makes a page hand-arranged on a drag, and forgets its layout and turn', () => {
+			const doc = new DocumentStore(null);
+			const { pageId, itemId } = doc.addChart(chart());
+			doc.addChart(chart());
+			doc.setOrientation(pageId, 'landscape');
+			const page = doc.pages[0];
+			expect(page.layout).toBeDefined();
+			expect(page.turnMemo).toBeDefined();
+			// Putting it where it is changes nothing.
+			doc.updateItem(pageId, itemId, { ...page.items.find((it) => it.id === itemId)!.frame });
+			expect(page.manual).toBeUndefined();
+			expect(page.layout).toBeDefined();
+
+			doc.updateItem(pageId, itemId, { x: 12, y: 12, w: 90, h: 90 });
+			expect(page.manual).toBe(true);
+			expect(page.layout).toBeUndefined();
+			expect(page.turnMemo).toBeUndefined();
+			// Deleting a chart is no hand arrangement.
+			const other = doc.addPage();
+			doc.addChart(chart());
+			doc.removeItem(other, doc.page(other)!.items[0].id);
+			expect(doc.page(other)!.manual).toBeUndefined();
 		});
 
 		it('moves within a page like an update', () => {
@@ -252,16 +430,21 @@ describe('DocumentStore', () => {
 
 		it('removes a chart and undoes it at its place, once', () => {
 			const doc = new DocumentStore(null);
-			const a = doc.addChart(chart());
-			const b = doc.addChart(chart());
-			const c = doc.addChart(chart());
+			const pageId = doc.addPage();
+			doc.page(pageId)!.items.push(
+				...['a', 'b', 'c'].map((id, i) => ({
+					id,
+					chart: chart(3),
+					frame: { x: 12, y: 12 + i * 68, w: 186, h: 62 }
+				}))
+			);
 			const page = () => doc.pages[0];
-			expect(page().items.map((i) => i.id)).toEqual([a.itemId, b.itemId, c.itemId]);
 
-			const undo = doc.removeItem(a.pageId, b.itemId);
-			expect(page().items.map((i) => i.id)).toEqual([a.itemId, c.itemId]);
+			const undo = doc.removeItem(pageId, 'b');
+			expect(page().items.map((i) => i.id)).toEqual(['a', 'c']);
 			expect(undo()).toBe(true);
-			expect(page().items.map((i) => i.id)).toEqual([a.itemId, b.itemId, c.itemId]);
+			expect(page().items.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+			expect(page().items[1].frame).toEqual({ x: 12, y: 80, w: 186, h: 62 });
 			expect(undo()).toBe(false);
 			expect(page().items).toHaveLength(3);
 		});
@@ -292,18 +475,29 @@ describe('DocumentStore', () => {
 
 		it('says why a chart cannot be added', () => {
 			const doc = new DocumentStore(null);
-			expect(doc.addChartBlocker(1)).toBeNull();
+			expect(doc.addChartBlocker(chart())).toBeNull();
 			for (let i = 0; i < MAX_PAGES; i++) doc.addPage();
 			// The pages are empty: a chart still fits on one.
-			expect(doc.addChartBlocker(1)).toBeNull();
+			expect(doc.addChartBlocker(chart())).toBeNull();
 			for (const page of doc.pages) {
 				page.items.push(...Array.from({ length: 2 }, (_, i) => fullItem(`${page.id}-${i}`)));
 			}
 			// 200 charts.
-			expect(doc.addChartBlocker(1)).toBe('charts');
+			expect(doc.addChartBlocker(chart())).toBe('charts');
 			doc.pages.forEach((page) => page.items.splice(1));
 			// 100 full pages and no room for a new one.
-			expect(doc.addChartBlocker(1)).toBe('pages');
+			expect(doc.addChartBlocker(chart())).toBe('pages');
+		});
+
+		it('blocks only the charts that would need a page past the limit', () => {
+			const doc = new DocumentStore(null);
+			for (let i = 0; i < MAX_PAGES; i++) doc.addPage();
+			for (const page of doc.pages) {
+				page.items.push({ id: `${page.id}-d`, chart: chart(), frame: aloneFrame(1, 'portrait') });
+			}
+			// A 3:1 joins a disc page under its disc; a 2:5 beside one would be too small.
+			expect(doc.addChartBlocker(chart(3))).toBeNull();
+			expect(doc.addChartBlocker(chart(0.4))).toBe('pages');
 		});
 
 		it('moves no chart onto a full page', () => {
@@ -387,7 +581,7 @@ describe('DocumentStore', () => {
 			doc.flush();
 			const [item] = saved(storage).pages[0].items;
 			expect(item).not.toHaveProperty('thumb');
-			expect(item.frame).toEqual({ x: 12, y: 12, w: 186, h: 186 });
+			expect(item.frame).toEqual({ x: 12, y: 55.5, w: 186, h: 186 });
 		});
 
 		it('survives a storage that throws', () => {
@@ -469,6 +663,131 @@ describe('DocumentStore', () => {
 			expect(kept[0]).not.toHaveProperty('thumb');
 			// Refitted into the landscape content box.
 			expect(kept[1].frame).toEqual({ x: 99, y: 12, w: 186, h: 186 });
+		});
+
+		it('saves and loads how each page was laid out', () => {
+			const storage = memoryStorage();
+			const doc = new DocumentStore(storage);
+			const { pageId } = doc.addChart(chart());
+			doc.addChart(chart());
+			const hand = doc.addPage();
+			const moved = doc.addChart(chart());
+			doc.updateItem(hand, moved.itemId, { x: 12, y: 12, w: 120, h: 120 });
+			doc.setOrientation(pageId, 'landscape');
+			doc.flush();
+			const again = new DocumentStore(storage);
+			expect(again.load()).toBe(true);
+			expect(again.pages).toEqual(doc.pages);
+			expect(again.page(pageId)?.layout).toEqual({
+				tree: { dir: 'H', kids: [0, 1] },
+				sizing: 'uniform'
+			});
+			expect(again.page(pageId)?.turnMemo?.orientation).toBe('portrait');
+			expect(again.page(hand)?.manual).toBe(true);
+			// Turning back after a reload restores the page as it was.
+			again.setOrientation(pageId, 'portrait');
+			expect(again.page(pageId)?.items.map((it) => it.frame)).toEqual([
+				{ x: 38.25, y: 12, w: 133.5, h: 133.5 },
+				{ x: 38.25, y: 151.5, w: 133.5, h: 133.5 }
+			]);
+		});
+
+		it('drops a layout or a turn memo that does not fit its page', () => {
+			const disc = (id: string, frame: Rect) => ({ id, chart: chart(), frame });
+			const items = [
+				disc('a', { x: 38.25, y: 12, w: 133.5, h: 133.5 }),
+				disc('b', { x: 38.25, y: 151.5, w: 133.5, h: 133.5 })
+			];
+			const layout = { tree: { dir: 'V', kids: [0, 1] }, sizing: 'uniform' };
+			const memo = {
+				orientation: 'landscape',
+				ids: ['a', 'b'],
+				frames: [
+					{ x: 12, y: 38.25, w: 133.5, h: 133.5 },
+					{ x: 151.5, y: 38.25, w: 133.5, h: 133.5 }
+				],
+				layout: { tree: { dir: 'H', kids: [0, 1] }, sizing: 'uniform' },
+				manual: false
+			};
+			const page = (id: string, extra: object, list = items) => ({
+				id,
+				orientation: 'portrait',
+				items: list.map((it) => ({ ...it, id: `${id}-${it.id}` })),
+				...extra
+			});
+			const memoFor = (id: string, m: object) => ({
+				...memo,
+				ids: memo.ids.map((x) => `${id}-${x}`),
+				...m
+			});
+			const pages = [
+				page('ok', { manual: true, layout, turnMemo: memoFor('ok', {}) }),
+				page('manual-not-true', { manual: 'yes' }),
+				page('leaf-twice', { layout: { ...layout, tree: { dir: 'V', kids: [0, 0] } } }),
+				page('leaf-missing', { layout: { ...layout, tree: 0 } }),
+				page('leaf-out', { layout: { ...layout, tree: { dir: 'H', kids: [0, 2] } } }),
+				page('bad-dir', { layout: { ...layout, tree: { dir: 'X', kids: [0, 1] } } }),
+				page('one-kid', {
+					layout: { ...layout, tree: { dir: 'V', kids: [{ dir: 'H', kids: [0] }, 1] } }
+				}),
+				page('bad-sizing', { layout: { ...layout, sizing: 'tight' } }),
+				page('chart-dropped', { layout }, [
+					items[0],
+					{ ...items[1], frame: null as unknown as Rect }
+				]),
+				page('memo-ids', { turnMemo: { ...memo, ids: ['x', 'y'] } }),
+				page('memo-twice', {
+					turnMemo: memoFor('memo-twice', { ids: ['memo-twice-a', 'memo-twice-a'] })
+				}),
+				page('memo-same-way', { turnMemo: memoFor('memo-same-way', { orientation: 'portrait' }) }),
+				page('memo-outside', {
+					turnMemo: memoFor('memo-outside', {
+						frames: [memo.frames[0], { x: 200, y: 38.25, w: 133.5, h: 133.5 }]
+					})
+				}),
+				page('memo-layout', {
+					turnMemo: memoFor('memo-layout', { layout: { tree: 7, sizing: 'uniform' } })
+				})
+			];
+			const storage = memoryStorage();
+			storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages }));
+			const doc = new DocumentStore(storage);
+			expect(doc.load()).toBe(true);
+			const [ok, ...rest] = doc.pages;
+			expect(ok).toMatchObject({ manual: true, layout, turnMemo: memoFor('ok', {}) });
+			for (const p of rest) {
+				expect(p.manual, p.id).toBeUndefined();
+				expect(p.layout, p.id).toBeUndefined();
+				expect(p.turnMemo, p.id).toBeUndefined();
+			}
+			expect(doc.page('chart-dropped')?.items).toHaveLength(1);
+		});
+
+		it('keeps a crowded turn’s charts under 40 mm as they are across a reload', () => {
+			const storage = memoryStorage();
+			const doc = new DocumentStore(storage);
+			const pageId = doc.addPage();
+			const tall = Array.from({ length: 8 }, (_, i) => ({
+				id: `t${i}`,
+				chart: chart(0.4),
+				frame: { x: 12 + i * 22.5, y: 12, w: 16.5, h: 41.25 }
+			}));
+			doc.page(pageId)!.items.push(...tall);
+			doc.setOrientation(pageId, 'portrait');
+			// Eight 2:5 pinholes fit a portrait page at 40 mm and more; on landscape they cannot.
+			doc.setOrientation(pageId, 'landscape');
+			const turned = doc.pages[0].items.map((it) => it.frame);
+			expect(Math.min(...turned.map((f) => f.w))).toBeLessThan(MIN_CHART_SIDE_MM);
+			doc.flush();
+
+			const again = new DocumentStore(storage);
+			expect(again.load()).toBe(true);
+			const loaded = again.pages[0].items.map((it) => it.frame);
+			expect(loaded).toEqual(turned);
+			loaded.forEach((frame, i) => {
+				expectInside(frame, again.pages[0]);
+				for (let j = 0; j < i; j++) expect(overlaps(frame, loaded[j], GUTTER_MM)).toBe(false);
+			});
 		});
 
 		it('clears a selection the loaded document does not have', () => {

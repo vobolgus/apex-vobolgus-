@@ -324,14 +324,15 @@
 
 	/**
 	 * Add to PDF: a frozen copy of the chart goes where it fits in the document (a
-	 * new page if nowhere), with a thumbnail of the preview to show until its vector
-	 * preview loads. The panel opens on that page and flashes it.
+	 * new page if nowhere; the charts on its page may move to make room), with a
+	 * thumbnail of the preview to show until its vector preview loads. The panel
+	 * opens on that page and flashes it; the toast offers to take the Add back.
 	 */
 	function addToPdf() {
 		const chartView = currentChartView();
 		const chart = snapshotChart(chartView, layers);
 		// The backend's limits: a document past them would not export.
-		const blocker = documentStore.addChartBlocker(chart.aspect);
+		const blocker = documentStore.addChartBlocker(chart);
 		if (blocker) {
 			toast.show(
 				blocker === 'charts'
@@ -341,9 +342,13 @@
 			return;
 		}
 		const thumb = canvasEl ? chartThumbnail(canvasEl, chartView) : undefined;
-		const { pageId } = documentStore.addChart(chart, thumb);
+		const { pageId, relaid, undo } = documentStore.addChart(chart, thumb);
 		documentStore.selectedPageId = pageId;
-		announce(`Added to page ${documentStore.pageIndex(pageId) + 1}`);
+		const added = `Added to page ${documentStore.pageIndex(pageId) + 1}`;
+		announce(added);
+		notify(relaid ? `${added}, layout updated` : added, () => {
+			if (undo()) announce('Add to PDF undone');
+		});
 		void pagesPanel?.reveal(pageId);
 	}
 

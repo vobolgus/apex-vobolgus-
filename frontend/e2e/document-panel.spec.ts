@@ -1,10 +1,26 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * The PDF document from the generator: Add to PDF fills the pages panel, a page
- * deleted from the panel comes back with the toast's Undo, a thumbnail opens the
- * page editor, and the export menu's "PDF document" row posts the whole document.
+ * The PDF document from the generator: Add to PDF fills the pages panel (laying a
+ * page out again to make room, which the toast's Undo takes back), a page deleted
+ * from the panel comes back with the toast's Undo, a thumbnail opens the page
+ * editor, and the export menu's "PDF document" row posts the whole document.
  */
+
+const STORAGE_KEY = 'skycharts.document.v1';
+
+interface SavedPage {
+	orientation: string;
+	items: { id: string; frame: { x: number; y: number; w: number; h: number } }[];
+}
+
+/** The saved pages (saves are debounced: poll this). */
+async function savedPages(page: Page): Promise<SavedPage[]> {
+	return page.evaluate((key) => {
+		const raw = localStorage.getItem(key);
+		return raw ? JSON.parse(raw).pages : [];
+	}, STORAGE_KEY);
+}
 
 async function gotoGenerator(page: Page) {
 	await page.goto('/');
@@ -28,10 +44,14 @@ test('Add to PDF fills the panel; a deleted page comes back with Undo; the docum
 
 	await add.click();
 	await expect(thumbnails(page)).toHaveCount(1);
-	await expect(page.getByRole('status').filter({ hasText: 'Added to page 1' })).toHaveCount(1);
+	// Read out, and shown in the toast with an Undo.
+	await expect(page.getByRole('status').filter({ hasText: /^Added to page 1$/ })).toHaveCount(1);
+	const added = page.locator('.toast').filter({ hasText: 'Added to page 1' });
+	await expect(added.getByRole('button', { name: 'Undo' })).toBeVisible();
 	await add.click();
-	// The first chart fills the page's width; the second fits under it.
+	// The first disc filled the page; the two now share it.
 	await expect(page.getByRole('button', { name: 'Page 1, 2 charts' })).toBeVisible();
+	await expect(page.locator('.toast')).toContainText('Added to page 1, layout updated');
 	await expect(page.getByRole('button', { name: 'Page 1, 2 charts' })).toHaveAttribute(
 		'aria-current',
 		'true'
@@ -75,6 +95,46 @@ test('Add to PDF fills the panel; a deleted page comes back with Undo; the docum
 		[210, 297]
 	]);
 	expect(pages.map((p) => p.items.length)).toEqual([2, 0]);
+});
+
+test('the toast’s Undo takes an Add back, and the page is laid out as before', async ({ page }) => {
+	await gotoGenerator(page);
+	const add = page.getByRole('button', { name: 'Add to PDF' });
+	await add.click();
+	await expect(thumbnails(page)).toHaveCount(1);
+	await expect
+		.poll(async () => (await savedPages(page))[0]?.items[0]?.frame)
+		.toEqual({
+			x: 12,
+			y: 55.5,
+			w: 186,
+			h: 186
+		});
+	await add.click();
+	const toast = page.locator('.toast').filter({ hasText: 'Added to page 1, layout updated' });
+	await expect(toast).toBeVisible();
+	await expect
+		.poll(async () => (await savedPages(page))[0]?.items.map((it) => it.frame.w))
+		.toEqual([133.5, 133.5]);
+
+	await toast.getByRole('button', { name: 'Undo' }).click();
+	await expect(toast).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Page 1, 1 chart' })).toBeVisible();
+	await expect
+		.poll(async () => (await savedPages(page))[0]?.items.map((it) => it.frame))
+		.toEqual([{ x: 12, y: 55.5, w: 186, h: 186 }]);
+});
+
+test('a wide pinhole gets a landscape page of its own', async ({ page }) => {
+	await gotoGenerator(page);
+	await page.getByRole('radio', { name: /pinhole/i }).click();
+	await page.getByRole('button', { name: 'Add to PDF' }).click();
+	await expect(thumbnails(page)).toHaveCount(1);
+	await expect.poll(async () => (await savedPages(page))[0]?.orientation).toBe('landscape');
+	const [saved] = await savedPages(page);
+	// The default pinhole (1.61:1) across the full landscape width, centred.
+	expect(saved.items[0].frame.w).toBeCloseTo(273, 6);
+	expect(saved.items[0].frame.x).toBeCloseTo(12, 6);
 });
 
 test('the PDF document row is disabled while the document is empty, and the arrows skip it', async ({

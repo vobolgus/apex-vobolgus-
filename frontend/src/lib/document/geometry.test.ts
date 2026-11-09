@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { CHART_CANVAS_BACKING_PX, CHART_RADIUS_FRAC } from '$lib/constants';
 import {
 	contentBox,
-	findPlacement,
 	fitFrame,
 	GUTTER_MM,
 	gridLines,
@@ -21,7 +20,7 @@ import {
 	type ResizeAnchor,
 	type SnapGuide
 } from './geometry';
-import type { DocItem, DocPage, PageOrientation, Rect } from './types';
+import type { PageOrientation, Rect } from './types';
 
 const PORTRAIT_X_EDGES = [12, 54, 60, 70, 76, 102, 108, 134, 140, 150, 156, 198];
 const PORTRAIT_X_CENTRES = [33, 41, 57, 81, 105, 129, 153, 169, 177];
@@ -86,40 +85,6 @@ function randomFrame(random: () => number, o: PageOrientation, aspect: number): 
 		w,
 		h
 	};
-}
-
-let nextId = 0;
-function item(frame: Rect, aspect = frame.w / frame.h): DocItem {
-	nextId += 1;
-	return {
-		id: `item-${nextId}`,
-		frame,
-		chart: {
-			view: {
-				projection: aspect === 1 ? 'stereographic' : 'pinhole',
-				orientation: { x: 0, y: 0, z: 0, w: 1 },
-				stereoFovDeg: 180,
-				pinholeFovDeg: 100,
-				pinholeAspectRatio: aspect,
-				pinholeHeightFrac: 1
-			},
-			layers: {
-				constellations: true,
-				constellationBoundaries: false,
-				equator: false,
-				ecliptic: false,
-				galacticEquator: false,
-				planets: false
-			},
-			aspect,
-			createdAt: '2026-10-27T12:00:00.000Z'
-		}
-	};
-}
-
-function page(orientation: PageOrientation, frames: Rect[] = []): DocPage {
-	nextId += 1;
-	return { id: `page-${nextId}`, orientation, items: frames.map((f) => item(f)) };
 }
 
 describe('page geometry', () => {
@@ -539,147 +504,6 @@ describe('snapResize', () => {
 	});
 });
 
-describe('findPlacement', () => {
-	it('opens a new portrait page at the full content width', () => {
-		expect(findPlacement([], 1)).toEqual({
-			pageIndex: null,
-			frame: { x: 12, y: 12, w: 186, h: 186 }
-		});
-	});
-
-	it('caps a tall chart on a new page by the content height', () => {
-		const { pageIndex, frame } = findPlacement([], 0.5);
-		expect(pageIndex).toBeNull();
-		expectRect(frame, { x: 12, y: 12, w: 136.5, h: 273 });
-	});
-
-	it('fills an empty page at the full width', () => {
-		expect(findPlacement([page('portrait')], 1)).toEqual({
-			pageIndex: 0,
-			frame: { x: 12, y: 12, w: 186, h: 186 }
-		});
-		const wide = findPlacement([page('portrait')], 1.61);
-		expect(wide.pageIndex).toBe(0);
-		expectRect(wide.frame, { x: 12, y: 12, w: 186, h: 186 / 1.61 });
-	});
-
-	it('fills an empty landscape page as high as it goes', () => {
-		expect(findPlacement([page('landscape')], 1)).toEqual({
-			pageIndex: 0,
-			frame: { x: 12, y: 12, w: 186, h: 186 }
-		});
-	});
-
-	it('puts later charts at half the width, left to right then top to bottom', () => {
-		const half = { x: 12, y: 12, w: 90, h: 90 };
-		const p = page('portrait', [half]);
-		expect(findPlacement([p], 1).frame).toEqual({ x: 108, y: 12, w: 90, h: 90 });
-		p.items.push(item({ x: 108, y: 12, w: 90, h: 90 }));
-		expect(findPlacement([p], 1).frame).toEqual({ x: 12, y: 108, w: 90, h: 90 });
-		p.items.push(item({ x: 12, y: 108, w: 90, h: 90 }));
-		expect(findPlacement([p], 1).frame).toEqual({ x: 108, y: 108, w: 90, h: 90 });
-	});
-
-	it('steps down to a smaller size to fit under a full-width chart', () => {
-		// 90 and 87 do not fit in the 81 mm left under the disc; 63.75 (a quarter of the
-		// height) does, one gutter below it.
-		const p = page('portrait', [{ x: 12, y: 12, w: 186, h: 186 }]);
-		expect(findPlacement([p], 1)).toEqual({
-			pageIndex: 0,
-			frame: { x: 12, y: 204, w: 63.75, h: 63.75 }
-		});
-	});
-
-	it('goes no smaller than a third of the width', () => {
-		// The bottom row of 63.75s has room for nothing of at least 58 next to it.
-		const p = page('portrait', [
-			{ x: 12, y: 12, w: 186, h: 186 },
-			{ x: 12, y: 204, w: 63.75, h: 63.75 },
-			{ x: 81.75, y: 204, w: 63.75, h: 63.75 }
-		]);
-		expect(findPlacement([p], 1).pageIndex).toBeNull();
-	});
-
-	it('tries the pages in order and creates one when all are full', () => {
-		const full = page('portrait', [{ x: 12, y: 12, w: 186, h: 273 }]);
-		const half = page('portrait', [{ x: 12, y: 12, w: 90, h: 90 }]);
-		expect(findPlacement([full, half], 1)).toEqual({
-			pageIndex: 1,
-			frame: { x: 108, y: 12, w: 90, h: 90 }
-		});
-		expect(findPlacement([full, full], 1).pageIndex).toBeNull();
-		// An empty page later in the document still takes the chart.
-		expect(findPlacement([full, page('landscape')], 1).pageIndex).toBe(1);
-	});
-
-	it('places side by side on a landscape page', () => {
-		const p = page('landscape', [{ x: 12, y: 12, w: 133.5, h: 133.5 }]);
-		expect(findPlacement([p], 1).frame).toEqual({ x: 151.5, y: 12, w: 133.5, h: 133.5 });
-	});
-
-	it('lets a tall chart onto a landscape page at the full height', () => {
-		const empty = findPlacement([page('landscape')], 0.4);
-		expectRect(empty.frame, { x: 12, y: 12, w: 74.4, h: 186 });
-		const p = page('landscape', [empty.frame]);
-		const next = findPlacement([p], 0.4);
-		expect(next.pageIndex).toBe(0);
-		expectRect(next.frame, { x: 92.4, y: 12, w: 74.4, h: 186 });
-	});
-
-	it('puts a panorama too wide for half the width next to a chart, at its smallest size', () => {
-		// Past 2.25:1 every size is over 90 mm: 122 (two thirds of the width) is the smallest.
-		const disc = page('portrait', [{ x: 12, y: 12, w: 42, h: 42 }]);
-		expect(sizeCandidates('portrait', 2.3)[0]).toBe(122);
-		const placed = findPlacement([disc], 2.3);
-		expect(placed.pageIndex).toBe(0);
-		expectRect(placed.frame, { x: 60, y: 12, w: 122, h: 122 / 2.3 });
-
-		// On a landscape page past 3.34:1 (over 133.5 mm): 42 × 3.4 = 142.8.
-		const landscape = page('landscape', [{ x: 12, y: 12, w: 42, h: 42 }]);
-		const wide = findPlacement([landscape], 3.4);
-		expect(wide.pageIndex).toBe(0);
-		expectRect(wide.frame, { x: 60, y: 12, w: 142.8, h: 42 });
-	});
-
-	it('packs several panoramas onto one page instead of a page each', () => {
-		for (const aspect of [21 / 9, 3, 3.5]) {
-			const pages: DocPage[] = [];
-			for (let i = 0; i < 3; i++) {
-				const { pageIndex, frame } = findPlacement(pages, aspect);
-				const target = pageIndex === null ? page('portrait') : pages[pageIndex];
-				if (pageIndex === null) pages.push(target);
-				for (const existing of target.items) {
-					expect(overlaps(frame, existing.frame, GUTTER_MM)).toBe(false);
-				}
-				target.items.push(item(frame, aspect));
-			}
-			expect(pages, `aspect ${aspect}`).toHaveLength(1);
-		}
-	});
-
-	it('packs random charts into pages with no overlap', () => {
-		const random = rng(3);
-		for (let run = 0; run < 20; run++) {
-			const pages: DocPage[] = Array.from({ length: Math.floor(random() * 3) }, () =>
-				page(random() < 0.5 ? 'portrait' : 'landscape')
-			);
-			for (let i = 0; i < 30; i++) {
-				const aspect = random() < 0.4 ? 1 : between(random, 0.4, 3.5);
-				const { pageIndex, frame } = findPlacement(pages, aspect);
-				const target = pageIndex === null ? page('portrait') : pages[pageIndex];
-				if (pageIndex === null) pages.push(target);
-				expect(insideBox(frame, target.orientation)).toBe(true);
-				expect(frame.w / frame.h).toBeCloseTo(aspect, 9);
-				expect(Math.min(frame.w, frame.h)).toBeGreaterThanOrEqual(MIN_CHART_SIDE_MM - 1e-9);
-				for (const existing of target.items) {
-					expect(overlaps(frame, existing.frame, GUTTER_MM)).toBe(false);
-				}
-				target.items.push(item(frame, aspect));
-			}
-		}
-	});
-});
-
 describe('fitFrame', () => {
 	it('leaves a frame that fits alone', () => {
 		const frame = { x: 30, y: 40, w: 90, h: 90 };
@@ -834,7 +658,7 @@ describe('rotateLayout', () => {
 	});
 
 	it('shrinks the whole block uniformly when it no longer fits, never one chart alone', () => {
-		// Add to PDF's own layout: a full-width disc over a pinhole and a small disc.
+		// A full-width disc over a pinhole and a small disc.
 		const frames = [
 			{ x: 12, y: 12, w: 186, h: 186 },
 			{ x: 12, y: 204, w: 90, h: 55.9 },
@@ -861,7 +685,7 @@ describe('rotateLayout', () => {
 		expect(insideBox(frame, 'landscape')).toBe(true);
 	});
 
-	it('turns Add to PDF layouts into layouts that fit, overlap nothing and keep every aspect', () => {
+	it('turns packed layouts into layouts that fit, overlap nothing and keep every aspect', () => {
 		// A turn shrinks a block to 186/273 at most, so a chart whose short side is at least
 		// 40 / (186/273) ≈ 59 mm never falls under the smallest side and is never placed
 		// again on its own: the turned block overlaps nothing because the old one did not.
@@ -871,20 +695,18 @@ describe('rotateLayout', () => {
 		for (let run = 0; run < 400; run++) {
 			const from: PageOrientation = random() < 0.5 ? 'portrait' : 'landscape';
 			const to: PageOrientation = from === 'portrait' ? 'landscape' : 'portrait';
+			const box = contentBox(from);
 			const items: { frame: Rect; aspect: number }[] = [];
+			// Packed like a hand-filled page: the full width first, then half of it, each
+			// chart in the first free spot (`placeFrame`), down to a third of the width.
 			for (let n = 0; n < 6; n++) {
 				const aspect = between(random, 0.5, 3);
-				const spot = findPlacement(
-					[
-						page(
-							from,
-							items.map((it) => it.frame)
-						)
-					],
-					aspect
-				);
-				if (spot.pageIndex === null) break;
-				items.push({ frame: spot.frame, aspect });
+				const w = n === 0 ? box.w : trackSize(box.w, 2);
+				const others = items.map((it) => it.frame);
+				const frame = placeFrame({ x: box.x, y: box.y, w, h: w / aspect }, aspect, others, from);
+				const third = Math.min(trackSize(box.w, 3), box.h * aspect);
+				if (frame.w < third - 1e-9 || others.some((o) => overlaps(frame, o, GUTTER_MM))) break;
+				items.push({ frame, aspect });
 			}
 			const frames = rotateLayout(items, from, to);
 			frames.forEach((frame, i) => {

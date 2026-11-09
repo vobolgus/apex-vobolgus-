@@ -6,10 +6,11 @@
  * each axis with a gutter between the cells: its edge lines are the cells' starts
  * and ends, its centre lines the cells' centres. Snapping pairs like with like
  * (an edge to an edge line, a centre to a centre line), so a chart never lands
- * with its edge on a cell's middle.
+ * with its edge on a cell's middle. Laying a whole page out (Add to PDF, a turn)
+ * is the arranger's (`arrange.ts`).
  */
 
-import type { DocPage, PageOrientation, Rect } from './types';
+import type { PageOrientation, Rect } from './types';
 
 export const A4_WIDTH_MM = 210;
 export const A4_HEIGHT_MM = 297;
@@ -359,40 +360,6 @@ export function snapResize(
 // === Placement ===
 
 /**
- * Where Add to PDF puts a chart: the first page (in order) with room, else a new
- * page. Room means a frame on the grid lines (or against another chart, one gutter
- * off) that does not overlap any chart, gutter included, and lies in the content
- * box. Sizes are tried from the preferred width down to a third of the content
- * width (from `sizeCandidates`): preferred is the full content width for an empty
- * page, half of it (one of two columns) otherwise. A chart too tall to be a third
- * as wide still gets its largest size that fits; one too wide to be half as wide
- * (a panorama past 2.25:1 on a portrait page) tries its sizes from the smallest up.
- * Within a page the largest size wins, then top-to-bottom, left-to-right. On a new
- * (portrait) page the chart gets the full content width, capped by the height.
- */
-export function findPlacement(
-	pages: readonly DocPage[],
-	aspect: number
-): { pageIndex: number | null; frame: Rect } {
-	for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-		const { orientation, items } = pages[pageIndex];
-		const box = contentBox(orientation);
-		const preferred = items.length === 0 ? box.w : trackSize(box.w, 2);
-		const smallest = Math.min(trackSize(box.w, 3), maxWidth(box, aspect));
-		const sizes = sizeCandidates(orientation, aspect);
-		const fitting = sizes.filter((w) => w <= preferred + EPS && w >= smallest - EPS).reverse();
-		// Every size of a wide chart is over half the width: the smallest that fits, then.
-		const widths = fitting.length > 0 ? fitting : sizes;
-		const obstacles = items.map((item) => item.frame);
-		const frame = findSpot(orientation, aspect, obstacles, widths);
-		if (frame) return { pageIndex, frame };
-	}
-	const box = contentBox('portrait');
-	const w = maxWidth(box, aspect);
-	return { pageIndex: null, frame: { x: box.x, y: box.y, w, h: w / aspect } };
-}
-
-/**
  * The first free frame for the widths in order: for each width every position whose
  * start or end is on a grid edge line, or against an obstacle (aligned with it or
  * one gutter off), tried top-to-bottom, left-to-right.
@@ -445,6 +412,14 @@ export function fitFrame(frame: Rect, aspect: number, o: PageOrientation): Rect 
 }
 
 /**
+ * Whether a side of `frame` is under MIN_CHART_SIDE_MM. Only a crowded turn lays a
+ * chart out that small (`turnLayout`), and the editor says so.
+ */
+export function underMinSide(frame: Rect): boolean {
+	return Math.min(frame.w, frame.h) < MIN_CHART_SIDE_MM - EPS;
+}
+
+/**
  * The frame one size step larger (`1`) or smaller (`-1`): the next size candidate
  * past its width, its top-left kept where the content box allows (`fitFrame`). Null
  * when there is no size further that way.
@@ -464,10 +439,10 @@ export function stepSize(
 }
 
 /**
- * Where a chart goes on a page when nothing points at a spot (a turn of the page, a
- * move from the keyboard): like Add to PDF places one, clear of `others`, from its
- * own width (capped by the box) down through the size candidates, top-to-bottom,
- * left-to-right. With no room it is scaled down into the box where it was
+ * Where a chart goes on a page when nothing points at a spot (a move from the
+ * keyboard, a chart that fell off a turned page): clear of `others`, from its own
+ * width (capped by the box) down through the size candidates, on the grid lines or
+ * against another chart, top-to-bottom, left-to-right. With no room it is scaled down into the box where it was
  * (`fitFrame`), which may overlap; the editor can fix that.
  */
 export function placeFrame(
@@ -485,8 +460,9 @@ export function placeFrame(
 }
 
 /**
- * A page's frames after it turned from `from` to `to`: the layout turns with the
- * page, as a block, in whichever of two ways shrinks it less. Turned, rows of charts
+ * A page's frames after it turned from `from` to `to`, for a page with more charts
+ * than the arranger lays out (`turnLayout`): the layout turns with the page, as a
+ * block, in whichever of two ways shrinks it less. Turned, rows of charts
  * become columns (left-to-right becoming top-to-bottom) with the gaps between them
  * kept, so two discs side by side on a landscape page stand one above the other on
  * a portrait one; kept, the arrangement stays and is only fitted in (a stack of wide
