@@ -85,6 +85,11 @@ export class LayerState {
 		this[key] = !this[key];
 	}
 
+	/** Turn every layer on or off as `values` says (a view that arrives whole, from a link). */
+	assign(values: Readonly<Record<LayerKey, boolean>>) {
+		for (const key of LAYER_KEYS) this[key] = values[key];
+	}
+
 	/** A group reads as on only when every one of its layers is on. */
 	isGroupOn(group: LayerGroup): boolean {
 		return group.layers.every((layer) => this[layer.key]);

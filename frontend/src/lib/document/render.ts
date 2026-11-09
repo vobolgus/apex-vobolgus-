@@ -128,7 +128,8 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<Documen
 		});
 		if (!response.ok) {
 			const text = await response.text();
-			if (response.status === 400) message = refusal(text);
+			// A 400 says what is wrong with the document, a 429 how long to wait.
+			if (response.status === 400 || response.status === 429) message = refusal(text);
 			throw new Error(`Document export failed: ${response.status} ${text}`);
 		}
 		const url = URL.createObjectURL(await response.blob());

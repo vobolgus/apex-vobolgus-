@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { replaceState } from '$app/navigation';
 	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
 	import { buildRenderConfig, type ChartView } from '$lib/api/render-config';
@@ -31,6 +32,7 @@
 		ProjectionTransition,
 		type ProjectionMode
 	} from '$lib/state/projection-transition.svelte';
+	import { applySharedView, decodeViewHash, encodeViewHash } from '$lib/state/view-url';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
 	import { toast, type ToastItem } from '$lib/ui/toast.svelte';
@@ -48,8 +50,22 @@
 
 	/** The compact header and the collapsed pages panel start here (as in the CSS). */
 	const NARROW_QUERY = '(max-width: 743px)';
-	/** A document export slower than this says it is working on it. */
+	/** An export slower than this says it is working on it. */
 	const EXPORT_PROGRESS_DELAY_MS = 600;
+	/** The catalogue says it is loading only when it takes longer than this. */
+	const CATALOG_SLOW_MS = 500;
+	/** The address bar follows the view once it has been still for this long. */
+	const URL_SYNC_DELAY_MS = 300;
+
+	/** What the chart is drawn from, each fetched on its own. */
+	const CATALOG_LOADERS = {
+		// Stars are drawn twice: the bright ones first, then all of them.
+		stars: () => loadStars(markRenderDirty),
+		constellations: loadConstellations,
+		boundaries: loadConstellationBoundaries
+	} as const;
+	type CatalogPart = keyof typeof CATALOG_LOADERS;
+	const CATALOG_PARTS = Object.keys(CATALOG_LOADERS) as CatalogPart[];
 
 	let canvasEl: HTMLCanvasElement | null = null;
 	let chartAreaEl: HTMLElement | null = null;
@@ -90,6 +106,29 @@
 	let addAnnouncement = $state('');
 	/** A document export is on its way: its row waits for it, a second click starts nothing. */
 	let documentExporting = $state(false);
+	/** An SVG or PDF of the chart is on its way; a second one waits for it. */
+	let chartExporting = false;
+	/** The catalogue parts that did not arrive; the notice over the chart offers to try again. */
+	let catalogFailed = $state<CatalogPart[]>([]);
+	let catalogLoading = $state(true);
+	/** The load is slow, or a retry: worth saying so. */
+	let catalogSlow = $state(false);
+	const catalogFailure = $derived(
+		catalogFailed.includes('stars')
+			? 'Couldn’t load the star catalogue.'
+			: catalogFailed.length === 2
+				? 'Couldn’t load the constellation lines and boundaries.'
+				: catalogFailed[0] === 'constellations'
+					? 'Couldn’t load the constellation lines.'
+					: 'Couldn’t load the constellation boundaries.'
+	);
+	/**
+	 * The view the address bar holds, as a fragment; null until the page has read it.
+	 * The bar is written only once the view differs from this, so a plain visit keeps
+	 * a plain address.
+	 */
+	let syncedHash: string | null = null;
+	let urlSyncTimer: ReturnType<typeof setTimeout> | null = null;
 	const modalOpen = $derived(aboutOpen || editorPageId !== null);
 	// On a phone the panel floats over the chart, which it may cover; on a wide screen the chart moves aside.
 	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
@@ -114,8 +153,14 @@
 		documentStore.load();
 		// Collapsed by default on a phone, where the open panel would cover the chart.
 		if (narrow) documentStore.panelOpen = false;
+		// A link (or a reload) brings its view; pasting another into this tab only changes the hash.
+		readViewFromUrl();
+		window.addEventListener('hashchange', readViewFromUrl);
 		// Saves are debounced: write the last one before the tab goes away.
-		const flushDocument = () => documentStore.flush();
+		const flushDocument = () => {
+			documentStore.flush();
+			if (urlSyncTimer !== null) writeViewToUrl();
+		};
 		const handleVisibilityChange = () => {
 			if (document.visibilityState === 'hidden') flushDocument();
 		};
@@ -181,7 +226,7 @@
 			}
 			if (isModShortcut(event, 'KeyS', apple)) {
 				event.preventDefault();
-				if (!event.repeat) runExport('PNG');
+				if (!event.repeat) void runExport('PNG');
 				return;
 			}
 			if (
@@ -213,11 +258,10 @@
 			renderer?.setMorphInterpolatorFactory(interpolate);
 			markRenderDirty();
 		});
-		void loadStars().then(markRenderDirty);
-		void loadConstellations().then(markRenderDirty);
-		void loadConstellationBoundaries().then(markRenderDirty);
+		void loadCatalog(CATALOG_PARTS);
 		return () => {
 			stopMenuDismiss();
+			window.removeEventListener('hashchange', readViewFromUrl);
 			narrowQuery.removeEventListener('change', handleNarrowChange);
 			window.removeEventListener('pagehide', flushDocument);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -235,6 +279,65 @@
 			input = null;
 		};
 	});
+
+	/**
+	 * Fetch `parts` of the catalogue, drawing each as it arrives. What fails is kept
+	 * in `catalogFailed` for the notice; a `retry` says it is loading at once, so the
+	 * notice does not blink away and back when the backend is still down.
+	 */
+	async function loadCatalog(parts: readonly CatalogPart[], retry = false) {
+		catalogLoading = true;
+		catalogSlow = retry;
+		const slowTimer = setTimeout(() => (catalogSlow = true), CATALOG_SLOW_MS);
+		const arrived = await Promise.all(
+			parts.map(async (part) => {
+				const ok = await CATALOG_LOADERS[part]();
+				if (ok) markRenderDirty();
+				return ok;
+			})
+		);
+		clearTimeout(slowTimer);
+		catalogFailed = parts.filter((_, index) => !arrived[index]);
+		catalogLoading = false;
+		catalogSlow = false;
+	}
+
+	/** The view as the address bar would hold it. */
+	function viewHash(): string {
+		return encodeViewHash(currentChartView(), layers);
+	}
+
+	/** Take the view the address names, if it names one, with no morph. */
+	function readViewFromUrl() {
+		const shared = decodeViewHash(window.location.hash);
+		if (shared) {
+			const next = applySharedView(currentChartView(), shared);
+			view.orientation = next.orientation;
+			view.stereoFovDeg = next.stereoFovDeg;
+			view.pinholeFovDeg = next.pinholeFovDeg;
+			view.pinholeAspectRatio = next.pinholeAspectRatio;
+			view.pinholeHeightFrac = next.pinholeHeightFrac;
+			projection.jump(next.projection);
+			layers.assign(shared.layers);
+			markRenderDirty();
+		}
+		syncedHash = viewHash();
+	}
+
+	function writeViewToUrl() {
+		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
+		urlSyncTimer = null;
+		const hash = viewHash();
+		if (hash === syncedHash) return;
+		try {
+			// Replaced, not pushed: turning the sky must not fill the Back history.
+			replaceState(`#${hash}`, {});
+			syncedHash = hash;
+		} catch (error) {
+			// Browsers cap how often the address may change; the next change tries again.
+			console.error(error);
+		}
+	}
 
 	function measureChartClip() {
 		if (!chartAreaEl) return;
@@ -299,6 +402,14 @@
 		markRenderDirty();
 	});
 
+	$effect(() => {
+		// Reading the fragment subscribes to the view, the projection and the layers.
+		const hash = viewHash();
+		if (syncedHash === null || hash === syncedHash) return;
+		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
+		urlSyncTimer = setTimeout(writeViewToUrl, URL_SYNC_DELAY_MS);
+	});
+
 	function switchProjection(nextMode: ProjectionMode) {
 		projection.start(nextMode);
 		markRenderDirty();
@@ -316,10 +427,53 @@
 		};
 	}
 
-	function runExport(format: ExportFormat) {
-		void exportChart(canvasEl, format, () =>
-			buildRenderConfig(currentChartView(), layers, new Date())
+	/**
+	 * Run an export that may be slow and may fail. Past EXPORT_PROGRESS_DELAY_MS a held
+	 * toast says `working` until it is done; a failure says `failure(result)`. An Undo
+	 * that the progress toast covered comes back afterwards, unless something newer took
+	 * its place.
+	 */
+	async function withExportProgress<T extends { ok: boolean }>(
+		working: string,
+		run: () => Promise<T>,
+		failure: (result: T) => string
+	): Promise<T> {
+		const progress: { id: number | null; covered: ToastItem | null } = { id: null, covered: null };
+		const timer = setTimeout(() => {
+			progress.covered = toast.current;
+			progress.id = toast.hold(working);
+		}, EXPORT_PROGRESS_DELAY_MS);
+		const result = await run();
+		clearTimeout(timer);
+		const progressShowing = progress.id !== null && toast.current?.id === progress.id;
+		if (progress.id !== null) toast.dismiss(progress.id);
+		if (!result.ok) {
+			toast.show(failure(result));
+		} else if (progressShowing && progress.covered?.undo) {
+			toast.show(progress.covered.message, progress.covered.undo);
+		}
+		return result;
+	}
+
+	/**
+	 * Save the chart. A PNG comes straight off the canvas; an SVG or a PDF is drawn by
+	 * the backend from the view as it is now, and a second one waits for the first.
+	 */
+	async function runExport(format: ExportFormat) {
+		const config = () => buildRenderConfig(currentChartView(), layers, new Date());
+		if (format === 'PNG') {
+			const result = await exportChart(canvasEl, format, config);
+			if (!result.ok) toast.show('Couldn’t save the PNG. Try again in a moment.');
+			return;
+		}
+		if (chartExporting) return;
+		chartExporting = true;
+		await withExportProgress(
+			`Preparing the ${format}…`,
+			() => exportChart(canvasEl, format, config),
+			() => `Couldn’t export the ${format}. Try again in a moment.`
 		);
+		chartExporting = false;
 	}
 
 	/**
@@ -359,34 +513,23 @@
 	}
 
 	/**
-	 * The whole document as one PDF. A slow export says so until it is done (a held
-	 * toast); an Undo that toast covered comes back afterwards, unless something newer
-	 * took its place. The row is off meanwhile, so a second click starts nothing.
+	 * The whole document as one PDF, with the progress and failure toasts of
+	 * `withExportProgress`. The row is off meanwhile, so a second click starts nothing.
 	 */
 	async function runDocumentExport() {
 		exportMenu.dismiss();
 		if (documentStore.pageCount === 0 || documentExporting) return;
 		documentExporting = true;
-		const progress: { id: number | null; covered: ToastItem | null } = { id: null, covered: null };
-		const timer = setTimeout(() => {
-			progress.covered = toast.current;
-			progress.id = toast.hold('Preparing the PDF…');
-		}, EXPORT_PROGRESS_DELAY_MS);
-		const result = await exportDocument(documentStore.pages);
-		clearTimeout(timer);
-		documentExporting = false;
-		const progressShowing = progress.id !== null && toast.current?.id === progress.id;
-		if (progress.id !== null) toast.dismiss(progress.id);
-		if (!result.ok) {
+		await withExportProgress(
+			'Preparing the PDF…',
+			() => exportDocument(documentStore.pages),
 			// A refusal (a 400) names its reason: trying again would not help.
-			toast.show(
-				result.message
+			(result) =>
+				!result.ok && result.message
 					? `Couldn’t export the PDF: ${result.message}`
 					: 'Couldn’t export the PDF. Try again in a moment.'
-			);
-		} else if (progressShowing && progress.covered?.undo) {
-			toast.show(progress.covered.message, progress.covered.undo);
-		}
+		);
+		documentExporting = false;
 	}
 
 	function openEditor(pageId: string) {
@@ -401,7 +544,7 @@
 		selectedExportFormat = format;
 		// From the keyboard, the focus goes back to the menu's button, not to <body>.
 		exportMenu.dismiss();
-		runExport(format);
+		void runExport(format);
 	}
 
 	/** ⌘K: open the format menu with the focus on the selected format, or close it again. */
@@ -625,6 +768,24 @@
 				onChange={markRenderDirty}
 			/>
 		</div>
+		<!-- Always in the tree, so the live region is there before its text changes. -->
+		<div class="catalog-notice-host" role="status">
+			{#if catalogLoading && catalogSlow}
+				<p class="catalog-notice">Loading the star catalogue…</p>
+			{:else if !catalogLoading && catalogFailed.length > 0}
+				<p class="catalog-notice">
+					<span class="catalog-notice-text">{catalogFailure}</span>
+					<span class="catalog-notice-divider" aria-hidden="true"></span>
+					<button
+						class="catalog-notice-action"
+						type="button"
+						onclick={() => loadCatalog(catalogFailed, true)}
+					>
+						Try again
+					</button>
+				</p>
+			{/if}
+		</div>
 		<PagesPanel
 			bind:this={pagesPanel}
 			bind:footprint={panelFootprintPx}
@@ -675,6 +836,82 @@
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr) auto;
 		overflow: hidden;
+	}
+
+	/*
+	 * The catalogue's notice: top centre of the chart area, over the chart. Styled as
+	 * the toast is; it stays until the catalogue has loaded.
+	 */
+	.catalog-notice-host {
+		position: absolute;
+		inset: 12px 12px auto;
+		z-index: 2;
+		display: flex;
+		justify-content: center;
+		pointer-events: none;
+	}
+
+	.catalog-notice {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		max-width: min(440px, 100%);
+		min-height: 40px;
+		margin: 0;
+		padding: 4px 14px;
+		border: 1px solid var(--hairline);
+		border-radius: var(--r-pop);
+		background: var(--pop);
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+		color: var(--fg-1);
+		font: var(--font-ui);
+		pointer-events: auto;
+	}
+
+	.catalog-notice:has(.catalog-notice-action) {
+		padding-right: 4px;
+	}
+
+	.catalog-notice-text {
+		min-width: 0;
+		padding: 4px 0;
+	}
+
+	.catalog-notice-divider {
+		flex-shrink: 0;
+		width: 1px;
+		height: 16px;
+		margin: 0 4px 0 8px;
+		background: var(--hairline);
+	}
+
+	.catalog-notice-action {
+		flex-shrink: 0;
+		height: var(--h-row);
+		padding: 0 10px;
+		border: 0;
+		border-radius: var(--r-row);
+		background: transparent;
+		color: var(--fg-1);
+		font: var(--font-ui);
+		font-weight: 600;
+		cursor: pointer;
+		transition: background var(--ease-ui);
+	}
+
+	@media (hover: hover) {
+		.catalog-notice-action:hover {
+			background: var(--fill-hover);
+		}
+	}
+
+	.catalog-notice-action:active {
+		background: var(--fill-press);
+	}
+
+	.catalog-notice-action:focus-visible {
+		outline: none;
+		box-shadow: var(--ring);
 	}
 
 	.ray-header {

@@ -36,6 +36,10 @@
 !package.json
 !package-lock.json
 
+# The deployment image (backend + the frontend's static build)
+!Dockerfile
+!.dockerignore
+
 # Explicitly keep local/editor/generated artifacts ignored
 .cursor/
 .vscode/

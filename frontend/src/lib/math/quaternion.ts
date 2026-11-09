@@ -127,3 +127,52 @@ export function rotateVectorByQuaternion(
 	const scale = 2 * qw;
 	return [x + uvx * scale + uuvx * 2, y + uvy * scale + uuvy * 2, z + uvz * scale + uuvz * 2];
 }
+
+/** A rotation matrix, row-major: `m[i][j]` is the i-th component of the rotated j-th axis. */
+export type RotationMatrix = readonly [
+	readonly [number, number, number],
+	readonly [number, number, number],
+	readonly [number, number, number]
+];
+
+/**
+ * The quaternion whose rotation (`rotateVectorByQuaternion`) is `m`. Takes the
+ * largest of the four pivots (Shepperd), so it stays accurate near half turns.
+ */
+export function quaternionFromRotationMatrix(m: RotationMatrix): Quaternion {
+	const trace = m[0][0] + m[1][1] + m[2][2];
+	if (trace > 0) {
+		const s = 2 * Math.sqrt(trace + 1);
+		return normalizeQuaternion({
+			x: (m[2][1] - m[1][2]) / s,
+			y: (m[0][2] - m[2][0]) / s,
+			z: (m[1][0] - m[0][1]) / s,
+			w: s / 4
+		});
+	}
+	if (m[0][0] > m[1][1] && m[0][0] > m[2][2]) {
+		const s = 2 * Math.sqrt(1 + m[0][0] - m[1][1] - m[2][2]);
+		return normalizeQuaternion({
+			x: s / 4,
+			y: (m[0][1] + m[1][0]) / s,
+			z: (m[0][2] + m[2][0]) / s,
+			w: (m[2][1] - m[1][2]) / s
+		});
+	}
+	if (m[1][1] > m[2][2]) {
+		const s = 2 * Math.sqrt(1 + m[1][1] - m[0][0] - m[2][2]);
+		return normalizeQuaternion({
+			x: (m[0][1] + m[1][0]) / s,
+			y: s / 4,
+			z: (m[1][2] + m[2][1]) / s,
+			w: (m[0][2] - m[2][0]) / s
+		});
+	}
+	const s = 2 * Math.sqrt(1 + m[2][2] - m[0][0] - m[1][1]);
+	return normalizeQuaternion({
+		x: (m[0][2] + m[2][0]) / s,
+		y: (m[1][2] + m[2][1]) / s,
+		z: s / 4,
+		w: (m[1][0] - m[0][1]) / s
+	});
+}

@@ -2,15 +2,52 @@
 
 Base URL (local): `http://localhost:8080`
 
-The backend serves the star-map generator only. The SvelteKit app proxies these
-routes under the same paths (`/api/...`).
+The backend serves the star-map generator only. In production it also serves
+the frontend's static build from the same origin (see "Static site" below); in
+development the Vite dev server proxies `/api/...` here.
 
 CORS: any origin, method and header.
 
 ## Health
 
-- `GET /`
-- Response: `Apex Backend is running!` (`text/plain`)
+- `GET /api/health`
+- Response: `ok` (`text/plain`)
+- `GET /` answers `Apex Backend is running!` when no static site is configured.
+
+## Static site
+
+With `STATIC_DIR` set to the frontend's build (`frontend/build`), every path that
+is not an API route is served from it:
+
+- `/_app/immutable/*` (content-hashed names): `Cache-Control: public,
+  max-age=31536000, immutable`.
+- Everything else, `index.html` included: `Cache-Control: no-cache`, revalidated
+  on each visit (`304` when unchanged).
+- The build's `.br` and `.gz` twins are sent as they are to a client that takes
+  them.
+- A path that is no file: `404.html` with status `404`.
+- `GET /generator`: `308` to `/`.
+
+`PORT` sets the port to listen on (default 8080).
+
+## Export budget
+
+`POST /api/export` and `POST /api/export/document` are rationed in charts, with
+a token bucket per client and one for the whole server (`src/limits.rs`). A
+chart in a PDF costs 4 units, an SVG 1.
+
+| Bucket | Burst | Refill |
+|---|---|---|
+| per client | 1600 units (two 200-chart documents) | 1 unit/s (900 PDF charts an hour) |
+| whole server | 8000 units | 2 units/s (1800 PDF charts an hour) |
+
+Past either: `429 Too Many Requests`, plain text, with `Retry-After` in seconds.
+The budget is taken before the request is validated. The client is the address
+in `X-Real-IP`, else the last hop of `X-Forwarded-For`, else the peer's; the
+server's bucket does not depend on it.
+
+Besides the budget, at most 4 single charts and 2 documents are converted at a
+time; the rest wait their turn.
 
 ## Catalog
 
@@ -23,14 +60,32 @@ Both routes return HIP stars as a JSON array, filtered by `min_mag <= v_mag <= m
 
 Query params (both optional, numbers): `max_mag`, `min_mag` (no lower bound when omitted).
 
+### Caching
+
+The default slice of each star route (no params, or the default `max_mag` named
+outright) and both constellation routes never change while the server runs. They
+are serialized and gzipped once at startup and sent as they are:
+
+- `Cache-Control: public, max-age=86400, stale-while-revalidate=604800` and a weak
+  `ETag`; a request with a matching `If-None-Match` gets `304` and no body.
+- `Content-Encoding: gzip` when `Accept-Encoding` lists gzip (the full catalog is
+  about 414 KB plain and 103 KB gzipped, the bright one 24 KB and 7 KB).
+
+Any other slice (`min_mag`, another `max_mag`) is computed per request and sent
+without these headers. The frontend's `/api/*` proxies pass `Cache-Control`, `ETag`
+and `If-None-Match` through and stream the body; they leave compressing the hop to
+the browser to the host (a CDN or a reverse proxy).
+
 Star object:
 
 ```json
-{ "hip_id": 32349, "v_mag": -1.44, "ra": 1.7677, "dec": -0.2917, "x": -0.187, "y": 0.939, "z": -0.288 }
+{ "v_mag": -1.44, "ra": 1.7677944, "dec": -0.29175127 }
 ```
 
 - `ra`, `dec` in radians
-- `x`, `y`, `z` - unit vector in the equatorial (ECI) frame
+- Position and brightness only. The unit vector in the equatorial frame is
+  `(cos dec · cos ra, cos dec · sin ra, sin dec)`, which the client works out; the
+  HIP number is not sent. Arrays are sorted from the brightest star down.
 
 ## Constellations
 
@@ -56,9 +111,11 @@ Each segment is a polyline of unit vectors (equatorial frame).
 - `POST /api/export` - PDF
   - Response: `application/pdf`, `Content-Disposition: attachment; filename="sky_chart.pdf"`
 - `POST /api/export?format=svg` - the same map as SVG
-  - Response: `image/svg+xml; charset=utf-8`
+  - Response: `image/svg+xml; charset=utf-8`, with `Content-Encoding: gzip` when
+    `Accept-Encoding` lists gzip (about a fifth of the size)
   - any other `format` value returns the PDF
 - Request: `Content-Type: application/json`, body is `RenderConfig`
+- `429` past the export budget (see "Export budget" above)
 
 `RenderConfig` (`?` = optional, may be omitted or `null`):
 

@@ -2,13 +2,18 @@ use anyhow::Context;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
+    response::Redirect,
     routing::{get, post},
 };
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
+mod cached;
+mod limits;
 mod models;
+mod static_site;
 mod svg_generator;
 mod handlers {
     pub mod catalog;
@@ -23,17 +28,40 @@ const DOCUMENT_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Clone)]
 pub struct AppState {
     pub hip_catalog: Arc<rust_core::catalog::HipCatalog>,
+    /// The catalog endpoints' answers, serialized and compressed once.
+    pub catalog_cache: Arc<cached::CatalogCache>,
+    /// What the export endpoints may spend, per client and in all.
+    pub export_limiter: Arc<limits::ExportLimiter>,
 }
 
-fn build_app(state: AppState) -> Router {
+impl AppState {
+    pub fn new(hip_catalog: Arc<rust_core::catalog::HipCatalog>) -> Self {
+        Self {
+            hip_catalog,
+            catalog_cache: Arc::default(),
+            export_limiter: Arc::default(),
+        }
+    }
+}
+
+/// The API, and the frontend's static build as well when `static_dir` holds one.
+/// Without it `/` is the health probe it always was, and the page is served by
+/// someone else (the Vite dev server, which proxies `/api` here).
+fn build_app(state: AppState, static_dir: Option<&Path>) -> Router {
     // Настройка CORS
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
-        .route("/", get(|| async { "Apex Backend is running!" }))
+    let app = match static_dir {
+        Some(dir) => Router::new().fallback_service(static_site::router(dir)),
+        None => Router::new().route("/", get(|| async { "Apex Backend is running!" })),
+    };
+
+    app.route("/api/health", get(|| async { "ok" }))
+        // The generator used to live at /generator; old links keep working.
+        .route("/generator", get(|| async { Redirect::permanent("/") }))
         // Catalog endpoints
         .route(
             "/api/catalog/bright",
@@ -49,10 +77,10 @@ fn build_app(state: AppState) -> Router {
             get(handlers::catalog::get_constellation_boundaries),
         )
         // PDF Export
-        .route("/api/export", post(handlers::export::export_pdf))
+        .route("/api/export", post(handlers::export::export_chart))
         .route(
             "/api/export/document",
-            post(handlers::document::export_document)
+            post(handlers::document::export_document_within_budget)
                 .layer(DefaultBodyLimit::max(DOCUMENT_BODY_LIMIT_BYTES)),
         )
         .layer(cors)
@@ -65,19 +93,44 @@ async fn main() -> anyhow::Result<()> {
     let hip_catalog = Arc::new(rust_core::catalog::HipCatalog::new());
     println!("Catalogs loaded successfully.");
 
-    let state = AppState { hip_catalog };
+    let state = AppState::new(hip_catalog);
+    // Built now, so the first visitor does not wait for the compression.
+    state.catalog_cache.warm(&state.hip_catalog);
 
-    let app = build_app(state);
+    // The frontend's build, when this server is to serve the page too (the Docker
+    // image sets it). A directory that is not there is a deploy gone wrong: say so
+    // now rather than answer every visitor with a 404.
+    let static_dir = std::env::var_os("STATIC_DIR").map(PathBuf::from);
+    if let Some(dir) = &static_dir {
+        anyhow::ensure!(
+            dir.join("index.html").is_file(),
+            "STATIC_DIR={} has no index.html",
+            dir.display()
+        );
+        println!("Serving the frontend from {}", dir.display());
+    }
+    let app = build_app(state, static_dir.as_deref());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    // The host names the port (Railway sets PORT); 8080 is the local default.
+    let port = match std::env::var("PORT") {
+        Ok(port) => port
+            .parse::<u16>()
+            .with_context(|| format!("PORT={port} is not a port number"))?,
+        Err(_) => 8080,
+    };
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind to {addr}"))?;
-    axum::serve(listener, app)
-        .await
-        .context("axum server failed")?;
+    // With the peer's address, for the export budget when no proxy reports one.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .context("axum server failed")?;
     Ok(())
 }
 
@@ -92,10 +145,8 @@ mod tests {
     use tower::ServiceExt;
 
     async fn test_app() -> Router {
-        let state = AppState {
-            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-        };
-        build_app(state)
+        let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
+        build_app(state, None)
     }
 
     #[tokio::test]
@@ -151,6 +202,291 @@ mod tests {
             .unwrap();
         let full_stars: Vec<Value> = serde_json::from_slice(&full_body).unwrap();
         assert!(full_stars.len() > bright_stars.len());
+
+        // A star is its position and brightness, nothing a client can work out itself.
+        for star in bright_stars.iter().chain(&full_stars) {
+            let mut fields: Vec<&str> = star
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            fields.sort_unstable();
+            assert_eq!(fields, ["dec", "ra", "v_mag"]);
+        }
+    }
+
+    /// GET `uri` with `headers`; the response's status, headers and raw body.
+    async fn get(
+        app: &Router,
+        uri: &str,
+        headers: &[(header::HeaderName, &str)],
+    ) -> (StatusCode, header::HeaderMap, Vec<u8>) {
+        let mut request = Request::builder().uri(uri);
+        for (name, value) in headers {
+            request = request.header(name, *value);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let (parts, body) = response.into_parts();
+        let body = to_bytes(body, usize::MAX).await.unwrap().to_vec();
+        (parts.status, parts.headers, body)
+    }
+
+    #[tokio::test]
+    async fn catalog_endpoints_are_cacheable_and_compressed() {
+        use std::io::Read;
+
+        let app = test_app().await;
+        for uri in [
+            "/api/catalog/bright",
+            "/api/catalog/full",
+            "/api/catalog/full?max_mag=6.5",
+            "/api/constellations",
+            "/api/constellation-boundaries",
+        ] {
+            let (status, headers, plain) = get(&app, uri, &[]).await;
+            assert_eq!(status, StatusCode::OK, "{uri}");
+            assert_eq!(
+                headers[header::CACHE_CONTROL],
+                cached::CATALOG_CACHE_CONTROL,
+                "{uri}"
+            );
+            assert_eq!(headers[header::CONTENT_TYPE], "application/json", "{uri}");
+            assert!(!headers.contains_key(header::CONTENT_ENCODING), "{uri}");
+            let etag = headers[header::ETAG].to_str().unwrap().to_owned();
+
+            // The gzip body is the same JSON, and a good deal smaller.
+            let (status, headers, packed) =
+                get(&app, uri, &[(header::ACCEPT_ENCODING, "gzip, br")]).await;
+            assert_eq!(status, StatusCode::OK, "{uri}");
+            assert_eq!(headers[header::CONTENT_ENCODING], "gzip", "{uri}");
+            assert_eq!(headers[header::ETAG], etag.as_str(), "{uri}");
+            assert!(packed.len() * 2 < plain.len(), "{uri}");
+            let mut unpacked = Vec::new();
+            flate2::read::GzDecoder::new(packed.as_slice())
+                .read_to_end(&mut unpacked)
+                .unwrap();
+            assert_eq!(unpacked, plain, "{uri}");
+
+            // A client that holds the body is told so, and sent nothing.
+            let (status, headers, body) = get(&app, uri, &[(header::IF_NONE_MATCH, &etag)]).await;
+            assert_eq!(status, StatusCode::NOT_MODIFIED, "{uri}");
+            assert_eq!(headers[header::ETAG], etag.as_str(), "{uri}");
+            assert!(body.is_empty(), "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_custom_catalog_slice_is_computed_and_not_cached() {
+        let app = test_app().await;
+        let (status, headers, body) = get(&app, "/api/catalog/full?max_mag=2.0", &[]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!headers.contains_key(header::CACHE_CONTROL));
+        let stars: Vec<Value> = serde_json::from_slice(&body).unwrap();
+        assert!(!stars.is_empty());
+        assert!(
+            stars
+                .iter()
+                .all(|star| star["v_mag"].as_f64().unwrap() <= 2.0)
+        );
+    }
+
+    /// A static build in a temp directory of its own: a page, a hashed asset with
+    /// its packed twin, and the 404 page.
+    fn static_build(name: &str) -> PathBuf {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!("apex-static-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("_app/immutable")).unwrap();
+        std::fs::write(dir.join("index.html"), "<h1>chart</h1>").unwrap();
+        std::fs::write(dir.join("404.html"), "<h1>lost</h1>").unwrap();
+        let script = "console.log('app');".repeat(20);
+        std::fs::write(dir.join("_app/immutable/app.abc123.js"), &script).unwrap();
+        let mut packed = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        packed.write_all(script.as_bytes()).unwrap();
+        std::fs::write(
+            dir.join("_app/immutable/app.abc123.js.gz"),
+            packed.finish().unwrap(),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn the_static_build_is_served_with_the_api_beside_it() {
+        let dir = static_build("served");
+        let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
+        let app = build_app(state, Some(&dir));
+
+        // The page is revalidated on every visit, so a deploy shows at once.
+        let (status, headers, body) = get(&app, "/", &[]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"<h1>chart</h1>");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-cache");
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("text/html")
+        );
+
+        // A hashed asset is kept for a year, and goes out packed as the build left it.
+        let (status, headers, plain) = get(&app, "/_app/immutable/app.abc123.js", &[]).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers[header::CACHE_CONTROL],
+            "public, max-age=31536000, immutable"
+        );
+        let (status, headers, packed) = get(
+            &app,
+            "/_app/immutable/app.abc123.js",
+            &[(header::ACCEPT_ENCODING, "gzip")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[header::CONTENT_ENCODING], "gzip");
+        assert!(packed.len() < plain.len());
+
+        // No file: the 404 page with a 404, and not cached for a year even under /_app.
+        for uri in ["/nowhere", "/_app/immutable/gone.js"] {
+            let (status, headers, _) = get(&app, uri, &[]).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+            assert_ne!(
+                headers.get(header::CACHE_CONTROL).map(|v| v.as_bytes()),
+                Some("public, max-age=31536000, immutable".as_bytes()),
+                "{uri}"
+            );
+        }
+        let (_, _, lost) = get(&app, "/nowhere", &[]).await;
+        assert_eq!(lost, b"<h1>lost</h1>");
+
+        // The API keeps its routes, and the old generator URL still lands on the page.
+        let (status, _, body) = get(&app, "/api/health", &[]).await;
+        assert_eq!(
+            (status, body.as_slice()),
+            (StatusCode::OK, b"ok".as_slice())
+        );
+        let (status, _, _) = get(&app, "/api/catalog/bright", &[]).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, headers, _) = get(&app, "/generator", &[]).await;
+        assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(headers[header::LOCATION], "/");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A chart as the page sends it: the preview's camera, no observer.
+    fn view_chart() -> Value {
+        json!({
+            "projection": "stereo",
+            "datetime": "2026-05-20T12:00:00Z",
+            "magnitude_limit": 6.5,
+            "fov_deg": 180.0,
+            "view": {
+                "right": [0.0, 1.0, 0.0], "up": [0.0, 0.0, 1.0], "forward": [1.0, 0.0, 0.0],
+                "width": 1104.0, "height": 1104.0
+            },
+            "layers": {
+                "ecliptic": true, "equator": true, "galactic_equator": false, "planets": false,
+                "horizontal_grid": false, "equatorial_grid": false, "constellations": true,
+                "constellation_boundaries": true, "constellation_names": false,
+                "zenith": false, "poles": false
+            },
+            "style": {
+                "star_color": "#000000", "constellation_line_color": "#808080",
+                "grid_color": "#404040", "background_color": "#0a0a0b",
+                "chart_color": "#ffffff", "font_family": "sans-serif", "magnitude_scale": 1.0
+            },
+            "print_info": false
+        })
+    }
+
+    /// POST `body` as JSON to `uri` with `headers`.
+    async fn post(
+        app: &Router,
+        uri: &str,
+        headers: &[(header::HeaderName, &str)],
+        body: &Value,
+    ) -> (StatusCode, header::HeaderMap, Vec<u8>) {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in headers {
+            request = request.header(name, *value);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let (parts, body) = response.into_parts();
+        let body = to_bytes(body, usize::MAX).await.unwrap().to_vec();
+        (parts.status, parts.headers, body)
+    }
+
+    #[tokio::test]
+    async fn an_svg_export_is_gzipped_for_a_client_that_takes_gzip() {
+        use std::io::Read;
+
+        let app = test_app().await;
+        let uri = "/api/export?format=svg";
+        let (status, headers, plain) = post(&app, uri, &[], &view_chart()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!headers.contains_key(header::CONTENT_ENCODING));
+        assert_eq!(headers[header::VARY], "accept-encoding");
+        assert!(plain.starts_with(b"<svg"));
+
+        let gzip = [(header::ACCEPT_ENCODING, "gzip, deflate, br")];
+        let (status, headers, packed) = post(&app, uri, &gzip, &view_chart()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers[header::CONTENT_ENCODING], "gzip");
+        assert!(packed.len() * 3 < plain.len());
+        let mut unpacked = Vec::new();
+        flate2::read::GzDecoder::new(packed.as_slice())
+            .read_to_end(&mut unpacked)
+            .unwrap();
+        assert_eq!(unpacked, plain);
+
+        // A PDF is packed inside already: it goes out as it is.
+        let (status, headers, pdf) = post(&app, "/api/export", &gzip, &view_chart()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!headers.contains_key(header::CONTENT_ENCODING));
+        assert!(pdf.starts_with(b"%PDF"));
+    }
+
+    #[tokio::test]
+    async fn exports_past_the_budget_are_refused_until_it_refills() {
+        let app = test_app().await;
+        let client = [(header::HeaderName::from_static("x-real-ip"), "203.0.113.9")];
+        // 400 charts at four units each: the whole of a client's burst, taken before
+        // anything is looked at (the document itself is then refused as too large).
+        let chart = json!({ "x_mm": 10.0, "y_mm": 10.0, "width_mm": 50.0, "height_mm": 50.0,
+            "config": view_chart() });
+        let page = json!({ "width_mm": 210.0, "height_mm": 297.0, "items": vec![chart; 50] });
+        let document = json!({ "pages": vec![page; 8] });
+        let (status, _, _) = post(&app, "/api/export/document", &client, &document).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        let svg = "/api/export?format=svg";
+        let (status, headers, body) = post(&app, svg, &client, &view_chart()).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(headers[header::RETRY_AFTER], "1");
+        assert!(
+            String::from_utf8(body)
+                .unwrap()
+                .contains("too many exports")
+        );
+
+        // Another visitor is not held back by this one.
+        let other = [(header::HeaderName::from_static("x-real-ip"), "198.51.100.4")];
+        let (status, _, _) = post(&app, svg, &other, &view_chart()).await;
+        assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]

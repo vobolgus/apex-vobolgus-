@@ -1,13 +1,28 @@
 use crate::AppState;
+use crate::cached::accepts_gzip;
+use crate::limits::{PDF_CHART_COST, SVG_CHART_COST, client_key, too_many_requests};
 use crate::models::RenderConfig;
 use crate::svg_generator::SvgGenerator;
 use axum::{
     Json,
-    extract::Query,
-    extract::State,
+    extract::{ConnectInfo, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
+use flate2::{Compression, write::GzEncoder};
+use rust_core::catalog::HipCatalog;
 use serde::Deserialize;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::sync::{Arc, OnceLock};
+use svg2pdf::usvg::fontdb;
+use tokio::sync::Semaphore;
+
+/// Charts drawn at once outside a document. A PDF takes tens of ms of CPU and some
+/// 10 MB while it is converted; the next ones wait their turn rather than pile up.
+const CONCURRENT_CHARTS: usize = 4;
+
+static CHART_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_CHARTS);
 
 /// Largest chart side a `view` may ask for; the preview's is about 1100 px.
 const MAX_VIEW_SIZE_PX: f64 = 20_000.0;
@@ -66,30 +81,124 @@ pub(crate) fn validate_config(config: &RenderConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// usvg options with the system fonts, for turning chart SVG into PDF.
-pub(crate) fn svg_options() -> svg2pdf::usvg::Options<'static> {
-    let mut options = svg2pdf::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
-    options
+/// The system fonts, found once: scanning the font directories on every export
+/// was a seventh of a PDF's CPU, for charts that carry no text yet.
+fn system_fonts() -> Arc<fontdb::Database> {
+    static FONTS: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+    FONTS
+        .get_or_init(|| {
+            let mut fonts = fontdb::Database::new();
+            fonts.load_system_fonts();
+            Arc::new(fonts)
+        })
+        .clone()
 }
 
+/// usvg options with the system fonts, for turning chart SVG into PDF.
+pub(crate) fn svg_options() -> svg2pdf::usvg::Options<'static> {
+    svg2pdf::usvg::Options {
+        fontdb: system_fonts(),
+        ..Default::default()
+    }
+}
+
+type ExportResult = Result<(HeaderMap, Vec<u8>), (StatusCode, String)>;
+
+/// `POST /api/export`: the chart as PDF, or as SVG with `?format=svg`. It is
+/// charged to the export budget first (`crate::limits`), and an SVG goes out
+/// gzipped when the client takes gzip: it is text, a fifth of the size packed.
+pub async fn export_chart(
+    State(state): State<AppState>,
+    Query(query): Query<ExportQuery>,
+    peer: Option<ConnectInfo<SocketAddr>>,
+    request_headers: HeaderMap,
+    Json(config): Json<RenderConfig>,
+) -> Response {
+    let svg = query.format.as_deref() == Some("svg");
+    let client = client_key(&request_headers, peer.map(|ConnectInfo(address)| address));
+    let cost = if svg { SVG_CHART_COST } else { PDF_CHART_COST };
+    if let Err(wait) = state.export_limiter.charge(&client, cost) {
+        return too_many_requests(wait);
+    }
+    let gzip = svg && accepts_gzip(&request_headers);
+    draw_off_the_runtime(state, config, svg, gzip)
+        .await
+        .into_response()
+}
+
+/// The export itself, without the budget: what `export_chart` does once the
+/// request is let through. The tests call it as a handler.
+#[cfg(test)]
 pub async fn export_pdf(
     State(state): State<AppState>,
     Query(query): Query<ExportQuery>,
     Json(config): Json<RenderConfig>,
-) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
+) -> ExportResult {
+    let svg = query.format.as_deref() == Some("svg");
+    draw_off_the_runtime(state, config, svg, false).await
+}
+
+/// Validate, wait for a permit and draw on the blocking pool: the conversion is
+/// CPU work, and on the async workers it would hold up every other request.
+async fn draw_off_the_runtime(
+    state: AppState,
+    config: RenderConfig,
+    svg: bool,
+    gzip: bool,
+) -> ExportResult {
     validate_config(&config).map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+    let failed = |e: &dyn std::fmt::Display| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Export failed: {e}"),
+        )
+    };
+    let permit = CHART_PERMITS.acquire().await.map_err(|e| failed(&e))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        draw_chart(&config, &state.hip_catalog, svg, gzip)
+    })
+    .await
+    .map_err(|e| failed(&e))?
+}
 
+fn draw_chart(
+    config: &RenderConfig,
+    hip_catalog: &HipCatalog,
+    svg: bool,
+    gzip: bool,
+) -> ExportResult {
     // 1. Генерируем SVG
-    let svg_str = SvgGenerator::render_map(&config, &state.hip_catalog);
+    let svg_str = SvgGenerator::render_map(config, hip_catalog);
 
-    if query.format.as_deref() == Some("svg") {
+    if svg {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("image/svg+xml; charset=utf-8"),
         );
-        return Ok((headers, svg_str.into_bytes()));
+        // The body differs by Accept-Encoding whether or not this one is packed.
+        headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+        if !gzip {
+            return Ok((headers, svg_str.into_bytes()));
+        }
+        // The default level: a chart is drawn per request, so the packing must stay
+        // cheap next to the drawing (the catalogs, packed once, take the best level).
+        let mut encoder = GzEncoder::new(
+            Vec::with_capacity(svg_str.len() / 4),
+            Compression::default(),
+        );
+        let packed = encoder
+            .write_all(svg_str.as_bytes())
+            .and_then(|()| encoder.finish())
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("SVG compression error: {e}"),
+                )
+            })?;
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        return Ok((headers, packed));
     }
 
     // 2. Конвертируем в PDF через svg2pdf
@@ -137,9 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_pdf_stereo() {
-        let state = AppState {
-            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-        };
+        let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
 
         let config = RenderConfig {
             projection: "stereo".to_string(),
@@ -192,9 +299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_export_pdf_pinhole() {
-        let state = AppState {
-            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-        };
+        let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
 
         let config = RenderConfig {
             projection: "pinhole".to_string(),
@@ -274,9 +379,7 @@ mod tests {
         payload: serde_json::Value,
         format: Option<&str>,
     ) -> Result<(HeaderMap, Vec<u8>), (StatusCode, String)> {
-        let state = AppState {
-            hip_catalog: Arc::new(rust_core::catalog::HipCatalog::new()),
-        };
+        let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
         let config: RenderConfig = serde_json::from_value(payload).unwrap();
         let query = ExportQuery {
             format: format.map(str::to_string),

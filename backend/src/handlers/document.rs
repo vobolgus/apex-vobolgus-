@@ -7,10 +7,13 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use std::net::SocketAddr;
+
 use axum::{
     Json,
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, TextStr};
 use rust_core::catalog::HipCatalog;
@@ -18,6 +21,7 @@ use tokio::sync::Semaphore;
 
 use crate::AppState;
 use crate::handlers::export::{svg_options, validate_config};
+use crate::limits::{PDF_CHART_COST, client_key, too_many_requests};
 use crate::models::{DocumentPage, DocumentRequest};
 use crate::svg_generator::{Placement, SvgGenerator};
 
@@ -131,7 +135,6 @@ pub(crate) fn document_pdf(
     document: &DocumentRequest,
     hip_catalog: &HipCatalog,
 ) -> Result<Vec<u8>, String> {
-    // Loading the system fonts is the slow part of the options: once per document.
     let options = svg_options();
     let mut alloc = Ref::new(1);
     let catalog_id = alloc.bump();
@@ -183,6 +186,27 @@ pub(crate) fn document_pdf(
     Ok(pdf.finish())
 }
 
+/// `POST /api/export/document`, charged to the export budget by its charts
+/// (`crate::limits`) before anything is drawn.
+pub async fn export_document_within_budget(
+    State(state): State<AppState>,
+    peer: Option<ConnectInfo<SocketAddr>>,
+    request_headers: HeaderMap,
+    Json(document): Json<DocumentRequest>,
+) -> Response {
+    let charts: usize = document.pages.iter().map(|page| page.items.len()).sum();
+    let client = client_key(&request_headers, peer.map(|ConnectInfo(address)| address));
+    // An empty document is refused for free further on; anything else costs a chart at least.
+    let cost = charts.max(1) as f64 * PDF_CHART_COST;
+    if let Err(wait) = state.export_limiter.charge(&client, cost) {
+        return too_many_requests(wait);
+    }
+    export_document(State(state), Json(document))
+        .await
+        .into_response()
+}
+
+/// The export itself, without the budget.
 pub async fn export_document(
     State(state): State<AppState>,
     Json(document): Json<DocumentRequest>,
@@ -545,9 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_two_page_document_is_one_pdf_with_a_portrait_and_a_landscape_page() {
-        let state = AppState {
-            hip_catalog: Arc::new(HipCatalog::new()),
-        };
+        let state = AppState::new(Arc::new(HipCatalog::new()));
         let (headers, pdf) = export_document(State(state), Json(two_page_document()))
             .await
             .unwrap();
@@ -568,9 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_invalid_document_is_a_400_with_a_message() {
-        let state = AppState {
-            hip_catalog: Arc::new(HipCatalog::new()),
-        };
+        let state = AppState::new(Arc::new(HipCatalog::new()));
         let (status, message) =
             export_document(State(state), Json(DocumentRequest { pages: vec![] }))
                 .await

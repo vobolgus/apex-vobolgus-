@@ -14,5 +14,8 @@ svg2pdf = "0.12"
 # The version svg2pdf builds on: its chunks are assembled into one multi-page PDF.
 pdf-writer = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
-tower-http = { version = "0.5", features = ["cors"] }
+# Gzip for the catalog responses, compressed once at startup (see src/cached.rs).
+flate2 = "1.1"
+# `fs` and `set-header` serve the frontend's static build (see src/static_site.rs).
+tower-http = { version = "0.5", features = ["cors", "fs", "set-header"] }
 tower = { version = "0.5.3", features = ["util"] }

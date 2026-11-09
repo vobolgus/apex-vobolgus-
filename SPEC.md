@@ -82,8 +82,7 @@ rust-core/
 
 | Сервис | Где |
 |---|---|
-| Rust сервер | Railway (free tier) |
-| SvelteKit | Vercel (free tier) |
+| Rust сервер + статическая сборка SvelteKit | Railway, один сервис (образ из `Dockerfile`) |
 
 ### Dev tooling
 

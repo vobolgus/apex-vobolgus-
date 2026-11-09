@@ -97,6 +97,17 @@ export class ProjectionTransition {
 	}
 
 	/**
+	 * Be in `nextMode` at once: no morph, and no field of view carried across. For a
+	 * view that arrives whole (a link), which brings its own field of view.
+	 */
+	jump(nextMode: ProjectionMode) {
+		this.mode = nextMode;
+		this.blend = nextMode === 'pinhole' ? 1 : 0;
+		this.animating = false;
+		this.carried = null;
+	}
+
+	/**
 	 * Carry the field of view into `nextMode` by matching the central scale. Into
 	 * pinhole it is capped at the default, which a full-sky stereo view would
 	 * exceed: the frame then opens with room to widen, at the cost of a zoom-in

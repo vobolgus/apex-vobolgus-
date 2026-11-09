@@ -2,14 +2,19 @@
  * Catalog loaders for the generator page.
  *
  * Every loader fetches one backend collection and writes it into the shared
- * `catalog` store. Failures are logged and swallowed: a missing layer must not
- * take the whole page down, the chart simply renders without it.
+ * `catalog` store. Failures are logged, not thrown: a missing layer must not
+ * take the whole page down, the chart simply renders without it. Each loader
+ * resolves to whether its collection arrived, so the page can say so and retry.
  */
 
 import { raDecToUnitVector } from '$lib/math/astronomy';
 import { catalog, type CatalogStar, type ConstellationData } from '$lib/stores.svelte';
 
-/** Faintest star magnitude requested from `/api/catalog/full` by default. */
+/**
+ * Faintest star the preview draws: the backend's default for `/api/catalog/full`,
+ * which is asked for without a limit so every visitor shares one cached URL. The
+ * exports send the same limit.
+ */
 export const DEFAULT_MAX_MAGNITUDE = 6.5;
 
 /**
@@ -27,13 +32,7 @@ async function fetchJson<T>(url: string, label: string): Promise<T | null> {
 	}
 }
 
-/** Load the star catalog and precompute the unit vector used by the renderer. */
-export async function loadStars(maxMagnitude = DEFAULT_MAX_MAGNITUDE): Promise<void> {
-	const stars = await fetchJson<CatalogStar[]>(
-		`/api/catalog/full?max_mag=${maxMagnitude}`,
-		'catalog'
-	);
-	if (!stars) return;
+function setStars(stars: CatalogStar[]) {
 	catalog.stars = stars;
 	catalog.starVectors = stars.map((star) => ({
 		...raDecToUnitVector(star.ra, star.dec),
@@ -41,22 +40,51 @@ export async function loadStars(maxMagnitude = DEFAULT_MAX_MAGNITUDE): Promise<v
 	}));
 }
 
+/**
+ * Load the star catalog in two stages, as SPEC.md asks: the few hundred stars
+ * brighter than 4.0 arrive first (a payload some 15 times smaller) and are drawn
+ * at once, then the full catalog replaces them. Both requests start together, so
+ * the second does not wait for the first; from the HTTP cache the full catalog is
+ * there straight away and the bright one is dropped.
+ *
+ * `onStars` is called each time there are new stars to draw. Resolves to whether
+ * the full catalog arrived.
+ */
+export async function loadStars(onStars: () => void = () => {}): Promise<boolean> {
+	let fullSettled = false;
+	void fetchJson<CatalogStar[]>('/api/catalog/bright', 'bright catalog').then((stars) => {
+		// Late, or after a failed full load with stars already up: nothing to add.
+		if (!stars || fullSettled) return;
+		setStars(stars);
+		onStars();
+	});
+	const stars = await fetchJson<CatalogStar[]>('/api/catalog/full', 'catalog');
+	fullSettled = true;
+	// On a failure the bright stars, if they came, stay on the chart.
+	if (!stars) return false;
+	setStars(stars);
+	onStars();
+	return true;
+}
+
 /** Load the constellation stick figures. */
-export async function loadConstellations(): Promise<void> {
+export async function loadConstellations(): Promise<boolean> {
 	const constellations = await fetchJson<ConstellationData[]>(
 		'/api/constellations',
 		'constellations'
 	);
-	if (!constellations) return;
+	if (!constellations) return false;
 	catalog.constellations = constellations;
+	return true;
 }
 
 /** Load the IAU constellation boundaries. */
-export async function loadConstellationBoundaries(): Promise<void> {
+export async function loadConstellationBoundaries(): Promise<boolean> {
 	const boundaries = await fetchJson<ConstellationData[]>(
 		'/api/constellation-boundaries',
 		'constellation boundaries'
 	);
-	if (!boundaries) return;
+	if (!boundaries) return false;
 	catalog.constellationBoundaries = boundaries;
+	return true;
 }

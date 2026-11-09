@@ -22,7 +22,17 @@ and are no longer built.
   equator, ecliptic, galactic equator.
 - Export: PNG straight from the canvas; SVG and PDF rendered by the backend
   (`POST /api/export`) from the preview's own camera, so they show the same chart.
-  The planets toggle applies to the backend export only.
+  The planets toggle applies to the backend export only. A slow export says it is
+  being prepared and a failed one says so, in a toast.
+- The view lives in the address bar, so a reload keeps it and the link shares it:
+  `#p=pinhole&ra=83.82&dec=-1.2&pa=0&fov=40&ar=1.5&size=1.3&layers=lines,bounds`
+  is the projection, the centre (degrees), the position angle of the chart's top
+  (north through east), the field of view, the pinhole frame's aspect ratio and
+  size, and the layers that are on (`frontend/src/lib/state/view-url.ts`).
+- Stars load in two stages: the few hundred brighter than 4.0 are drawn first, the
+  full catalog replaces them. Catalog responses are gzipped once by the backend
+  and cached for a day by the browser (see `backend/API.md`). If the backend cannot
+  be reached, a notice over the chart says what did not load and offers to try again.
 - PDF document: **+ Add to PDF** places the chart as the preview shows it on the
   first A4 page with room (a new page if none). A pages panel on the left lists the
   pages (delete with Undo, add, collapse), and a click on a page opens the page
@@ -46,8 +56,9 @@ and are no longer built.
   figures and boundaries, SVG map rendering and PDF export via `svg2pdf`.
   Stateless: no database, catalogs are loaded into memory at startup.
 - **frontend** (`frontend/`): SvelteKit app with a single page, the generator
-  at `/` (`/generator` redirects to it). Canvas 2D renderer in TypeScript; the
-  SvelteKit server proxies `/api/*` to the backend.
+  at `/` (`/generator` redirects to it). Canvas 2D renderer in TypeScript. It
+  builds to static files (`adapter-static`), which the backend serves next to
+  `/api/*`: in production there is one service and no Node server.
 
 ## Architecture
 
@@ -63,20 +74,21 @@ and are no longer built.
     │ catalog · constellations │
     │ SVG / PDF export         │
     └──────┬───────────────────┘
-           │ HTTP, proxied by SvelteKit /api/*
+           │ serves the static build, and /api/* on the same origin
     ┌──────▼──────────────────────────────┐
-    │         frontend (SvelteKit)        │
+    │     frontend (SvelteKit, static)    │
     │  generator page at /                │
     │  Canvas 2D preview — realtime (TS)  │
     └─────────────────────────────────────┘
 ```
 
-Backend endpoints used by the page: `GET /api/catalog/full`,
+Backend endpoints used by the page: `GET /api/catalog/bright`,
+`GET /api/catalog/full`,
 `GET /api/constellations`, `GET /api/constellation-boundaries`,
 `POST /api/export` (PDF by default, SVG with `?format=svg`; the page editor's
 chart previews are these SVGs) and `POST /api/export/document` (the PDF
 document, one multi-page PDF). The backend also
-serves `GET /api/catalog/bright` and a `GET /` health probe. Details are in
+serves a `GET /api/health` probe. Details are in
 [`backend/API.md`](backend/API.md).
 
 ## How to develop
@@ -91,8 +103,8 @@ From the repository root:
 cargo run -p backend
 ```
 
-The server listens on `http://localhost:8080`. There is no database and no
-configuration to set up.
+The server listens on `http://localhost:8080` (`PORT` overrides the port). There
+is no database and no configuration to set up.
 
 ### Frontend
 
@@ -102,8 +114,36 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The SvelteKit server forwards `/api/*` to
-`BACKEND_URL` (default `http://localhost:8080`, see `frontend/.env.example`).
+Open http://localhost:5173. The Vite dev server forwards `/api/*` to
+`BACKEND_URL` (default `http://localhost:8080`, see `frontend/.env.example`),
+standing in for the single origin of production.
+
+### The production build, locally
+
+```bash
+(cd frontend && npm run build)          # static files in frontend/build
+STATIC_DIR=frontend/build cargo run --release -p backend
+```
+
+Open http://localhost:8080: the backend serves the page and the API. The same
+thing as a container is `docker build -t skycharts . && docker run --rm -p 8080:8080 skycharts`.
+
+## Deploying
+
+The [`Dockerfile`](Dockerfile) builds one image: the backend binary with the
+frontend's static build inside it. Railway builds it as it is and sets `PORT`.
+
+- **One small service.** It idles at about 6 MB of memory, starts in about 0.3 s
+  (so it suits Railway's serverless sleep) and settles at 11-23 MB after large
+  exports; a 100-chart document peaks near 95 MB.
+- **Exports are rationed** per client and for the whole server
+  (`backend/src/limits.rs`): past the budget a request gets a `429`. This bounds
+  what a loop of exports can cost; set a usage hard limit in the host's billing
+  settings as well, as the last line.
+- **Environment:** `PORT` (default 8080), `STATIC_DIR` (the static build; unset,
+  the backend is the API only). The image also tunes glibc's allocator to return
+  memory, see the comments in the `Dockerfile`.
+- **Health check:** `GET /api/health`.
 
 ### Tests
 
@@ -132,13 +172,15 @@ rust-core/                 astronomy core library
 backend/                   Axum server
   src/handlers/            catalog.rs, export.rs, document.rs (the PDF document)
   src/svg_generator/       SVG map renderer behind /api/export and the document
+  src/cached.rs            catalog responses, serialized and gzipped once
+  src/limits.rs            the export budget (per client and for the server)
+  src/static_site.rs       serving the frontend's static build
   assets/constellations/   constellation figures and boundaries (JSON)
   assets/golden/           reference-geometry fixture shared by Rust and TS tests
   API.md                   HTTP API reference
-frontend/                  SvelteKit app
+frontend/                  SvelteKit app, built to static files
   src/routes/+page.svelte  the generator page
-  src/routes/generator/    redirect from the old /generator URL to /
-  src/routes/api/          server-side proxies to the backend
+  vite.config.ts           the dev proxy of /api to the backend
   src/lib/                 renderer, math, state, components, API clients
   src/lib/document/        the PDF document: layout engine, store, render configs
   e2e/                     Playwright visual regression tests
@@ -146,6 +188,7 @@ legacy/                    archived features, reference only (see legacy/README.
 SPEC.md                    product specification (generator only)
 CHANGELOG.md               release notes
 Cargo.toml                 Rust workspace (rust-core, backend)
+Dockerfile                 the deployment image: backend + the static build
 ```
 
 ## License
