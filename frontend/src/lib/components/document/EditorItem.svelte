@@ -23,7 +23,7 @@
 	import { sizeLabel, spokenSize, type Size } from './editor-geometry';
 
 	/** What the chart is doing: dragged on a page, dragged off every page, resized, or easing back. */
-	export type ItemState = 'idle' | 'moving' | 'detached' | 'resizing' | 'returning';
+	export type ItemState = 'idle' | 'moving' | 'detached' | 'resizing' | 'returning' | 'settling';
 
 	interface Props {
 		item: DocItem;
@@ -41,6 +41,8 @@
 		/** On the current page: focusable, resizable, with its toolbar. Elsewhere it can still be dragged. */
 		interactive: boolean;
 		mode?: ItemState;
+		/** Another chart is being carried: this one puts its frame and controls away. */
+		quiet?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
 		onmovestart?: (event: PointerEvent, item: DocItem) => void;
@@ -61,6 +63,7 @@
 		frame,
 		interactive,
 		mode = 'idle',
+		quiet = false,
 		hintId,
 		onmovestart,
 		onresizestart,
@@ -174,6 +177,7 @@
 	class="item"
 	class:is-interactive={interactive}
 	class:is-disc={disc}
+	class:is-quiet={quiet}
 	data-item-id={item.id}
 	data-state={mode}
 	style:left="{(frame.x / page.w) * 100}%"
@@ -299,6 +303,7 @@
 
 <style>
 	.item {
+		--lift: 0 8px 20px rgba(0, 0, 0, 0.3);
 		position: absolute;
 		box-sizing: border-box;
 		/* Charts drawn later sit on top, as they print. */
@@ -316,10 +321,44 @@
 			top 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 	}
 
-	/* Off every page: let go here and it goes back, so it looks lifted off the paper. */
+	/*
+	 * In the hand: lifted off the paper, wherever it is carried. On a layer of its
+	 * own, with the shadow a box-shadow: a drop-shadow filter on an element that
+	 * moves every frame left smears behind it in Safari.
+	 */
+	.item[data-state='moving'],
+	.item[data-state='detached'] {
+		will-change: transform;
+	}
+
+	.item[data-state='moving'] .chart,
+	.item[data-state='detached'] .chart {
+		box-shadow: var(--lift);
+	}
+
+	.item.is-disc:not([data-state='idle'], [data-state='resizing']) .chart {
+		border-radius: 50%;
+	}
+
+	/* Let go: the shadow goes as it comes down onto the paper. */
+	.item[data-state='settling'] .chart,
+	.item[data-state='returning'] .chart {
+		animation: land 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+	}
+
+	@keyframes land {
+		from {
+			box-shadow: var(--lift);
+		}
+
+		to {
+			box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+		}
+	}
+
+	/* Out of reach of every page: let go here and it goes back, so it is half there. */
 	.item[data-state='detached'] {
 		opacity: 0.6;
-		filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35));
 	}
 
 	.chart {
@@ -574,6 +613,24 @@
 	.item:not([data-state='idle']) .remove {
 		opacity: 0;
 		pointer-events: none;
+	}
+
+	/*
+	 * Carried, a chart is the picture and its shadow, with no frame or handles around
+	 * it; and while one is carried, the others put theirs away too.
+	 */
+	.item:not([data-state='idle'], [data-state='resizing']) .handle,
+	.item:not([data-state='idle'], [data-state='resizing']) .chart::after,
+	.item.is-quiet .handle,
+	.item.is-quiet .remove,
+	.item.is-quiet .chart::after {
+		opacity: 0;
+		pointer-events: none;
+		transition: none;
+	}
+
+	.item.is-interactive.is-quiet[data-state='idle']:focus-within .tools {
+		display: none;
 	}
 
 	.remove:active {

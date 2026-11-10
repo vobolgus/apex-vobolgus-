@@ -8,6 +8,7 @@
 	 * `translateX`.
 	 */
 	import type { SegmentOption } from './options';
+	import { keepFocusOnMousePress } from '$lib/ui/focus';
 
 	interface Props {
 		/** Accessible name of the group, e.g. "Projection". */
@@ -85,6 +86,7 @@
 			title={shortcut ? `${option.name} · ${shortcut}` : option.name}
 			tabindex={index === tabIndexOwner ? 0 : -1}
 			{disabled}
+			onmousedown={keepFocusOnMousePress}
 			onclick={() => select(option.value)}
 			onkeydown={(event) => handleKeydown(event, index)}
 		>
@@ -98,10 +100,14 @@
 
 <style>
 	.segment {
+		/* Between the options, as between the dock's other controls: flush, the lit one
+		   ran straight into its neighbour's label. */
+		--gap: 4px;
 		position: relative;
 		display: grid;
 		grid-auto-flow: column;
 		grid-auto-columns: 1fr;
+		column-gap: var(--gap);
 		height: var(--h-ctl);
 	}
 
@@ -109,12 +115,14 @@
 		position: absolute;
 		top: 0;
 		left: 0;
-		width: calc(100% / var(--count));
+		/* One column of the grid: the width less its gaps, shared out. */
+		width: calc((100% - (var(--count) - 1) * var(--gap)) / var(--count));
 		height: 100%;
 		border-radius: var(--r-ctl);
 		background: var(--fill-on);
 		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-		transform: translateX(calc(var(--index) * 100%));
+		/* A step is its own width and a gap. */
+		transform: translateX(calc(var(--index) * (100% + var(--gap))));
 		transition: transform 160ms ease;
 		pointer-events: none;
 	}

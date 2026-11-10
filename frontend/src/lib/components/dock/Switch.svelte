@@ -4,6 +4,8 @@
 	 * button, so the hit target is the row and not the 28 px track; the track is
 	 * decoration. `variant="header"` is the master switch in a group header.
 	 */
+	import { keepFocusOnMousePress } from '$lib/ui/focus';
+
 	interface Props {
 		label: string;
 		checked: boolean;
@@ -45,6 +47,7 @@
 	aria-labelledby="{id}-label"
 	aria-describedby={describedBy}
 	{disabled}
+	onmousedown={keepFocusOnMousePress}
 	onclick={() => onchange(!checked)}
 >
 	<span class="text">

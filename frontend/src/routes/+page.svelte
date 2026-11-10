@@ -1,23 +1,38 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
 	import { buildRenderConfig, type ChartView } from '$lib/api/render-config';
 	import AboutDialog from '$lib/components/AboutDialog.svelte';
-	import { chartThumbnail } from '$lib/components/document/chart-thumbnail';
+	import { chartThumbnail, drawChartThumbnail } from '$lib/components/document/chart-thumbnail';
 	import PageEditor from '$lib/components/document/PageEditor.svelte';
 	import PagesPanel from '$lib/components/document/PagesPanel.svelte';
 	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
 	import Toast from '$lib/components/Toast.svelte';
+	import LayersPanel from '$lib/components/dock/LayersPanel.svelte';
 	import LayersPopover from '$lib/components/dock/LayersPopover.svelte';
-	import { PROJECTION_SEGMENTS } from '$lib/components/dock/options';
+	import { LAYERS_PANEL_FOOTPRINT_PX, PROJECTION_SEGMENTS } from '$lib/components/dock/options';
 	import SegmentedControl from '$lib/components/dock/SegmentedControl.svelte';
 	import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
 	import { DocumentStore, MAX_CHARTS, MAX_PAGES } from '$lib/document/document.svelte';
 	import { plural } from '$lib/document/labels';
+	import {
+		chartBoxOnScreen,
+		FLIGHT_FADE,
+		flightEdgeKeyframes,
+		flightKeyframes,
+		flightPixelRatio,
+		flightScale,
+		flightStarScale,
+		PDF_FLIGHT_EASING,
+		PDF_FLIGHT_MS,
+		type Box
+	} from '$lib/document/flight';
+	import type { ChartSnapshot } from '$lib/document/types';
 	import { exportDocument, snapshotChart } from '$lib/document/render';
 	import { loadFlubberInterpolator } from '$lib/flubber';
+	import { clearWidthAroundChart } from '$lib/math/chart-area';
 	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
 	import { InputController } from '$lib/renderer/input-handlers';
 	import {
@@ -35,6 +50,7 @@
 	import { applySharedView, decodeViewHash, encodeViewHash } from '$lib/state/view-url';
 	import { catalog, view } from '$lib/stores.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
+	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { toast, type ToastItem } from '$lib/ui/toast.svelte';
 
 	/** The export menu: what each format is for, and its shortcut (⌘S always saves a PNG). */
@@ -52,6 +68,20 @@
 	const NARROW_QUERY = '(max-width: 743px)';
 	/** An export slower than this says it is working on it. */
 	const EXPORT_PROGRESS_DELAY_MS = 600;
+	/** The chart area's padding, px, as in the CSS: the panels' reserves are measured inside it. */
+	const CHART_AREA_PADDING_PX = 12;
+	const LAYERS_PANEL_ID = 'layers-panel';
+	/** Whether the layers panel was left open, kept for the next visit. */
+	const LAYERS_PANEL_STORAGE_KEY = 'skycharts.layers.panel';
+	/** How long the export button shows its check after a file is saved. */
+	const EXPORT_DONE_MS = 1400;
+	/**
+	 * An export still running after this long shows the turning ring. Most are done
+	 * well before (an SVG in tens of ms), and a ring that flashes for a frame is noise.
+	 */
+	const EXPORT_BUSY_DELAY_MS = 350;
+	/** How long the chart takes to move to its new place when a panel opens or closes. */
+	const CHART_MOVE_MS = 260;
 	/** The catalogue says it is loading only when it takes longer than this. */
 	const CATALOG_SLOW_MS = 500;
 	/** The address bar follows the view once it has been still for this long. */
@@ -102,6 +132,31 @@
 	/** How far the pages panel reaches into the chart area, px; the chart keeps clear of it. */
 	let panelFootprintPx = $state(0);
 	let narrow = $state(false);
+	/**
+	 * The layers panel on the right of the chart, where a screen has the room for one
+	 * (a phone keeps the dock's popover). The dock's Layers button shows and hides it.
+	 */
+	let layersPanelOpen = $state(false);
+	let layersPanel = $state<ReturnType<typeof LayersPanel>>();
+	/**
+	 * The page has settled after its load: from here on a panel that opens slides
+	 * and the chart moves with it. Before, what storage remembers is simply there.
+	 */
+	let motionReady = $state(false);
+	/** A copy of the chart on its way to its page after Add to PDF; null when nothing is in the air. */
+	let pdfFlight = $state<{
+		id: number;
+		chart: ChartSnapshot;
+		from: Box;
+		to: Box;
+		corner: string;
+	} | null>(null);
+	let pdfFlightCount = 0;
+	/** The chart that copy stands for: its place on the page's thumbnail stays empty until it lands. */
+	let pendingItemId = $state<string | null>(null);
+	/** What the export button shows: its icon, a spinner while a file is drawn, a check once saved. */
+	let exportPhase = $state<'idle' | 'busy' | 'done'>('idle');
+	let exportDoneTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Read out after Add to PDF (the thumbnail's flash is the visual cue). */
 	let addAnnouncement = $state('');
 	/** A document export is on its way: its row waits for it, a second click starts nothing. */
@@ -132,6 +187,18 @@
 	const modalOpen = $derived(aboutOpen || editorPageId !== null);
 	// On a phone the panel floats over the chart, which it may cover; on a wide screen the chart moves aside.
 	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
+	const layersDocked = $derived(!narrow);
+	const layersReservePx = $derived(layersDocked && layersPanelOpen ? LAYERS_PANEL_FOOTPRINT_PX : 0);
+	/** Room for the pinhole frame's handles between the two panels, around where the chart sits. */
+	const frameClipWidthPx = $derived(
+		clearWidthAroundChart(
+			chartClipWidthPx - 2 * CHART_AREA_PADDING_PX,
+			surfaceSizePx,
+			panelReservePx,
+			layersReservePx
+		) +
+			2 * CHART_AREA_PADDING_PX
+	);
 	const documentNote = $derived(
 		documentExporting
 			? 'Preparing…'
@@ -153,9 +220,14 @@
 		documentStore.load();
 		// Collapsed by default on a phone, where the open panel would cover the chart.
 		if (narrow) documentStore.panelOpen = false;
+		layersPanelOpen = readLayersPanelOpen();
+		// Two frames on, the restored layout has been painted: changes after that may animate.
+		const motionFrame = requestAnimationFrame(() => {
+			requestAnimationFrame(() => (motionReady = true));
+		});
 		// A link (or a reload) brings its view; pasting another into this tab only changes the hash.
 		readViewFromUrl();
-		window.addEventListener('hashchange', readViewFromUrl);
+		window.addEventListener('hashchange', flyToViewFromUrl);
 		// Saves are debounced: write the last one before the tab goes away.
 		const flushDocument = () => {
 			documentStore.flush();
@@ -261,7 +333,9 @@
 		void loadCatalog(CATALOG_PARTS);
 		return () => {
 			stopMenuDismiss();
-			window.removeEventListener('hashchange', readViewFromUrl);
+			window.removeEventListener('hashchange', flyToViewFromUrl);
+			cancelAnimationFrame(motionFrame);
+			if (exportDoneTimer !== null) clearTimeout(exportDoneTimer);
 			narrowQuery.removeEventListener('change', handleNarrowChange);
 			window.removeEventListener('pagehide', flushDocument);
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -307,22 +381,40 @@
 		return encodeViewHash(currentChartView(), layers);
 	}
 
-	/** Take the view the address names, if it names one, with no morph. */
-	function readViewFromUrl() {
+	/**
+	 * Take the view the address names, if it names one. On a load it is simply
+	 * there; with `fly` (a link pasted into the open tab) the sky turns and zooms
+	 * to it, when the projection stays the same: across projections the morph and
+	 * its carried field of view would fight the flight, so that is a cut.
+	 */
+	function readViewFromUrl(fly = false) {
 		const shared = decodeViewHash(window.location.hash);
 		if (shared) {
-			const next = applySharedView(currentChartView(), shared);
-			view.orientation = next.orientation;
-			view.stereoFovDeg = next.stereoFovDeg;
-			view.pinholeFovDeg = next.pinholeFovDeg;
+			const current = currentChartView();
+			const next = applySharedView(current, shared);
+			input?.stopMotion();
 			view.pinholeAspectRatio = next.pinholeAspectRatio;
 			view.pinholeHeightFrac = next.pinholeHeightFrac;
-			projection.jump(next.projection);
 			layers.assign(shared.layers);
+			if (fly && input && next.projection === current.projection && !prefersReducedMotion()) {
+				const pinhole = next.projection === 'pinhole';
+				input.flyTo(
+					next.orientation,
+					pinhole ? next.pinholeFovDeg : next.stereoFovDeg,
+					next.projection
+				);
+			} else {
+				view.orientation = next.orientation;
+				view.stereoFovDeg = next.stereoFovDeg;
+				view.pinholeFovDeg = next.pinholeFovDeg;
+				projection.jump(next.projection);
+			}
 			markRenderDirty();
 		}
 		syncedHash = viewHash();
 	}
+
+	const flyToViewFromUrl = () => readViewFromUrl(true);
 
 	function writeViewToUrl() {
 		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
@@ -367,7 +459,7 @@
 		const inputActive = input?.tick(dtMs) ?? false;
 		if (inputActive) renderDirty = true;
 
-		const linesAnimating = renderer?.hasActiveLineAnimations() ?? false;
+		const linesAnimating = renderer?.hasActiveAnimations() ?? false;
 		if (!renderDirty && !projection.animating && !linesAnimating) {
 			lastFrameTimeMs = 0;
 			return;
@@ -388,7 +480,7 @@
 			constellationBoundaries: catalog.constellationBoundaries
 		});
 
-		const linesAnimatingAfter = renderer?.hasActiveLineAnimations() ?? false;
+		const linesAnimatingAfter = renderer?.hasActiveAnimations() ?? false;
 		if (projection.animating || inputActive || linesAnimatingAfter) {
 			scheduleFrame();
 		} else {
@@ -400,6 +492,34 @@
 		// Reading the snapshot subscribes to every reference-line flag at once.
 		void layers.referenceLines;
 		markRenderDirty();
+	});
+
+	// A panel opening or closing changes what room the chart has, and the chart is laid
+	// out in its new place at once. It is then played there from where it was (first,
+	// last, invert, play): a transform alone, which the compositor runs without laying
+	// the page out or scaling the canvas again on every frame. A window resize changes
+	// no reserve and so moves the chart directly, as it should.
+	$effect.pre(() => {
+		void panelReservePx;
+		void layersReservePx;
+		const surface = chartSurfaceEl;
+		if (!surface || !untrack(() => motionReady) || prefersReducedMotion()) return;
+		if (typeof surface.animate !== 'function') return;
+		// Before the DOM takes the new reserves: where the chart is now, mid-move or not.
+		const first = surface.getBoundingClientRect();
+		void tick().then(() => {
+			surface.getAnimations().forEach((animation) => animation.cancel());
+			const last = surface.getBoundingClientRect();
+			if (last.width <= 0) return;
+			const scale = first.width / last.width;
+			const dx = first.left + first.width / 2 - (last.left + last.width / 2);
+			const dy = first.top + first.height / 2 - (last.top + last.height / 2);
+			if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(scale - 1) < 0.002) return;
+			surface.animate(
+				[{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` }, { transform: 'none' }],
+				{ duration: CHART_MOVE_MS, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
+			);
+		});
 	});
 
 	$effect(() => {
@@ -463,17 +583,35 @@
 		const config = () => buildRenderConfig(currentChartView(), layers, new Date());
 		if (format === 'PNG') {
 			const result = await exportChart(canvasEl, format, config);
-			if (!result.ok) toast.show('Couldn’t save the PNG. Try again in a moment.');
+			if (result.ok) showExported(format);
+			else toast.show('Couldn’t save the PNG. Try again in a moment.');
 			return;
 		}
 		if (chartExporting) return;
 		chartExporting = true;
-		await withExportProgress(
+		if (exportDoneTimer !== null) clearTimeout(exportDoneTimer);
+		exportPhase = 'idle';
+		const busyTimer = setTimeout(() => (exportPhase = 'busy'), EXPORT_BUSY_DELAY_MS);
+		const result = await withExportProgress(
 			`Preparing the ${format}…`,
 			() => exportChart(canvasEl, format, config),
 			() => `Couldn’t export the ${format}. Try again in a moment.`
 		);
+		clearTimeout(busyTimer);
 		chartExporting = false;
+		if (result.ok) showExported(format);
+		else exportPhase = 'idle';
+	}
+
+	/** The file is on its way to the downloads: the button says so for a moment. */
+	function showExported(format: ExportFormat) {
+		exportPhase = 'done';
+		announce(`${format} saved`);
+		if (exportDoneTimer !== null) clearTimeout(exportDoneTimer);
+		exportDoneTimer = setTimeout(() => {
+			exportPhase = 'idle';
+			exportDoneTimer = null;
+		}, EXPORT_DONE_MS);
 	}
 
 	/**
@@ -496,14 +634,132 @@
 			return;
 		}
 		const thumb = canvasEl ? chartThumbnail(canvasEl, chartView) : undefined;
-		const { pageId, relaid, undo } = documentStore.addChart(chart, thumb);
+		// Where the chart is on screen now: adding it may bring the pages panel in and move it.
+		const canvasBox = canvasEl?.getBoundingClientRect() ?? null;
+		// A copy still in the air from the last Add comes down at once.
+		void landPdfFlight();
+		// And where the charts already on the pages are: this one may move them to make room.
+		const before = pagesPanel?.chartBoxes();
+		const { pageId, itemId, newPage, relaid, undo } = documentStore.addChart(chart, thumb);
 		documentStore.selectedPageId = pageId;
+		const flying =
+			canvasBox !== null &&
+			canvasBox.width > 0 &&
+			typeof canvasEl?.animate === 'function' &&
+			!prefersReducedMotion();
+		// Before the thumbnail is drawn: the chart's place on it stays empty until the copy lands.
+		if (flying) pendingItemId = itemId;
 		const added = `Added to page ${documentStore.pageIndex(pageId) + 1}`;
 		announce(added);
 		notify(relaid ? `${added}, layout updated` : added, () => {
+			// Taken back mid-flight: the copy has nowhere to land.
+			if (pendingItemId === itemId) {
+				pendingItemId = null;
+				pdfFlight = null;
+			}
 			if (undo()) announce('Add to PDF undone');
 		});
-		void pagesPanel?.reveal(pageId);
+		void showAddedChart(pageId, itemId, newPage, chart, canvasBox, flying, before);
+	}
+
+	/**
+	 * Lead the eye from the chart to its place on the page. The panel brings the
+	 * page into view (a new page makes its entrance; the first one arrives with the
+	 * panel) and says where the chart sits on its thumbnail; a copy of the chart,
+	 * drawn as the thumbnail draws it, flies there from the preview and is replaced
+	 * by the thumbnail's own drawing as it lands; charts already on the page move
+	 * aside over the same time. Without a copy (less motion asked for) the panel
+	 * simply reveals the page.
+	 */
+	async function showAddedChart(
+		pageId: string,
+		itemId: string,
+		newPage: boolean,
+		chart: ChartSnapshot,
+		canvasBox: Box | null,
+		flying: boolean,
+		before: Readonly<Record<string, Box>> | undefined
+	) {
+		const target = await pagesPanel?.reveal(
+			pageId,
+			flying ? { itemId, newPage, ms: PDF_FLIGHT_MS, before } : undefined
+		);
+		if (!flying || pendingItemId !== itemId) return;
+		if (!target || !canvasBox) {
+			pendingItemId = null;
+			return;
+		}
+		pdfFlightCount += 1;
+		pdfFlight = {
+			id: pdfFlightCount,
+			chart,
+			from: chartBoxOnScreen(canvasBox, chart.view),
+			to: target.box,
+			corner: target.corner
+		};
+	}
+
+	/** The copy has arrived (or must make way): the thumbnail draws the chart, then the copy goes. */
+	async function landPdfFlight() {
+		if (pendingItemId === null && pdfFlight === null) return;
+		const landed = pdfFlight?.id;
+		pendingItemId = null;
+		// One update for the thumbnail to draw before the copy over it is removed: no empty frame.
+		await tick();
+		if (pdfFlight?.id === landed) pdfFlight = null;
+	}
+
+	/**
+	 * Lay the copy out on its place on the thumbnail, draw it as the thumbnail will,
+	 * and play it there from over the chart. It lands by itself when it arrives.
+	 */
+	function flyToPage(node: HTMLElement, flight: NonNullable<typeof pdfFlight>) {
+		const { from, to } = flight;
+		node.style.left = `${to.x}px`;
+		node.style.top = `${to.y}px`;
+		node.style.width = `${to.width}px`;
+		node.style.height = `${to.height}px`;
+		const canvas = node.querySelector('canvas');
+		const startScale = flightScale(from, to);
+		const density = flightPixelRatio(from, to, window.devicePixelRatio || 1);
+		const timing = { duration: PDF_FLIGHT_MS, easing: PDF_FLIGHT_EASING, fill: 'both' } as const;
+		const move = node.animate(flightKeyframes(from, to), timing);
+		const fade = node.animate(FLIGHT_FADE, { duration: PDF_FLIGHT_MS, fill: 'both' });
+		const edge = node
+			.querySelector<HTMLElement>('.pdf-flight-edge')
+			?.animate(flightEdgeKeyframes(from, to, 'var(--paper-chart-edge)'), timing);
+		// Redrawn every frame with the stars sized for how large the copy is shown just
+		// then: a few hundred dots, and on landing exactly the thumbnail's own drawing.
+		let frame = 0;
+		const draw = () => {
+			if (!canvas) return;
+			const progress = move.effect?.getComputedTiming().progress ?? 1;
+			const scale = startScale + (1 - startScale) * progress;
+			drawChartThumbnail(
+				canvas,
+				flight.chart,
+				to.width,
+				to.height,
+				catalog.starVectors,
+				density,
+				flightStarScale(scale, startScale)
+			);
+			if (move.playState === 'running') frame = requestAnimationFrame(draw);
+		};
+		draw();
+		move.onfinish = () => {
+			// The last frame drawn may be a hair short of the end: land on the thumbnail's exact drawing.
+			draw();
+			void landPdfFlight();
+		};
+		return {
+			destroy: () => {
+				cancelAnimationFrame(frame);
+				move.cancel();
+				fade.cancel();
+				edge?.cancel();
+			}
+		};
 	}
 
 	/** Polite live region; cleared first, so the same words twice are read twice. */
@@ -590,6 +846,39 @@
 		items[next]?.focus();
 	}
 
+	function readLayersPanelOpen(): boolean {
+		try {
+			return window.localStorage.getItem(LAYERS_PANEL_STORAGE_KEY) === '1';
+		} catch {
+			// Storage blocked: the panel starts closed, as on a first visit.
+			return false;
+		}
+	}
+
+	/**
+	 * Show or hide the layers panel, and remember which for the next visit. Opened
+	 * from the keyboard (`focus`), the focus goes to its first switch.
+	 */
+	async function setLayersPanelOpen(open: boolean, focus = false) {
+		layersPanelOpen = open;
+		try {
+			window.localStorage.setItem(LAYERS_PANEL_STORAGE_KEY, open ? '1' : '0');
+		} catch {
+			// Not remembered, then; the panel works all the same.
+		}
+		if (open && focus) {
+			await tick();
+			layersPanel?.focusFirst();
+		}
+	}
+
+	/** From the panel itself (its close button, Escape): the focus goes back to the Layers button. */
+	function closeLayersPanel() {
+		const focusInside = layersPanel?.hasFocus() ?? false;
+		void setLayersPanelOpen(false);
+		if (focusInside) layersMenu.trigger?.focus();
+	}
+
 	function setAboutOpen(next: boolean) {
 		if (next) {
 			menus.closeAll();
@@ -652,10 +941,25 @@
 					<span class="tool-label">Add to PDF</span>
 				</button>
 				<div class="export-wrap" bind:this={exportMenu.element}>
-					<button class="export-main" type="button" onclick={() => runExport(selectedExportFormat)}>
-						<svg class="export-icon" viewBox="0 0 16 16" aria-hidden="true">
-							<path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
-						</svg>
+					<button
+						class="export-main"
+						type="button"
+						aria-busy={exportPhase === 'busy'}
+						onclick={() => runExport(selectedExportFormat)}
+					>
+						{#if exportPhase === 'busy'}
+							<svg class="export-icon export-spinner" viewBox="0 0 16 16" aria-hidden="true">
+								<path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" />
+							</svg>
+						{:else if exportPhase === 'done'}
+							<svg class="export-icon export-done" viewBox="0 0 16 16" aria-hidden="true">
+								<path d="M3.5 8.5l3 3 6-7" pathLength="1" />
+							</svg>
+						{:else}
+							<svg class="export-icon" viewBox="0 0 16 16" aria-hidden="true">
+								<path d="M8 2.5v7M5 6.5l3 3 3-3M3 12.5h10" />
+							</svg>
+						{/if}
 						<span><span class="export-verb">Export</span> {selectedExportFormat}</span>
 					</button>
 					<button
@@ -755,14 +1059,19 @@
 			</div>
 		</div>
 	</header>
-	<section class="chart-area" bind:this={chartAreaEl} style:--panel-reserve="{panelReservePx}px">
+	<section
+		class="chart-area"
+		bind:this={chartAreaEl}
+		style:--reserve-left="{panelReservePx}px"
+		style:--reserve-right="{layersReservePx}px"
+	>
 		<div class="chart-surface" bind:this={chartSurfaceEl}>
 			<canvas bind:this={canvasEl} width={CHART_CANVAS_BACKING_PX} height={CHART_CANVAS_BACKING_PX}
 			></canvas>
 			<PinholeFrameOverlay
 				bind:this={pinholeOverlay}
 				{surfaceSizePx}
-				clipWidthPx={Math.max(1, chartClipWidthPx - 2 * panelReservePx)}
+				clipWidthPx={Math.max(1, frameClipWidthPx)}
 				clipHeightPx={chartClipHeightPx}
 				visible={projection.isPinholeSettled}
 				onChange={markRenderDirty}
@@ -790,10 +1099,22 @@
 			bind:this={pagesPanel}
 			bind:footprint={panelFootprintPx}
 			store={documentStore}
+			{pendingItemId}
+			animated={motionReady}
 			onopen={openEditor}
 			{notify}
 			onemptied={() => addButtonEl?.focus()}
 		/>
+		{#if layersDocked}
+			<LayersPanel
+				bind:this={layersPanel}
+				{layers}
+				open={layersPanelOpen}
+				animated={motionReady}
+				id={LAYERS_PANEL_ID}
+				onclose={closeLayersPanel}
+			/>
+		{/if}
 	</section>
 	<div class="control-bar-shell">
 		<div class="control-bar" role="group" aria-label="Generator display controls">
@@ -808,7 +1129,14 @@
 			</div>
 			<span class="control-divider" aria-hidden="true"></span>
 			<div class="control-group">
-				<LayersPopover {layers} menu={layersMenu} />
+				<LayersPopover
+					{layers}
+					menu={layersMenu}
+					docked={layersDocked}
+					panelOpen={layersPanelOpen}
+					panelId={LAYERS_PANEL_ID}
+					onpanel={setLayersPanelOpen}
+				/>
 			</div>
 		</div>
 	</div>
@@ -824,6 +1152,19 @@
 	undo={() => toast.undo()}
 	{apple}
 />
+{#if pdfFlight}
+	{#key pdfFlight.id}
+		<div
+			class="pdf-flight"
+			aria-hidden="true"
+			style:--corner={pdfFlight.corner}
+			use:flyToPage={pdfFlight}
+		>
+			<canvas></canvas>
+			<span class="pdf-flight-edge"></span>
+		</div>
+	{/key}
+{/if}
 <Toast store={toast} modal={modalOpen} {apple} />
 
 <style>
@@ -866,6 +1207,15 @@
 		color: var(--fg-1);
 		font: var(--font-ui);
 		pointer-events: auto;
+		animation: catalog-notice-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* The toast's entrance, from the other side: this one hangs from the top. */
+	@keyframes catalog-notice-in {
+		from {
+			opacity: 0;
+			transform: translateY(-8px);
+		}
 	}
 
 	.catalog-notice:has(.catalog-notice-action) {
@@ -941,16 +1291,57 @@
 	}
 
 	.chart-surface {
-		/* Квадрат: сторона = min(ширина области, высота области, фикс. кап); кап даёт
-		   стабильный размер на десктопе. Из ширины вычитается охват панели страниц
-		   (--panel-reserve) с обеих сторон: карта остаётся по центру и не уходит под панель. */
+		/* Квадрат: сторона = min(ширина области без панелей, высота области, фикс. кап);
+		   кап даёт стабильный размер на десктопе. Слева место занимает панель страниц
+		   (--reserve-left), справа панель слоёв (--reserve-right). Карта остаётся по центру
+		   области, пока там не задевает ни одну из панелей, иначе сдвигается ровно настолько,
+		   чтобы не уйти под панель (--chart-centre; та же формула в $lib/math/chart-area.ts),
+		   и только когда места не хватает и так, уменьшается. */
 		--chart-cap: 720px;
-		--chart-side: max(0px, min(100cqw - 2 * var(--panel-reserve, 0px), 100cqh, var(--chart-cap)));
+		--chart-side: max(
+			0px,
+			min(100cqw - var(--reserve-left, 0px) - var(--reserve-right, 0px), 100cqh, var(--chart-cap))
+		);
+		--chart-centre: clamp(
+			var(--reserve-left, 0px) + var(--chart-side) / 2,
+			50cqw,
+			100cqw - var(--reserve-right, 0px) - var(--chart-side) / 2
+		);
 		position: relative;
+		left: calc(var(--chart-centre) - 50cqw);
 		width: var(--chart-side);
 		height: var(--chart-side);
 		display: grid;
 		place-items: center;
+	}
+
+	/*
+	 * The chart's copy in the air after Add to PDF. It is the chart as a page thumbnail
+	 * shows it (paper, the brighter stars, a hairline edge), laid out by the script on
+	 * its place on that thumbnail and played there from over the preview; above the page
+	 * and its panels, under the toast. It takes no pointer.
+	 */
+	.pdf-flight {
+		position: fixed;
+		z-index: 900;
+		overflow: hidden;
+		border-radius: var(--corner);
+		background: var(--paper);
+		transform-origin: center;
+		pointer-events: none;
+		will-change: transform, opacity;
+	}
+
+	.pdf-flight canvas {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+
+	.pdf-flight-edge {
+		position: absolute;
+		inset: 0;
+		border-radius: var(--corner);
 	}
 
 	.ray-bottom {
@@ -1194,6 +1585,38 @@
 		stroke-width: 1.5;
 		stroke-linecap: round;
 		stroke-linejoin: round;
+	}
+
+	/* A file is being drawn: three quarters of a ring, turning. */
+	.export-spinner {
+		animation: export-spin 700ms linear infinite;
+	}
+
+	@keyframes export-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	/* Saved: the check draws itself, start to end. */
+	.export-done path {
+		stroke-dasharray: 1;
+		animation: export-check 240ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	@keyframes export-check {
+		from {
+			stroke-dashoffset: 1;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		/* The ring still says "working" standing still; the check and the notice are simply there. */
+		.export-spinner,
+		.export-done path,
+		.catalog-notice {
+			animation: none;
+		}
 	}
 
 	.export-toggle .export-icon {

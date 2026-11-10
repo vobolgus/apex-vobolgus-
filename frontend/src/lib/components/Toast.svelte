@@ -15,6 +15,7 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { ariaKeys, keyLabel, spokenKeys } from '$lib/shortcuts';
+	import { prefersReducedMotion } from '$lib/ui/motion';
 	import type { ToastItem, ToastStore } from '$lib/ui/toast.svelte';
 
 	interface Props {
@@ -28,6 +29,8 @@
 	let { store, modal = false, apple = true }: Props = $props();
 
 	const UNDO_KEYS = ['mod', 'Z'] as const;
+	/** How long a dismissed toast takes to leave (the `toast-out` animation below). */
+	const TOAST_EXIT_MS = 140;
 
 	let host = $state<HTMLDivElement>();
 	/** Where the host lives without a modal: its place in the page. */
@@ -39,6 +42,8 @@
 	 * in place (in the dialog, if one is open) before its text changes.
 	 */
 	let shown = $state<ToastItem | null>(null);
+	/** The toast on screen was dismissed and is on its way out; it no longer takes input. */
+	let leaving = $state(false);
 
 	/** The last open modal dialog in document order (one at a time in this app). */
 	function topModal(): HTMLDialogElement | null {
@@ -112,11 +117,24 @@
 	$effect(() => {
 		const next = store.current;
 		if (!next) {
-			shown = null;
-			return;
+			if (untrack(() => shown) === null || prefersReducedMotion()) {
+				shown = null;
+				leaving = false;
+				return;
+			}
+			leaving = true;
+			const timer = setTimeout(() => {
+				shown = null;
+				leaving = false;
+			}, TOAST_EXIT_MS);
+			return () => clearTimeout(timer);
 		}
 		untrack(place);
-		const timer = setTimeout(() => (shown = next));
+		// A toast that replaces one on its way out takes its place at once.
+		const timer = setTimeout(() => {
+			shown = next;
+			leaving = false;
+		});
 		return () => clearTimeout(timer);
 	});
 
@@ -134,6 +152,8 @@
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="toast"
+					class:leaving
+					inert={leaving}
 					onpointerenter={() => store.pause()}
 					onpointerleave={() => store.resume()}
 					onfocusin={() => store.pause()}
@@ -199,6 +219,19 @@
 		font: var(--font-ui);
 		pointer-events: auto;
 		animation: toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* Dismissed: it drops back the way it came. Its Undo is spent, so it takes no pointer. */
+	.toast.leaving {
+		pointer-events: none;
+		animation: toast-out 140ms ease-in forwards;
+	}
+
+	@keyframes toast-out {
+		to {
+			opacity: 0;
+			transform: translateY(6px);
+		}
 	}
 
 	/* Without an Undo the text sits centred in the pill. */

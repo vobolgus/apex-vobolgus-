@@ -137,6 +137,79 @@ test('a wide pinhole gets a landscape page of its own', async ({ page }) => {
 	expect(saved.items[0].frame.x).toBeCloseTo(12, 6);
 });
 
+test('a landscape page fits the width of the panel: the panel does not widen, the chart does not move', async ({
+	page
+}) => {
+	await gotoGenerator(page);
+	const panel = page.getByRole('complementary', { name: 'PDF pages' });
+	const canvas = page.locator('canvas').first();
+	// A wide frame takes a landscape page of its own.
+	await page.getByRole('radio', { name: /pinhole/i }).click();
+	await page.getByRole('button', { name: 'Add to PDF' }).click();
+	await expect(thumbnails(page)).toHaveCount(1);
+	await expect.poll(async () => (await savedPages(page))[0]?.orientation).toBe('landscape');
+	await page.waitForTimeout(900);
+	const landscapePanel = (await panel.boundingBox())!;
+	const landscapeChart = (await canvas.boundingBox())!;
+
+	// An empty page is portrait.
+	await panel.getByRole('button', { name: 'Add page' }).click();
+	await expect(thumbnails(page)).toHaveCount(2);
+	await expect.poll(async () => (await savedPages(page))[1]?.orientation).toBe('portrait');
+	// Off the panel: a page under the pointer is lifted, 6 % larger.
+	await page.mouse.move(640, 400);
+	await page.waitForTimeout(600);
+	const [landscape, portrait] = [
+		(await thumbnails(page).nth(0).boundingBox())!,
+		(await thumbnails(page).nth(1).boundingBox())!
+	];
+	// The landscape page is as wide as the portrait one, and lower.
+	expect(landscape.width).toBeCloseTo(portrait.width, 1);
+	expect(landscape.height).toBeLessThan(portrait.height);
+	// So the panel is one width whatever it holds, and the chart beside it stays put.
+	expect((await panel.boundingBox())!.width).toBeCloseTo(landscapePanel.width, 1);
+	expect((await canvas.boundingBox())!.x).toBeCloseTo(landscapeChart.x, 1);
+});
+
+test('a long list fades only at the edge pages run under, and has no scrollbar', async ({
+	page
+}) => {
+	await page.setViewportSize({ width: 1280, height: 620 });
+	await gotoGenerator(page);
+	const panel = page.getByRole('complementary', { name: 'PDF pages' });
+	await page.getByRole('radio', { name: /pinhole/i }).click();
+	await page.getByRole('button', { name: 'Add to PDF' }).click();
+	await expect(thumbnails(page)).toHaveCount(1);
+	for (let count = 2; count <= 6; count += 1) {
+		await panel.getByRole('button', { name: 'Add page' }).click();
+		await expect(thumbnails(page)).toHaveCount(count);
+	}
+	const list = panel.getByRole('list');
+	const fades = () =>
+		list.evaluate((el) => [
+			parseFloat((el as HTMLElement).style.getPropertyValue('--fade-top')),
+			parseFloat((el as HTMLElement).style.getPropertyValue('--fade-bottom'))
+		]);
+	const scrollTo = (top: number) => list.evaluate((el, y) => el.scrollTo(0, y), top);
+	// It does scroll, without a bar of the system's down its side.
+	expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+	expect(await list.evaluate((el) => getComputedStyle(el).scrollbarWidth)).toBe('none');
+
+	// The last page added is still being scrolled to, smoothly: let that come to rest first.
+	await page.waitForTimeout(900);
+	// At the top nothing is above to fade: the first page's ⊖ is at full strength.
+	await scrollTo(0);
+	await expect.poll(fades).toEqual([0, 20]);
+	// A little way down the fade has come in by that much; further, in full at both edges.
+	await scrollTo(6);
+	await expect.poll(fades).toEqual([6, 20]);
+	await scrollTo(60);
+	await expect.poll(fades).toEqual([20, 20]);
+	// At the bottom nothing is below.
+	await scrollTo(100000);
+	await expect.poll(fades).toEqual([20, 0]);
+});
+
 test('the PDF document row is disabled while the document is empty, and the arrows skip it', async ({
 	page
 }) => {

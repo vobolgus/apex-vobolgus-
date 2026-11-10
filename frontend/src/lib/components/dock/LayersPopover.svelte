@@ -1,24 +1,48 @@
 <script lang="ts">
 	/**
-	 * Dock trigger "Layers N" with an upward popover of grouped layer switches.
+	 * Dock trigger "Layers N". Where there is room beside the chart (`docked`) it
+	 * shows and hides the page's layers panel (`LayersPanel.svelte`), which the
+	 * chart keeps clear of. Otherwise, on a phone, it opens an upward popover of
+	 * the same grouped switches.
 	 *
-	 * Keyboard: Enter, Space, ↑ or ↓ on the trigger open the popover and focus
-	 * the first row; ↑/↓ (Home/End) move between rows, Space toggles, Escape
-	 * closes and returns focus to the trigger, Tab out of it closes it. Every key handled here stops propagation,
-	 * so the window-level sky rotation does not act on it as well.
+	 * Keyboard: Enter, Space, ↑ or ↓ on the trigger open the list and focus the
+	 * first row. In the popover ↑/↓ (Home/End) move between rows, Space toggles,
+	 * Escape closes and returns focus to the trigger, Tab out of it closes it.
+	 * Every key handled here stops propagation, so the window-level sky rotation
+	 * does not act on it as well.
 	 */
 	import { tick } from 'svelte';
-	import { LAYER_GROUPS, type LayerState } from '$lib/state/layers.svelte';
+	import type { LayerState } from '$lib/state/layers.svelte';
 	import { Dropdown } from '$lib/ui/dropdown.svelte';
-	import Switch from './Switch.svelte';
+	import { keepFocusOnMousePress } from '$lib/ui/focus';
+	import { prefersReducedMotion } from '$lib/ui/motion';
+	import LayerSwitches from './LayerSwitches.svelte';
+	import { stepSwitchFocus, switchRows } from './switch-keys';
 
 	interface Props {
 		layers: LayerState;
 		/** Open state. Pass the page's instance so its `DropdownGroup` can dismiss it. */
 		menu?: Dropdown;
+		/** The layers live in the page's side panel; the trigger only shows and hides it. */
+		docked?: boolean;
+		/** With `docked`: whether the side panel is open, and its id. */
+		panelOpen?: boolean;
+		panelId?: string;
+		/**
+		 * With `docked`: show or hide the side panel. `focus` asks for the focus to go
+		 * to its first row, when it was opened from the keyboard.
+		 */
+		onpanel?: (open: boolean, focus: boolean) => void;
 	}
 
-	let { layers, menu = new Dropdown() }: Props = $props();
+	let {
+		layers,
+		menu = new Dropdown(),
+		docked = false,
+		panelOpen = false,
+		panelId: sidePanelId,
+		onpanel
+	}: Props = $props();
 
 	/** Keep the popover this far from the viewport edges. */
 	const VIEWPORT_MARGIN_PX = 8;
@@ -32,17 +56,54 @@
 
 	const count = $derived(layers.enabledCount);
 
-	function rows(): HTMLElement[] {
-		return panelEl ? Array.from(panelEl.querySelectorAll<HTMLElement>('[role="switch"]')) : [];
-	}
+	let badgeEl = $state<HTMLElement>();
+	/** The count the badge last showed; null before the first one, which arrives without a bump. */
+	let shownCount: number | null = null;
+
+	// A layer turned on or off: the count gives a small bump, so the eye finds what changed.
+	$effect(() => {
+		const next = count;
+		const changed = shownCount !== null && next !== shownCount;
+		shownCount = next;
+		if (!changed || !badgeEl || prefersReducedMotion()) return;
+		// Not in every engine (jsdom has none): the number changes all the same.
+		if (typeof badgeEl.animate !== 'function') return;
+		badgeEl.animate(
+			[
+				{ transform: 'scale(1)' },
+				{ transform: 'scale(1.28)', offset: 0.35 },
+				{ transform: 'scale(1)' }
+			],
+			{ duration: 260, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }
+		);
+	});
+
+	const expanded = $derived(docked ? panelOpen : menu.open);
+	const controls = $derived(
+		docked ? (panelOpen ? sidePanelId : undefined) : menu.open ? panelId : undefined
+	);
+
+	// A popover left open as the window grows wide would come back open on a phone.
+	$effect(() => {
+		if (docked) menu.close();
+	});
 
 	async function openAndFocusFirst() {
+		if (docked) {
+			onpanel?.(true, true);
+			return;
+		}
 		menu.show();
 		await tick();
-		rows()[0]?.focus();
+		switchRows(panelEl)[0]?.focus();
 	}
 
 	function handleTriggerClick(event: MouseEvent) {
+		if (docked) {
+			// detail 0: activated from the keyboard (Enter/Space), so focus moves in.
+			onpanel?.(!panelOpen, event.detail === 0);
+			return;
+		}
 		if (menu.open) menu.close();
 		// detail 0: activated from the keyboard (Enter/Space), so focus moves in.
 		else if (event.detail === 0) void openAndFocusFirst();
@@ -75,34 +136,13 @@
 			setTimeout(() => (tabbing = false));
 			return;
 		}
+		if (stepSwitchFocus(event, panelEl)) return;
 		if (event.metaKey || event.ctrlKey || event.altKey) return;
-		const items = rows();
-		const current = items.indexOf(document.activeElement as HTMLElement);
-		let next: number;
-		switch (event.key) {
-			case 'ArrowDown':
-				next = (current + 1) % items.length;
-				break;
-			case 'ArrowUp':
-				next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length;
-				break;
-			case 'Home':
-				next = 0;
-				break;
-			case 'End':
-				next = items.length - 1;
-				break;
-			case 'Escape':
-				event.preventDefault();
-				event.stopPropagation();
-				menu.dismiss();
-				return;
-			default:
-				return;
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			event.stopPropagation();
+			menu.dismiss();
 		}
-		event.preventDefault();
-		event.stopPropagation();
-		items[next]?.focus();
 	}
 
 	/**
@@ -134,10 +174,11 @@
 		bind:this={menu.trigger}
 		class="trigger"
 		type="button"
-		aria-haspopup="dialog"
-		aria-expanded={menu.open}
-		aria-controls={menu.open ? panelId : undefined}
+		aria-haspopup={docked ? undefined : 'dialog'}
+		aria-expanded={expanded}
+		aria-controls={controls}
 		aria-label="Layers, {count} on"
+		onmousedown={keepFocusOnMousePress}
 		onclick={handleTriggerClick}
 		onkeydown={handleTriggerKeydown}
 	>
@@ -146,12 +187,14 @@
 			<path d="M8 2.75v10.5" />
 		</svg>
 		<span>Layers</span>
-		<span class="badge" class:is-zero={count === 0} aria-hidden="true">{count}</span>
+		<span bind:this={badgeEl} class="badge" class:is-zero={count === 0} aria-hidden="true"
+			>{count}</span
+		>
 		<svg class="chevron" viewBox="0 0 12 12" aria-hidden="true">
 			<path d="M3 7.5 6 4.5l3 3" />
 		</svg>
 	</button>
-	{#if menu.open}
+	{#if menu.open && !docked}
 		<div
 			bind:this={panelEl}
 			class="panel"
@@ -163,25 +206,7 @@
 			onkeydown={handlePanelKeydown}
 		>
 			<div class="title" id="{id}-title">Layers</div>
-			{#each LAYER_GROUPS as group (group.id)}
-				<div class="group" role="group" aria-label={group.label}>
-					<Switch
-						variant="header"
-						label={group.label}
-						checked={layers.isGroupOn(group)}
-						mixed={layers.isGroupMixed(group)}
-						onchange={(on) => layers.setGroup(group, on)}
-					/>
-					{#each group.layers as layer (layer.key)}
-						<Switch
-							label={layer.label}
-							note={layer.note}
-							checked={layers[layer.key]}
-							onchange={() => layers.toggle(layer.key)}
-						/>
-					{/each}
-				</div>
-			{/each}
+			<LayerSwitches {layers} />
 		</div>
 	{/if}
 </div>
@@ -309,12 +334,6 @@
 		padding: 6px 8px 4px;
 		color: var(--fg-1);
 		font: var(--font-ui);
-	}
-
-	.group + .group {
-		margin-top: 4px;
-		padding-top: 4px;
-		border-top: 1px solid var(--hairline);
 	}
 
 	@media (prefers-reduced-motion: reduce) {

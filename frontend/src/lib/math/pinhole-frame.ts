@@ -490,8 +490,14 @@ export function beginPinholeDrag(
 /**
  * The frame size a pointer at (pointerX, pointerY) asks for. Both opposite
  * edges follow the dragged one, so the frame grows by twice the pointer travel.
- * With Shift the axis that moved further from the start wins and the frame
- * snaps to 1:1, as the Moveable-based handles did.
+ *
+ * With Shift the frame snaps to 1:1. From a corner its side is the larger of the
+ * two the pointer asks for: the square reaches the pointer on the axis where it is
+ * further out, and follows it there. That is continuous in the pointer, which
+ * "the axis that moved further from the start" was not: with one axis growing and
+ * the other shrinking by about as much, that rule flipped between a large square
+ * and a small one as the pointer crossed the diagonal. From an edge the side is
+ * the dragged axis alone.
  */
 export function pinholeDragRequest(
 	origin: PinholeDragOrigin,
@@ -508,10 +514,7 @@ export function pinholeDragRequest(
 		? Math.max(0, 2 * (dir.y * (pointerY - origin.centerY) - origin.grabY))
 		: origin.startHeightPx;
 	if (shift) {
-		const side =
-			Math.abs(widthPx - origin.startWidthPx) > Math.abs(heightPx - origin.startHeightPx)
-				? widthPx
-				: heightPx;
+		const side = dir.x && dir.y ? Math.max(widthPx, heightPx) : dir.x ? widthPx : heightPx;
 		return { widthFrac: side / k, heightFrac: side / k, x: true, y: true, square: true };
 	}
 	return {

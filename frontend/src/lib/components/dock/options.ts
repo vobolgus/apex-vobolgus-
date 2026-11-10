@@ -1,5 +1,5 @@
 /**
- * Option data for the dock's segmented controls.
+ * Option data for the dock's segmented controls, and the layers panel's size.
  */
 
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
@@ -30,3 +30,9 @@ export const PROJECTION_SEGMENTS: readonly SegmentOption<ProjectionMode>[] = [
 		iconPath: 'M4 3.75h8a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4.5a2 2 0 0 1 2-2Z'
 	}
 ];
+
+/** The layers panel (`LayersPanel.svelte`): its width and its inset from the chart area's edges. */
+export const LAYERS_PANEL_WIDTH_PX = 232;
+export const LAYERS_PANEL_INSET_PX = 12;
+/** How far the open panel reaches into the chart area from its right edge; the chart keeps clear of it. */
+export const LAYERS_PANEL_FOOTPRINT_PX = LAYERS_PANEL_INSET_PX + LAYERS_PANEL_WIDTH_PX;

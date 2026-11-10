@@ -53,6 +53,46 @@ describe('Toast', () => {
 		flushSync();
 		expect(undo).toHaveBeenCalledOnce();
 		expect(ctx.store.current).toBeNull();
+		// It leaves rather than vanishes: on its way out it is inert, so Undo cannot run twice.
+		const leaving = ctx.region.querySelector<HTMLElement>('.toast')!;
+		expect(leaving.classList.contains('leaving')).toBe(true);
+		expect(leaving.inert).toBe(true);
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		flushSync();
+		expect(ctx.region.querySelector('.toast')).toBeNull();
+	});
+
+	it('gives way at once to a toast that replaces one on its way out', async () => {
+		const ctx = setup();
+		cleanup = ctx.cleanup;
+		ctx.store.show('First');
+		await shown();
+		ctx.store.dismiss();
+		flushSync();
+		expect(ctx.region.querySelector('.toast.leaving')).not.toBeNull();
+
+		ctx.store.show('Second');
+		await shown();
+		const toast = ctx.region.querySelector('.toast')!;
+		expect(toast.querySelector('.message')?.textContent).toBe('Second');
+		expect(toast.classList.contains('leaving')).toBe(false);
+		// The first one's exit timer does not take the second with it.
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		flushSync();
+		expect(ctx.region.querySelector('.message')?.textContent).toBe('Second');
+	});
+
+	it('is simply gone when the system asks for less motion', async () => {
+		vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduced-motion') }));
+		const ctx = setup();
+		cleanup = () => {
+			ctx.cleanup();
+			vi.unstubAllGlobals();
+		};
+		ctx.store.show('Saved');
+		await shown();
+		ctx.store.dismiss();
+		flushSync();
 		expect(ctx.region.querySelector('.toast')).toBeNull();
 	});
 

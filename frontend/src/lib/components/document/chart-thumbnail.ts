@@ -63,10 +63,14 @@ export function chartThumbnail(canvas: HTMLCanvasElement, view: ChartView): stri
 	}
 }
 
-/** Page-thumbnail stars, CSS px: the brightest, the floor, and the step per magnitude. */
-const THUMB_STAR_MAX_PX = 1.2;
-const THUMB_STAR_MIN_PX = 0.4;
-const THUMB_STAR_PER_MAG = 0.22;
+/**
+ * Page-thumbnail stars, CSS px of radius: the brightest, the floor, and the step
+ * per magnitude. Small enough that a sheet reads as a chart and not as a spatter
+ * of blots: at 1.2 px the bright stars of a 60 px chart ran into each other.
+ */
+const THUMB_STAR_MAX_PX = 0.85;
+const THUMB_STAR_MIN_PX = 0.3;
+const THUMB_STAR_PER_MAG = 0.16;
 
 /**
  * The faintest star a thumbnail chart `sidePx` across draws: a few hundred dots read
@@ -78,9 +82,15 @@ export function thumbnailMagnitudeLimit(sidePx: number): number {
 
 /**
  * Draws a chart for a page thumbnail on `canvas`, `width` × `height` CSS px: the
- * preview's own camera, but only the brighter stars, none under half a pixel. The
- * vector preview, and the preview's pixels scaled down, both draw the stars at their
- * size on paper, which at this scale is far under a pixel: the sheet looked empty.
+ * preview's own camera, but only the brighter stars, none under a floor. The vector
+ * preview, and the preview's pixels scaled down, both draw the stars at their size
+ * on paper, which at this scale is far under a pixel: the sheet looked empty.
+ *
+ * `dpr` is the backing store's density, and `starScale` multiplies every star's
+ * radius. The copy that flies to the page on Add to PDF is this same drawing shown
+ * several times larger: it asks for that many times the pixels, so that it is
+ * sharp on the way, and for smaller stars while it is large, so that they do not
+ * arrive as blots (`flightStarScale`). On the thumbnail itself both are 1.
  */
 export function drawChartThumbnail(
 	canvas: HTMLCanvasElement,
@@ -88,7 +98,8 @@ export function drawChartThumbnail(
 	width: number,
 	height: number,
 	stars: readonly StarVector[],
-	dpr = 1
+	dpr = 1,
+	starScale = 1
 ): void {
 	canvas.width = Math.max(1, Math.round(width * dpr));
 	canvas.height = Math.max(1, Math.round(height * dpr));
@@ -117,7 +128,8 @@ export function drawChartThumbnail(
 		if (star.v_mag > limit) continue;
 		const sample = sampleStarMorphFrame(star, blend, params, rotate);
 		if (sample.visibility < 0.5) continue;
-		const r = Math.max(THUMB_STAR_MIN_PX, THUMB_STAR_MAX_PX - THUMB_STAR_PER_MAG * star.v_mag);
+		const r =
+			starScale * Math.max(THUMB_STAR_MIN_PX, THUMB_STAR_MAX_PX - THUMB_STAR_PER_MAG * star.v_mag);
 		ctx.beginPath();
 		ctx.arc(width / 2 + sample.px * scale, height / 2 + sample.py * scale, r, 0, Math.PI * 2);
 		ctx.fill();

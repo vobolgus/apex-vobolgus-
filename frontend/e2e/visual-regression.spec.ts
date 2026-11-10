@@ -90,6 +90,9 @@ async function dragCanvas(page: Page, canvas: Locator) {
 	for (let i = 1; i <= 5; i += 1) {
 		await page.mouse.move(startX + i * 30, startY + i * 14, { steps: 4 });
 	}
+	// Rest before letting go: a pointer lifted in motion throws the sky, which then glides
+	// on for a moment, and the snapshot is of where the drag put it.
+	await page.waitForTimeout(150);
 	await page.mouse.up();
 }
 

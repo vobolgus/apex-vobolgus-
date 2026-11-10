@@ -120,7 +120,7 @@ describe('PagesPanel', () => {
 		expect(numbers).toEqual(['1', '2']);
 	});
 
-	it('draws a page as a sheet in mm × scale with its charts placed on it', () => {
+	it('draws a page as a sheet as wide as the column, with its charts placed on it to scale', () => {
 		const store = new DocumentStore(null);
 		store.addChart(chart(), 'data:image/png;base64,AAAA');
 		store.addPage('landscape');
@@ -130,8 +130,9 @@ describe('PagesPanel', () => {
 		const sheets = ctx.target.querySelectorAll<HTMLElement>('.sheet');
 		expect(sheets[0].style.width).toBe('88px');
 		expect(parseFloat(sheets[0].style.height)).toBeCloseTo((297 * 88) / 210, 3);
-		expect(parseFloat(sheets[1].style.width)).toBeCloseTo((297 * 88) / 210, 3);
-		expect(sheets[1].style.height).toBe('88px');
+		// A landscape page fills the same width and is lower for it: the panel keeps its width.
+		expect(sheets[1].style.width).toBe('88px');
+		expect(parseFloat(sheets[1].style.height)).toBeCloseTo((210 * 88) / 297, 3);
 
 		const item = store.pages[0].items[0];
 		const chartEl = sheets[0].querySelector<HTMLElement>('.chart')!;

@@ -8,9 +8,10 @@
 	 * and calls `onclose` when it closes itself (Escape, ⊗, the backdrop); it moves
 	 * between pages on its own and mirrors the current one in `store.selectedPageId`.
 	 *
-	 * Charts on the current page move by pointer (snapping with `snapMove`) and resize
-	 * by their corners (`snapResize`, aspect locked); let go over a neighbouring page,
-	 * a chart moves there, under the pointer; anywhere off the pages it goes back.
+	 * A chart is carried by the pointer, free of the paper, and let go it settles on
+	 * the page its centre is over or nearest to, snapped with `snapMove` (Shift held
+	 * shows the lines it would snap to); out of reach of every page it goes back.
+	 * Charts on the current page resize by their corners (`snapResize`, aspect locked).
 	 * The store is written once, on release. From the keyboard a chart nudges by 1 mm
 	 * (Shift: 10), + and − step its size, Page Up/Down move it to the page before or
 	 * after, and Delete removes it; ←/→ elsewhere change the page. A selected chart's
@@ -34,6 +35,7 @@
 	} from '$lib/document/geometry';
 	import { plural } from '$lib/document/labels';
 	import type { DocItem, DocPage, PageOrientation, Rect } from '$lib/document/types';
+	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { isModShortcut } from '$lib/shortcuts';
 	import type { ChartAction } from './EditorItem.svelte';
 	import EditorPage, { type PageDrag } from './EditorPage.svelte';
@@ -41,13 +43,14 @@
 	import {
 		anchorOf,
 		cornerOf,
-		dropTarget,
+		landingPage,
 		EDITOR_LAYOUT,
 		editorLayout,
 		frameUnderPointer,
 		nudgeDelta,
 		offsetBox,
 		resizeRect,
+		mmToScreen,
 		screenToMm,
 		sizeStep,
 		spokenSize,
@@ -75,12 +78,17 @@
 
 	/** A press must travel this far, px, before it drags: a click selects without snapping. */
 	const DRAG_SLOP_PX = 3;
-	/** The pointer may stray this far off the current page, px, and the chart still lands on it. */
-	const DROP_SLACK_PX = 24;
+	/**
+	 * The catch zone around every page, px: a chart let go with its centre within
+	 * this of a page lands on that page, brought to the nearest place it may be.
+	 */
+	const DROP_SLACK_PX = 40;
 	/** How long the guides a keyboard nudge lands on stay drawn, ms. */
 	const FLASH_MS = 700;
 	/** The snap-back after a drag let go off every page. */
 	const RETURN_MS = 200;
+	/** How long a chart let go over a page takes to come to rest in its place. */
+	const SETTLE_MS = 220;
 	/** Stage size before the first measurement (and in tests, which have no layout). */
 	const FALLBACK_STAGE: Size = { w: 1200, h: 640 };
 
@@ -98,6 +106,8 @@
 	let lastIndex = 0;
 	let announcement = $state('');
 	let returningId = $state<string | null>(null);
+	/** A chart coming to rest after it was let go over a page. */
+	let settlingId = $state<string | null>(null);
 	let flash = $state.raw<{ pageId: string; guides: SnapGuide[] } | null>(null);
 	let flashTimer: ReturnType<typeof setTimeout> | undefined;
 	/** The strip's height, px: the toast, lodged in the dialog, sits above it. */
@@ -264,6 +274,27 @@
 		announce(`Page ${pages.length} added`);
 	}
 
+	/**
+	 * Delete an empty page (its label's button, or Delete with the focus on the page).
+	 * A page with charts on it is not deleted from here: its charts are removed one by
+	 * one, or the page is deleted in the pages panel. The page that takes its place is
+	 * shown; with none left the editor closes. The toast's Undo brings it back.
+	 */
+	function deletePage(id: string) {
+		const page = store.page(id);
+		if (session || !page || page.items.length > 0) return;
+		const number = store.pageIndex(id) + 1;
+		const restore = store.removePage(id);
+		notify(`Page ${number} deleted`, () => {
+			if (!restore() || !open) return;
+			setCurrent(id, false, true);
+			announce(`Page ${number} restored`);
+			void tick().then(focusPaper);
+		});
+		// The button went with its page: the focus goes to the page now shown.
+		void tick().then(focusPaper);
+	}
+
 	function setOrientation(id: string, orientation: PageOrientation) {
 		if (!session) store.setOrientation(id, orientation);
 	}
@@ -284,8 +315,16 @@
 			return;
 		}
 		if (event.metaKey || event.ctrlKey || event.altKey || session) return;
-		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		const target = event.target as Element | null;
+		// Delete on the page itself (no chart selected) deletes it, if it is empty.
+		if (event.key === 'Delete' || event.key === 'Backspace') {
+			if (current?.items.length === 0 && target?.matches?.('[data-paper]')) {
+				event.preventDefault();
+				if (!event.repeat) deletePage(current.id);
+			}
+			return;
+		}
+		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		// A focused chart takes the arrows itself; a text field would want them too.
 		if (target?.closest?.('[data-item-id], input, textarea, select')) return;
 		event.preventDefault();
@@ -315,6 +354,10 @@
 		anchorPoint: Point;
 		corner: Point;
 		moved: boolean;
+		/** Shift is held: a chart being carried shows the lines it would snap to. */
+		shift: boolean;
+		/** The pointer's last applied position: Shift pressed with the pointer at rest redraws from it. */
+		last: Point | null;
 		/** The pointer's latest position, applied once per frame. */
 		pending: Point | null;
 		frameRequest: number;
@@ -324,15 +367,26 @@
 		kind: 'moving' | 'detached' | 'resizing';
 		pageId: string;
 		itemId: string;
-		/** The page it would land on; null off every page. */
+		/** The page it would land on; null out of reach of every page. */
 		targetId: string | null;
-		/** On the target page, its mm; detached, the source page's mm. */
+		/**
+		 * Where the chart is drawn, its own page's mm. Moving, that is wherever the
+		 * pointer has it, on a page or off: it is not held to the paper. Resizing, it
+		 * is the snapped frame, which is also what the resize commits.
+		 */
 		frame: Rect;
+		/** Moving: where it would come to rest if let go now, the target page's mm. */
+		landing: Rect | null;
+		/** The lines a resize is snapped to; a chart being carried shows its own only with Shift held. */
 		guides: SnapGuide[];
 	}
 
 	let session: Session | null = null;
 	let drag = $state.raw<DragView | null>(null);
+	/** A chart is off its place: in the hand, or on its way to rest or back. */
+	const carrying = $derived(
+		(drag !== null && drag.kind !== 'resizing') || settlingId !== null || returningId !== null
+	);
 	/** Set for the click a drag's release ends in. */
 	let swallowClick = false;
 
@@ -392,6 +446,8 @@
 			anchorPoint: { x: 0, y: 0 },
 			corner: { x: 0, y: 0 },
 			moved: false,
+			shift: event.shiftKey,
+			last: null,
 			pending: null,
 			frameRequest: 0,
 			...extra
@@ -405,6 +461,15 @@
 		element.addEventListener('pointerup', handlePointerUp, { signal });
 		element.addEventListener('pointercancel', () => cancelDrag(), { signal });
 		element.addEventListener('lostpointercapture', () => cancelDrag(), { signal });
+		// Shift pressed or let go with the pointer at rest shows or hides the lines at once.
+		const handleShift = (keyEvent: KeyboardEvent) => {
+			const s = session;
+			if (!s || keyEvent.key !== 'Shift') return;
+			s.shift = keyEvent.type === 'keydown';
+			if (s.last) update(s, s.last);
+		};
+		window.addEventListener('keydown', handleShift, { signal, capture: true });
+		window.addEventListener('keyup', handleShift, { signal, capture: true });
 	}
 
 	function startMove(event: PointerEvent, item: DocItem) {
@@ -437,6 +502,7 @@
 	function handlePointerMove(event: PointerEvent) {
 		const s = session;
 		if (!s || event.pointerId !== s.pointerId) return;
+		s.shift = event.shiftKey;
 		s.pending = { x: event.clientX, y: event.clientY };
 		if (!s.frameRequest) {
 			s.frameRequest = requestAnimationFrame(() => {
@@ -464,6 +530,7 @@
 	}
 
 	function update(s: Session, point: Point) {
+		s.last = point;
 		const dx = point.x - s.start.x;
 		const dy = point.y - s.start.y;
 		if (!s.moved && Math.hypot(dx, dy) < DRAG_SLOP_PX) return;
@@ -478,21 +545,32 @@
 			const raw = resizeRect(s.anchor, s.anchorPoint, corner);
 			const others = page.items.filter((it) => it.id !== s.itemId).map((it) => it.frame);
 			const snapped = snapResize(raw, s.anchor, s.aspect, others, page.orientation, threshold);
-			drag = { ...base, kind: 'resizing', targetId: s.pageId, ...snapped };
+			drag = { ...base, kind: 'resizing', targetId: s.pageId, landing: null, ...snapped };
 			return;
 		}
 
-		const targetId = dropTarget(point, s.boxes, s.pageId, DROP_SLACK_PX);
+		// The chart goes wherever the pointer takes it, on the paper or off it: it is in
+		// the hand, not on a page, and nothing is drawn for it on the pages unless Shift
+		// is held, which shows the lines it would snap to. Where it would come to rest
+		// is worked out beside it; it only goes there when let go.
+		const home = s.boxes.find((b) => b.id === s.pageId)?.box;
+		if (!home) return;
+		let frame: Rect = {
+			...s.startFrame,
+			x: s.startFrame.x + dx / s.scale,
+			y: s.startFrame.y + dy / s.scale
+		};
+		const centre = mmToScreen(
+			{ x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 },
+			home,
+			s.scale
+		);
+		const targetId = landingPage(centre, s.boxes, DROP_SLACK_PX);
 		const target = targetId === null ? undefined : store.page(targetId);
 		const box = s.boxes.find((b) => b.id === targetId)?.box;
 		if (!target || !box) {
-			// Off every page: it follows the pointer freely, and goes back if let go here.
-			const frame = {
-				...s.startFrame,
-				x: s.startFrame.x + dx / s.scale,
-				y: s.startFrame.y + dy / s.scale
-			};
-			drag = { ...base, kind: 'detached', targetId: null, frame, guides: [] };
+			// Out of reach of every page: let go here, it goes back where it was.
+			drag = { ...base, kind: 'detached', targetId: null, frame, landing: null, guides: [] };
 			return;
 		}
 		// A chart too large for the target page shrinks to fit it, as it will on the drop.
@@ -500,25 +578,50 @@
 			target.id === s.pageId
 				? s.startFrame
 				: fitFrame({ ...s.startFrame, x: 0, y: 0 }, s.aspect, target.orientation);
+		if (size.w !== s.startFrame.w || size.h !== s.startFrame.h) {
+			frame = frameUnderPointer(screenToMm(point, home, s.scale), s.grab, s.startFrame, size);
+		}
 		const raw = frameUnderPointer(screenToMm(point, box, s.scale), s.grab, s.startFrame, size);
 		const others = target.items.filter((it) => it.id !== s.itemId).map((it) => it.frame);
-		const snapped = snapMove(raw, others, target.orientation, threshold);
-		drag = { ...base, kind: 'moving', targetId: target.id, ...snapped };
+		const landing = snapMove(raw, others, target.orientation, threshold);
+		drag = {
+			...base,
+			kind: 'moving',
+			targetId: target.id,
+			frame,
+			landing: landing.frame,
+			guides: s.shift ? landing.guides : []
+		};
+	}
+
+	/** The chart's element in the editor, on whichever page it is. */
+	function itemElement(itemId: string): HTMLElement | null {
+		return (
+			Array.from(dialogEl?.querySelectorAll<HTMLElement>('[data-item-id]') ?? []).find(
+				(element) => element.dataset.itemId === itemId
+			) ?? null
+		);
 	}
 
 	function commit(s: Session) {
 		const view = drag;
+		// Where the chart is on screen as it is let go: it settles from there.
+		const held = s.moved ? (itemElement(s.itemId)?.getBoundingClientRect() ?? null) : null;
 		endDrag();
 		if (!s.moved || !view) return;
 		// The click this release ends in must not make the page it was grabbed on current.
 		swallowClick = true;
 		setTimeout(() => (swallowClick = false));
-		if (view.targetId === null) {
+		if (view.kind === 'resizing') {
+			store.updateItem(s.pageId, s.itemId, view.frame);
+		} else if (view.targetId === null || !view.landing) {
 			snapBack(s.itemId);
 		} else if (view.targetId === s.pageId) {
-			store.updateItem(s.pageId, s.itemId, view.frame);
-		} else if (store.moveItem(s.itemId, view.targetId, view.frame)) {
+			store.updateItem(s.pageId, s.itemId, view.landing);
+			settle(s.itemId, held);
+		} else if (store.moveItem(s.itemId, view.targetId, view.landing)) {
 			announce(`Chart moved to page ${store.pageIndex(view.targetId) + 1}`);
+			settle(s.itemId, held);
 			// Its element is gone with it: the focus goes to it on the current page, else stays here.
 			const itemId = s.itemId;
 			void tick().then(() => {
@@ -532,6 +635,35 @@
 			snapBack(s.itemId);
 			announce(`Page ${store.pageIndex(view.targetId) + 1} is full`);
 		}
+	}
+
+	/**
+	 * The chart has been let go and is already where it belongs in the document;
+	 * on screen it is played there from where the hand left it (`held`), so that it
+	 * comes to rest instead of jumping the last of the way. Its element may be a new
+	 * one, on another page: found again once the page has drawn it.
+	 */
+	function settle(itemId: string, held: DOMRect | null) {
+		if (!held || prefersReducedMotion()) return;
+		settlingId = itemId;
+		const done = () => {
+			if (settlingId === itemId) settlingId = null;
+		};
+		void tick().then(() => {
+			const element = itemElement(itemId);
+			if (!element || typeof element.animate !== 'function') return done();
+			const rest = element.getBoundingClientRect();
+			if (rest.width <= 0) return done();
+			const dx = held.left + held.width / 2 - (rest.left + rest.width / 2);
+			const dy = held.top + held.height / 2 - (rest.top + rest.height / 2);
+			const scale = held.width / rest.width;
+			const move = element.animate(
+				[{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` }, { transform: 'none' }],
+				{ duration: SETTLE_MS, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+			);
+			move.onfinish = done;
+			move.oncancel = done;
+		});
 	}
 
 	function cancelDrag() {
@@ -574,33 +706,15 @@
 		const isSource = view.pageId === page.id;
 		const isTarget = view.targetId === page.id;
 		if (!isSource && !isTarget) return null;
-		let frame: Rect | null = null;
-		if (isSource) {
-			frame = view.frame;
-			if (view.targetId !== null && !isTarget) {
-				// Drawn over the neighbour from its own page: the neighbour's mm, shifted.
-				const from = layout.slots[slotRole(page.id)];
-				const to = layout.slots[slotRole(view.targetId)];
-				if (from && to) {
-					frame = {
-						...view.frame,
-						x: view.frame.x + (to.left - from.left) / layout.scale,
-						y: view.frame.y + (to.top - from.top) / layout.scale
-					};
-				}
-			}
-		}
 		return {
 			itemId: isSource ? view.itemId : null,
-			frame,
+			// Its own page's mm, wherever on the stage that puts it: the page draws it
+			// past its own edges, above the others.
+			frame: isSource ? view.frame : null,
 			kind: view.kind,
 			guides: isTarget ? view.guides : [],
 			target: isTarget
 		};
-	}
-
-	function slotRole(id: string): SlotRole {
-		return slots.find((slot) => slot.page.id === id)?.role ?? 'current';
 	}
 
 	// === Keyboard on a chart ===
@@ -760,7 +874,7 @@
 				</div>
 			</header>
 
-			<div class="stage" bind:this={stageEl}>
+			<div class="stage" class:is-carrying={carrying} bind:this={stageEl}>
 				{#each slots as slot (slot.page.id)}
 					<EditorPage
 						page={slot.page}
@@ -773,9 +887,12 @@
 						narrow={layout.narrow}
 						drag={pageDrag(slot.page)}
 						{returningId}
+						{settlingId}
+						{carrying}
 						{hintId}
 						onactivate={(id) => setCurrent(id)}
 						onorientation={setOrientation}
+						ondelete={deletePage}
 						onmovestart={startMove}
 						onresizestart={startResize}
 						onitemkeydown={handleItemKeydown}
@@ -794,9 +911,9 @@
 			/>
 
 			<p class="sr-only" id={hintId}>
-				Drag to move it, or use the arrow keys, with Shift for 10 millimetres; Page Up and Page Down
-				move it to the page before or after. Drag a corner to resize it, or press plus or minus.
-				Delete removes it.
+				Drag to move it, holding Shift to see the lines it will snap to, or use the arrow keys, with
+				Shift for 10 millimetres; Page Up and Page Down move it to the page before or after. Drag a
+				corner to resize it, or press plus or minus. Delete removes it.
 			</p>
 			<p class="sr-only" aria-live="polite">{announcement}</p>
 		</div>
@@ -956,6 +1073,15 @@
 		position: relative;
 		min-height: 0;
 		overflow: hidden;
+	}
+
+	/*
+	 * A chart in the hand is not held to the stage either: carried over the bar above
+	 * or the strip below, it stays whole and on top of them.
+	 */
+	.stage.is-carrying {
+		z-index: 1;
+		overflow: visible;
 	}
 
 	.sr-only {

@@ -154,22 +154,39 @@ export function mmToScreen(point: Point, box: Box, scale: number): Point {
 	return { x: box.left + point.x * scale, y: box.top + point.y * scale };
 }
 
+/** How far `point` is from `box`, px; 0 inside it. */
+export function distanceToBox(box: Box, point: Point): number {
+	const dx = Math.max(box.left - point.x, 0, point.x - (box.left + box.width));
+	const dy = Math.max(box.top - point.y, 0, point.y - (box.top + box.height));
+	return Math.hypot(dx, dy);
+}
+
 /**
- * The page a chart dragged to `point` would land on: the page under the pointer,
- * or the current page while the pointer is within `slack` px of it (pushing a chart
- * against the margin often takes the pointer a little past the paper's edge).
- * Anywhere else is null: dropped there, the chart goes back where it was.
+ * The page a chart let go with its centre at `centre` would land on: the page the
+ * centre is over, else the nearest page within `slack` px of it. That margin is a
+ * catch zone around every page: a chart carried to a page and let go a little
+ * short of it, or a little past its edge, was meant for that page and is brought
+ * onto it. Further out than that is null: let go there, the chart goes back
+ * where it was.
+ *
+ * By the chart's centre, not the pointer: a chart held by its rim would otherwise
+ * be "on" a page it barely touches, or off one it all but covers.
  */
-export function dropTarget(
-	point: Point,
+export function landingPage(
+	centre: Point,
 	pages: readonly { id: string; box: Box }[],
-	currentId: string,
 	slack: number
 ): string | null {
-	const hit = pages.find((page) => containsPoint(page.box, point));
-	if (hit) return hit.id;
-	const current = pages.find((page) => page.id === currentId);
-	return current && containsPoint(current.box, point, slack) ? currentId : null;
+	let nearest: string | null = null;
+	let best = Infinity;
+	for (const page of pages) {
+		const distance = distanceToBox(page.box, centre);
+		if (distance <= slack && distance < best) {
+			best = distance;
+			nearest = page.id;
+		}
+	}
+	return nearest;
 }
 
 /**

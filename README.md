@@ -19,7 +19,9 @@ and are no longer built.
   arrow keys to pan, `Q`/`E` to roll, `Shift+I`/`Shift+O` to zoom, `Shift+N` to
   turn north up.
 - Reference lines: constellation figures, constellation boundaries, celestial
-  equator, ecliptic, galactic equator.
+  equator, ecliptic, galactic equator. The dock's Layers button shows them as a
+  panel at the right of the chart, which the chart keeps clear of (a popover above
+  the dock on a phone).
 - Export: PNG straight from the canvas; SVG and PDF rendered by the backend
   (`POST /api/export`) from the preview's own camera, so they show the same chart.
   The planets toggle applies to the backend export only. A slow export says it is

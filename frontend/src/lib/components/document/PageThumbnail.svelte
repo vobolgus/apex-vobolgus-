@@ -8,6 +8,11 @@
 	 * their size in mm, under a pixel at this scale, and the preview's own pixels
 	 * scaled down lose them too, so either way the sheet looked empty. Redrawn when
 	 * a chart's frame changes and once the star catalogue has loaded.
+	 *
+	 * `pendingItemId` names a chart that is on its way here (Add to PDF flies a copy
+	 * of it from the preview): its place on the sheet is kept, empty, until the copy
+	 * lands on it, and then it is drawn. The copy is this same drawing, so nothing
+	 * changes under the eye at that moment.
 	 */
 	import { PINHOLE_CORNER_RADIUS } from '$lib/constants';
 	import { pageSize, PRINT_MM_PER_PREVIEW_PX } from '$lib/document/geometry';
@@ -19,9 +24,11 @@
 		page: DocPage;
 		/** Screen px per mm. */
 		scale: number;
+		/** The chart still in the air, whose place stays empty for now. */
+		pendingItemId?: string | null;
 	}
 
-	let { page, scale }: Props = $props();
+	let { page, scale, pendingItemId = null }: Props = $props();
 
 	/** The pinhole frame's rounded corner, in mm on the page. */
 	const cornerMm = PINHOLE_CORNER_RADIUS * PRINT_MM_PER_PREVIEW_PX;
@@ -41,23 +48,27 @@
 		{@const h = item.frame.h * scale}
 		<div
 			class="chart"
+			class:pending={item.id === pendingItemId}
+			data-item-id={item.id}
 			style:left="{item.frame.x * scale}px"
 			style:top="{item.frame.y * scale}px"
 			style:width="{w}px"
 			style:height="{h}px"
 			style:--corner={round ? '50%' : `${cornerMm * scale}px`}
 		>
-			<canvas
-				{@attach (canvas) =>
-					drawChartThumbnail(
-						canvas,
-						item.chart,
-						w,
-						h,
-						catalog.starVectors,
-						window.devicePixelRatio || 1
-					)}
-			></canvas>
+			{#if item.id !== pendingItemId}
+				<canvas
+					{@attach (canvas) =>
+						drawChartThumbnail(
+							canvas,
+							item.chart,
+							w,
+							h,
+							catalog.starVectors,
+							window.devicePixelRatio || 1
+						)}
+				></canvas>
+			{/if}
 		</div>
 	{/each}
 </div>
@@ -96,6 +107,11 @@
 		inset: 0;
 		border-radius: var(--corner);
 		box-shadow: inset 0 0 0 1px var(--paper-chart-edge);
+	}
+
+	/* Still in the air: not even its edge is on the sheet yet. */
+	.chart.pending::after {
+		content: none;
 	}
 
 	/* Forced colours drop the paper fill: keep the sheet's edge. */

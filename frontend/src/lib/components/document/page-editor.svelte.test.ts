@@ -468,6 +468,61 @@ describe('PageEditor', () => {
 		expect(ctx.store.page('p2')!.items.map((it) => it.frame)).toEqual(before);
 	});
 
+	it('offers to delete a page only while it is empty, and Undo brings it back', async () => {
+		const ctx = setup();
+		cleanup = ctx.cleanup;
+		const remove = (number: number) =>
+			ctx.dialog.querySelector<HTMLElement>(`button[aria-label="Delete page ${number}"]`);
+		// Pages 1 and 3 are empty, page 2 has charts on it.
+		expect(remove(1)).not.toBeNull();
+		expect(remove(2)).toBeNull();
+		expect(remove(3)).not.toBeNull();
+
+		// A neighbour deleted: the current page stays the current one, now page 1.
+		click(remove(1)!);
+		await settle();
+		expect(ctx.store.pages.map((page) => page.id)).toEqual(['p2', 'p3']);
+		expect(ctx.store.selectedPageId).toBe('p2');
+		expect(ctx.notify).toHaveBeenLastCalledWith('Page 1 deleted', expect.any(Function));
+		expect(document.activeElement).toBe(currentPaper(ctx.dialog));
+
+		ctx.toast.undo();
+		await settle();
+		expect(ctx.store.pages.map((page) => page.id)).toEqual(['p1', 'p2', 'p3']);
+		expect(ctx.store.selectedPageId).toBe('p1');
+		expect(liveRegion(ctx.dialog).textContent).toBe('Page 1 restored');
+	});
+
+	it('deletes the empty current page on Delete, and shows the page that took its place', async () => {
+		const ctx = setup('p3');
+		cleanup = ctx.cleanup;
+		// Not with a chart on the page: Delete on the paper of page 2 does nothing.
+		const full = setup('p2');
+		key(currentPaper(full.dialog), 'Delete');
+		expect(full.store.pageCount).toBe(3);
+		full.cleanup();
+
+		const event = key(currentPaper(ctx.dialog), 'Delete');
+		await settle();
+		expect(event.defaultPrevented).toBe(true);
+		expect(ctx.store.pages.map((page) => page.id)).toEqual(['p1', 'p2']);
+		// The last page went: the one before it is shown.
+		expect(ctx.store.selectedPageId).toBe('p2');
+		expect(ctx.dialog.open).toBe(true);
+	});
+
+	it('closes when its only page is deleted', async () => {
+		const ctx = setup('p1');
+		cleanup = ctx.cleanup;
+		ctx.store.pages = [{ id: 'p1', orientation: 'portrait', items: [] }];
+		flushSync();
+		click(ctx.dialog.querySelector('button[aria-label="Delete page 1"]')!);
+		await settle();
+		expect(ctx.store.pageCount).toBe(0);
+		expect(ctx.onclose).toHaveBeenCalled();
+		expect(ctx.dialog.open).toBe(false);
+	});
+
 	it('closes itself when the document has no page left to show', () => {
 		const ctx = setup();
 		cleanup = ctx.cleanup;

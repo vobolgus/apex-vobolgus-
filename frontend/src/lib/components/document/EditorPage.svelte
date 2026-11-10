@@ -45,9 +45,15 @@
 		drag: PageDrag | null;
 		/** A chart easing back after a drag that was let go off every page. */
 		returningId: string | null;
+		/** A chart coming to rest after it was let go over a page. */
+		settlingId?: string | null;
+		/** A chart is being carried somewhere in the editor: the others go quiet. */
+		carrying?: boolean;
 		hintId: string;
 		onactivate: (pageId: string) => void;
 		onorientation: (pageId: string, orientation: PageOrientation) => void;
+		/** Delete this page; offered while it is empty. */
+		ondelete?: (pageId: string) => void;
 		onmovestart: (event: PointerEvent, item: DocItem) => void;
 		onresizestart: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
 		onitemkeydown: (event: KeyboardEvent, item: DocItem) => void;
@@ -66,9 +72,12 @@
 		narrow,
 		drag,
 		returningId,
+		settlingId = null,
+		carrying = false,
 		hintId,
 		onactivate,
 		onorientation,
+		ondelete,
 		onmovestart,
 		onresizestart,
 		onitemkeydown,
@@ -82,8 +91,21 @@
 	const count = $derived(page.items.length);
 	const chartWord = $derived(chartCountLabel(count));
 
+	/**
+	 * One of this page's charts is in the hand, or on its way to rest after being let
+	 * go. The page then stacks above every other, the current one included: the chart
+	 * is this page's child wherever on the stage it is drawn, and under another page
+	 * it would be out of sight.
+	 */
+	const lifted = $derived(
+		page.items.some(
+			(item) => item.id === drag?.itemId || item.id === settlingId || item.id === returningId
+		)
+	);
+
 	function itemState(item: DocItem) {
 		if (drag?.itemId === item.id) return drag.kind;
+		if (settlingId === item.id) return 'settling';
 		return returningId === item.id ? 'returning' : 'idle';
 	}
 
@@ -106,6 +128,7 @@
 	data-role={role}
 	data-page-id={page.id}
 	class:is-target={drag?.target && !current}
+	class:is-lifted={lifted}
 	class:is-narrow={narrow}
 	style:left="{box.left}px"
 	style:top="{box.top - labelHeight}px"
@@ -114,11 +137,28 @@
 >
 	<div class="label">
 		<span class="name">Page {number} <span class="format">· A4</span></span>
-		<EditorOrientation
-			label="Page {number} orientation"
-			value={page.orientation}
-			onselect={(orientation) => onorientation(page.id, orientation)}
-		/>
+		<div class="actions">
+			<!-- Only an empty page: one with charts is deleted from the pages panel, where they show. -->
+			{#if count === 0 && ondelete}
+				<button
+					class="delete"
+					type="button"
+					aria-label="Delete page {number}"
+					aria-keyshortcuts={current ? 'Delete' : undefined}
+					title="Delete this empty page"
+					onclick={() => ondelete(page.id)}
+				>
+					<svg viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5M6.75 7v3.5M9.25 7v3.5" />
+					</svg>
+				</button>
+			{/if}
+			<EditorOrientation
+				label="Page {number} orientation"
+				value={page.orientation}
+				onselect={(orientation) => onorientation(page.id, orientation)}
+			/>
+		</div>
 	</div>
 	<!-- The current page takes the focus when nothing on it is selected; a neighbour is a button. -->
 	<div
@@ -149,6 +189,7 @@
 				frame={dragged ?? item.frame}
 				interactive={current}
 				mode={itemState(item)}
+				quiet={carrying && itemState(item) === 'idle'}
 				{hintId}
 				{onmovestart}
 				{onresizestart}
@@ -168,14 +209,15 @@
 			</div>
 		{/if}
 
-		{#if drag && (drag.guides.length > 0 || (drag.target && drag.kind !== 'detached'))}
+		<!-- A resize shows the margins it is held to; a chart being carried, its snap lines only with Shift held. -->
+		{#if drag && (drag.guides.length > 0 || drag.kind === 'resizing')}
 			<svg
 				class="guides"
 				viewBox="0 0 {size.w} {size.h}"
 				preserveAspectRatio="none"
 				aria-hidden="true"
 			>
-				{#if drag.target}
+				{#if drag.kind === 'resizing'}
 					<rect
 						class="margin"
 						x={margin.x}
@@ -221,6 +263,11 @@
 		z-index: 2;
 	}
 
+	/* And a page a chart is being dragged from is above them all, the current one too. */
+	.slot.is-lifted {
+		z-index: 3;
+	}
+
 	/* The page carousel: set by the editor once the stage has its size. */
 	:global(.is-animated) .slot {
 		transition:
@@ -232,8 +279,11 @@
 	:global(.is-animated) .paper {
 		transition:
 			height 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-			opacity 160ms ease,
 			box-shadow 160ms ease;
+	}
+
+	:global(.is-animated) .paper::after {
+		transition: opacity 160ms ease;
 	}
 
 	@keyframes slot-in {
@@ -250,6 +300,58 @@
 		box-sizing: border-box;
 		height: var(--label-h);
 		padding-bottom: 8px;
+	}
+
+	.actions {
+		display: flex;
+		flex: none;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.delete {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--r-ctl);
+		background: transparent;
+		color: var(--fg-3);
+		cursor: pointer;
+		transition:
+			background var(--ease-ui),
+			color var(--ease-ui);
+	}
+
+	@media (hover: hover) {
+		.delete:hover {
+			background: var(--fill-hover);
+			color: var(--fg-1);
+		}
+	}
+
+	.delete:active {
+		background: var(--fill-press);
+		color: var(--fg-1);
+	}
+
+	.delete:focus-visible {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		color: var(--fg-1);
+		box-shadow: var(--ring);
+	}
+
+	.delete svg {
+		width: 16px;
+		height: 16px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 
 	.name {
@@ -290,20 +392,54 @@
 		box-shadow: var(--ring), var(--paper-shadow-lg);
 	}
 
+	/*
+	 * A neighbour is dimmed by a veil of the editor's own colour laid over the paper,
+	 * not by making the paper translucent: a chart being dragged off the page is the
+	 * paper's child, and translucency would dim it along with the page. The veil lies
+	 * above the charts at rest (z-index 1) and under the one in the hand (3), which
+	 * so comes up at full strength the moment it is picked up. The shadow, which the
+	 * veil does not reach, is dimmed by the same amount in its own colours.
+	 */
+	.paper::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		z-index: 2;
+		border-radius: inherit;
+		background: var(--panel);
+		opacity: 0;
+		pointer-events: none;
+	}
+
 	.slot:not([data-role='current']) .paper {
-		opacity: 0.42;
+		box-shadow:
+			0 1px 2px rgba(0, 0, 0, 0.21),
+			0 12px 40px rgba(0, 0, 0, 0.19);
 		cursor: pointer;
+	}
+
+	.slot:not([data-role='current']) .paper::after {
+		opacity: 0.58;
 	}
 
 	@media (hover: hover) {
 		.slot:not([data-role='current']) .paper:hover {
-			opacity: 0.62;
+			box-shadow:
+				0 1px 2px rgba(0, 0, 0, 0.31),
+				0 12px 40px rgba(0, 0, 0, 0.28);
+		}
+
+		.slot:not([data-role='current']) .paper:hover::after {
+			opacity: 0.38;
 		}
 	}
 
 	/* The drop target: full strength and ringed, so it is plain where the chart goes. */
+	.slot.is-target .paper::after {
+		opacity: 0;
+	}
+
 	.slot.is-target .paper {
-		opacity: 1;
 		box-shadow:
 			0 0 0 2px var(--panel),
 			0 0 0 4px var(--fg-1),

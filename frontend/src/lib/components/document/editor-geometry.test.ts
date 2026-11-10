@@ -4,7 +4,8 @@ import {
 	anchorOf,
 	containsPoint,
 	cornerOf,
-	dropTarget,
+	distanceToBox,
+	landingPage,
 	EDITOR_LAYOUT,
 	editorLayout,
 	frameUnderPointer,
@@ -150,37 +151,49 @@ describe('screen px and page mm', () => {
 	});
 });
 
-describe('dropTarget', () => {
+describe('landingPage', () => {
 	const pages = [
 		{ id: 'prev', box: { left: 0, top: 0, width: 200, height: 280 } },
 		{ id: 'current', box: { left: 240, top: 0, width: 200, height: 280 } },
 		{ id: 'next', box: { left: 480, top: 0, width: 280, height: 200 } }
 	];
 
-	it('is the page under the pointer', () => {
-		expect(dropTarget({ x: 300, y: 100 }, pages, 'current', 24)).toBe('current');
-		expect(dropTarget({ x: 50, y: 100 }, pages, 'current', 24)).toBe('prev');
-		expect(dropTarget({ x: 600, y: 150 }, pages, 'current', 24)).toBe('next');
+	it("is the page the chart's centre is over", () => {
+		expect(landingPage({ x: 300, y: 100 }, pages, 40)).toBe('current');
+		expect(landingPage({ x: 50, y: 100 }, pages, 40)).toBe('prev');
+		expect(landingPage({ x: 600, y: 150 }, pages, 40)).toBe('next');
 	});
 
-	it('keeps the current page while the pointer strays just past its edge', () => {
-		expect(dropTarget({ x: 300, y: 300 }, pages, 'current', 24)).toBe('current');
-		expect(dropTarget({ x: 230, y: 100 }, pages, 'current', 24)).toBe('current');
+	it('catches a chart let go a little short of a page, or a little past its edge', () => {
+		// Below the current page, and left of the first one.
+		expect(landingPage({ x: 300, y: 310 }, pages, 40)).toBe('current');
+		expect(landingPage({ x: -30, y: 100 }, pages, 40)).toBe('prev');
+		// Past a corner the distance is the diagonal one.
+		expect(landingPage({ x: -30, y: 305 }, pages, 40)).toBe('prev');
+		expect(landingPage({ x: -30, y: 310 }, pages, 40)).toBeNull();
 	});
 
-	it('prefers a neighbour under the pointer to the slack around the current page', () => {
-		expect(dropTarget({ x: 460, y: 100 }, pages, 'current', 24)).toBe('current');
-		expect(dropTarget({ x: 482, y: 100 }, pages, 'current', 24)).toBe('next');
+	it('gives the gap between two pages to the nearer one', () => {
+		expect(landingPage({ x: 215, y: 100 }, pages, 40)).toBe('prev');
+		expect(landingPage({ x: 225, y: 100 }, pages, 40)).toBe('current');
 	});
 
-	it('is null off every page, even below a neighbour', () => {
-		expect(dropTarget({ x: 300, y: 400 }, pages, 'current', 24)).toBeNull();
-		expect(dropTarget({ x: 600, y: 230 }, pages, 'current', 24)).toBeNull();
-		expect(dropTarget({ x: -40, y: 100 }, pages, 'current', 24)).toBeNull();
+	it('is null further out than the catch zone, and with no pages', () => {
+		expect(landingPage({ x: 300, y: 330 }, pages, 40)).toBeNull();
+		expect(landingPage({ x: 600, y: 250 }, pages, 40)).toBeNull();
+		expect(landingPage({ x: 0, y: 0 }, [], 40)).toBeNull();
 	});
+});
 
-	it('is null with no pages', () => {
-		expect(dropTarget({ x: 0, y: 0 }, [], 'current', 24)).toBeNull();
+describe('distanceToBox', () => {
+	const box = { left: 10, top: 20, width: 100, height: 50 };
+
+	it('is 0 inside and on the edge, and the straight distance outside', () => {
+		expect(distanceToBox(box, { x: 50, y: 40 })).toBe(0);
+		expect(distanceToBox(box, { x: 110, y: 70 })).toBe(0);
+		expect(distanceToBox(box, { x: 130, y: 40 })).toBe(20);
+		expect(distanceToBox(box, { x: 50, y: 0 })).toBe(20);
+		expect(distanceToBox(box, { x: 113, y: 74 })).toBe(5);
 	});
 });
 

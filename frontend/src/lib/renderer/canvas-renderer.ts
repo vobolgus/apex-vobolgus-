@@ -30,6 +30,7 @@ import {
 
 import type { Quaternion } from '../math/quaternion';
 import type { ConstellationData } from '../stores.svelte';
+import { prefersReducedMotion } from '../ui/motion';
 import type {
 	MorphInterpolator,
 	MorphInterpolatorFactory,
@@ -43,6 +44,56 @@ import type {
 } from './types';
 
 const LINE_ANIM_DURATION_MS = 720;
+/** Stars that arrive (the first load, then the faint ones of the full catalog) fade in over this. */
+export const STAR_FADE_MS = 320;
+
+/**
+ * Which stars are fading in, and how far along. The catalog arrives in two stages,
+ * brightest first, and the second is the first with the fainter stars appended, so
+ * "the new ones" are those from `from` on.
+ */
+export interface StarFade {
+	/** How many stars the last frame had. */
+	count: number;
+	/** Stars from this index on are the ones fading in. */
+	from: number;
+	startedAt: number;
+	/** 0..1; 1 when every star is fully there. */
+	progress: number;
+}
+
+export function makeStarFade(): StarFade {
+	return { count: 0, from: 0, startedAt: 0, progress: 1 };
+}
+
+/**
+ * Advance `fade` for a frame at `nowMs` drawing `count` stars. More stars than
+ * the last frame had start a fade of the new ones; with `reduceMotion` they are
+ * simply there.
+ */
+export function advanceStarFade(
+	fade: StarFade,
+	count: number,
+	nowMs: number,
+	reduceMotion: boolean
+): void {
+	if (count !== fade.count) {
+		if (count > fade.count && !reduceMotion) {
+			fade.from = fade.count;
+			fade.startedAt = nowMs;
+			fade.progress = 0;
+		} else {
+			// Fewer stars (a reload that failed half way), or no animation wanted.
+			fade.progress = 1;
+		}
+		fade.count = count;
+	}
+	if (fade.progress < 1) {
+		const t = clamp((nowMs - fade.startedAt) / STAR_FADE_MS, 0, 1);
+		// Ease out: most of the light comes up early, the tail is gentle.
+		fade.progress = 1 - (1 - t) * (1 - t);
+	}
+}
 
 interface LineAnimState {
 	target: boolean;
@@ -377,11 +428,17 @@ export class CanvasRenderer {
 	private readonly lineAnims: Record<ReferenceLineKey, LineAnimState> = Object.fromEntries(
 		REFERENCE_LINE_LAYERS.map((layer) => [layer.key, makeLineAnim()])
 	) as Record<ReferenceLineKey, LineAnimState>;
+	private readonly starFade = makeStarFade();
 
 	constructor(private readonly canvas: HTMLCanvasElement) {}
 
 	hasActiveLineAnimations(): boolean {
 		return REFERENCE_LINE_LAYERS.some((layer) => this.lineAnims[layer.key].animating);
+	}
+
+	/** Something the renderer animates by itself is still moving: the page keeps the frames coming. */
+	hasActiveAnimations(): boolean {
+		return this.hasActiveLineAnimations() || this.starFade.progress < 1;
 	}
 
 	invalidateStarsCache() {
@@ -466,6 +523,7 @@ export class CanvasRenderer {
 			updateLineAnim(anim, state.referenceLines[layer.key], nowMs);
 			if (anim.progress > 0) hasLinesToDraw = true;
 		}
+		advanceStarFade(this.starFade, state.starVectors.length, nowMs, prefersReducedMotion());
 
 		if (!state.starVectors.length && !hasLinesToDraw) return;
 
@@ -553,6 +611,8 @@ export class CanvasRenderer {
 			state.stereoFovDeg,
 			state.pinholeFovDeg,
 			visualBlend,
+			// A fade in progress redraws the layer each frame; at rest this is a constant.
+			this.starFade.progress,
 			o.x,
 			o.y,
 			o.z,
@@ -575,14 +635,17 @@ export class CanvasRenderer {
 		const cx = width / 2;
 		const cy = height / 2;
 		ctx.fillStyle = STAR_COLOR;
-		for (const star of state.starVectors) {
-			const sample = sampleStarMorphFrame(star, visualBlend, params, (x, y, z) =>
+		const { from: fadeFrom, progress: fadeProgress } = this.starFade;
+		const stars = state.starVectors;
+		for (let index = 0; index < stars.length; index += 1) {
+			const sample = sampleStarMorphFrame(stars[index], visualBlend, params, (x, y, z) =>
 				this.rotateVector(x, y, z, state.orientation)
 			);
 			if (sample.visibility <= VISIBILITY_CULL_THRESHOLD) continue;
 			const pointRadius = lerp(sample.stereoRadius, sample.pinholeRadius, visualBlend);
 			const pointAlpha = lerp(sample.stereoAlpha, sample.pinholeAlpha, visualBlend);
-			ctx.globalAlpha = pointAlpha * sample.visibility;
+			const arriving = index >= fadeFrom ? fadeProgress : 1;
+			ctx.globalAlpha = pointAlpha * sample.visibility * arriving;
 			ctx.beginPath();
 			ctx.arc(cx + sample.px, cy + sample.py, pointRadius, 0, Math.PI * 2);
 			ctx.fill();

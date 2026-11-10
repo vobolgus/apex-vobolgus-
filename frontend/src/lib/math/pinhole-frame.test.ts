@@ -269,7 +269,7 @@ describe('pinholeDragRequest', () => {
 		expect(r).toMatchObject({ x: false, y: true });
 	});
 
-	it('snaps square with Shift, taking the axis that moved further', () => {
+	it('snaps square with Shift, a corner taking the side the pointer is further out on', () => {
 		const corner = beginPinholeDrag(
 			'se',
 			cx + frame.width / 2,
@@ -279,20 +279,54 @@ describe('pinholeDragRequest', () => {
 			frame,
 			k
 		);
-		const r = pinholeDragRequest(
+		// The frame is wider than it is tall: at the grab the square is its width.
+		expect(frame.width).toBeGreaterThan(frame.height + 60);
+		const down = pinholeDragRequest(
 			corner,
 			cx + frame.width / 2 - 2,
 			cy + frame.height / 2 + 30,
 			true
 		);
-		expect(r.square).toBe(true);
-		expect(r.widthFrac).toBeCloseTo(r.heightFrac, 12);
-		expect(r.heightFrac * k).toBeCloseTo(frame.height + 60, 9);
+		expect(down.square).toBe(true);
+		expect(down.widthFrac).toBeCloseTo(down.heightFrac, 12);
+		expect(down.widthFrac * k).toBeCloseTo(frame.width - 4, 9);
+		// Far enough down, the height is the larger side and takes over.
+		const far = pinholeDragRequest(
+			corner,
+			cx + frame.width / 2 - 2,
+			cy + frame.width / 2 + 25,
+			true
+		);
+		expect(far.widthFrac * k).toBeCloseTo(frame.width + 50, 9);
 
 		const edge = beginPinholeDrag('e', cx + frame.width / 2, cy, cx, cy, frame, k);
 		const e = pinholeDragRequest(edge, cx + frame.width / 2 - 10, cy, true);
 		expect(e.widthFrac * k).toBeCloseTo(frame.width - 20, 9);
 		expect(e.heightFrac).toBeCloseTo(e.widthFrac, 12);
+		// An edge squares on its own axis, from the first pixel: no jump to the other side's size.
+		const still = pinholeDragRequest(edge, cx + frame.width / 2, cy, true);
+		expect(still.widthFrac * k).toBeCloseTo(frame.width, 9);
+	});
+
+	it('keeps a Shift corner drag steady where one axis grows as the other shrinks', () => {
+		// From a square frame, the pointer goes out to the right and up by about as much:
+		// the frame used to flip between a large square and a small one along that diagonal.
+		const side = 200;
+		const square = { x: cx - side / 2, y: cy - side / 2, width: side, height: side };
+		const corner = beginPinholeDrag('se', cx + side / 2, cy + side / 2, cx, cy, square, k);
+		const at = (dx: number, dy: number) =>
+			pinholeDragRequest(corner, cx + side / 2 + dx, cy + side / 2 + dy, true).widthFrac * k;
+
+		// Either side of the diagonal the square is the one the pointer's x asks for.
+		expect(at(40, -39)).toBeCloseTo(side + 80, 9);
+		expect(at(40, -41)).toBeCloseTo(side + 80, 9);
+		// Along any path the side moves no faster than the pointer does (twice its travel).
+		let last = at(60, -20);
+		for (let step = 1; step <= 80; step += 1) {
+			const next = at(60 - step, -20 - step);
+			expect(Math.abs(next - last)).toBeLessThanOrEqual(2 + 1e-9);
+			last = next;
+		}
 	});
 });
 
