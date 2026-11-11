@@ -47,12 +47,12 @@ import type {
 
 export const TABLE_SOURCES: readonly TableSource[] = ['messier', 'stars'];
 export const TABLE_LOOKS: readonly TableLook[] = ['names', 'details'];
-export const TABLE_ROWS_DEFAULT = 5;
+const TABLE_ROWS_DEFAULT = 5;
 export const MIN_TABLE_ROWS = 1;
 /** With its header a table is a line a cell: the backend takes 400 lines a text. */
 export const MAX_TABLE_ROWS = 40;
 /** How many names stand in a row of the `names` look, as on a SkyGen worksheet. */
-export const NAMES_PER_ROW = 3;
+const NAMES_PER_ROW = 3;
 
 export const DEFAULT_TABLE: TableSpec = {
 	source: 'messier',

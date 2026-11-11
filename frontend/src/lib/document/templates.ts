@@ -86,10 +86,10 @@ export const TEXT_ROLES: readonly TextRole[] = [
 ];
 
 /** A text or a table a template puts on a page: a block yet to get its id, with its part. */
-export type LaidText = NewBlock<TypesetBlock> & { role: TextRole };
+type LaidText = NewBlock<TypesetBlock> & { role: TextRole };
 
 /** A chart on a laid page: one of the page's own, by id, or one the template made. */
-export interface LaidChart {
+interface LaidChart {
 	/** The chart's id; a made one has a name for the text beside it to point at (`chartId`). */
 	id: string;
 	frame: Rect;

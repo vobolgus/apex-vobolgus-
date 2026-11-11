@@ -8,7 +8,7 @@
  * and `ctrl` are the modifiers, anything else is printed as is.
  */
 
-export interface Shortcut {
+interface Shortcut {
 	action: string;
 	keys: readonly string[];
 }
@@ -81,7 +81,7 @@ export function isModShortcut(event: KeyboardEvent, code: string, apple: boolean
 }
 
 /** What a key does on the generator page itself; the keys it leaves alone turn the sky. */
-export type PageCommand = 'undo' | 'help' | 'exportMenu' | 'savePng' | 'switchProjection';
+type PageCommand = 'undo' | 'help' | 'exportMenu' | 'savePng' | 'switchProjection';
 
 /** The page's own keys, in the order they are tried: the first that matches is the one. */
 const PAGE_KEYS: readonly {

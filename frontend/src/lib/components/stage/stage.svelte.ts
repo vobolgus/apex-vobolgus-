@@ -22,7 +22,7 @@ import { view } from '$lib/state/view.svelte';
 import { RenderLoop } from './render-loop';
 
 /** What the stage asks of the pinhole frame's handles (`PinholeFrameOverlay`). */
-export interface FrameOverlay {
+interface FrameOverlay {
 	/** Apply a resize drag's latest pointer position; true when it changed the view. */
 	flush(): boolean;
 	/** Light the handles up when the pointer comes near the frame. */

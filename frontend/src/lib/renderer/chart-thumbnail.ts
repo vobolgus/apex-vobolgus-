@@ -22,7 +22,7 @@ import {
 /** Long side of the thumbnail, px: sharp in the pages panel, small in storage. */
 export const CHART_THUMB_PX = 320;
 
-export interface ThumbnailCrop {
+interface ThumbnailCrop {
 	/** The chart's box on the canvas, canvas px. */
 	sx: number;
 	sy: number;
@@ -85,7 +85,7 @@ const THUMB_STAR_PER_MAG = 0.16;
  * The faintest star a thumbnail chart `sidePx` across draws: a few hundred dots read
  * as the sky's figures, the full catalogue as a grey wash.
  */
-export function thumbnailMagnitudeLimit(sidePx: number): number {
+function thumbnailMagnitudeLimit(sidePx: number): number {
 	return sidePx < 60 ? 3.2 : sidePx < 120 ? 4 : 4.8;
 }
 

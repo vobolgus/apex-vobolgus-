@@ -12,7 +12,7 @@ import type { Dropdown } from '$lib/ui/dropdown.svelte';
 const LAYERS_PANEL_STORAGE_KEY = 'skycharts.layers.panel';
 
 /** What the dock asks of the panel (`LayersPanel`'s exports). */
-export interface LayersPanelHandle {
+interface LayersPanelHandle {
 	focusFirst(): void;
 	hasFocus(): boolean;
 }

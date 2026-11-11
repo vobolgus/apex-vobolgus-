@@ -73,7 +73,7 @@ export const TEMPLATE_WORDS: Record<Language, TemplateWords> = {
 // === A table's words ===
 
 /** The words a table sets on the page, in one language. */
-export interface TableWords {
+interface TableWords {
 	titles: Record<TableSource, string>;
 	headers: Record<TableSource, string[]>;
 	noChart: string;

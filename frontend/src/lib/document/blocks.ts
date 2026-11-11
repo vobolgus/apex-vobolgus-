@@ -17,7 +17,7 @@ export function isChart(block: DocBlock): block is ChartBlock {
 	return block.kind === 'chart';
 }
 
-export function isTypeset(block: DocBlock): block is TypesetBlock {
+function isTypeset(block: DocBlock): block is TypesetBlock {
 	return block.kind !== 'chart';
 }
 

@@ -30,7 +30,7 @@ export const J2000_OBLIQUITY_RAD = (J2000_OBLIQUITY_DEG * Math.PI) / 180;
  *
  * Indexed as `[row][column]`: row = equatorial axis (x, y, z), column = galactic axis (l-cos, l-sin).
  */
-export const GALACTIC_TO_EQUATORIAL_MATRIX = [
+const GALACTIC_TO_EQUATORIAL_MATRIX = [
 	[-0.05487556, +0.494109428],
 	[-0.87343709, -0.44482963],
 	[-0.483835016, +0.746982245]

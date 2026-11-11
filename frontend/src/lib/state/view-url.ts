@@ -58,7 +58,7 @@ const LAYER_KEYS = Object.keys(LAYER_NAMES) as (keyof ChartLayers)[];
 const PROJECTION_NAMES = { stereographic: 'stereo', pinhole: 'pinhole' } as const;
 
 /** What a fragment says: the view fields it names, as written, and every layer. */
-export interface SharedView {
+interface SharedView {
 	projection?: ProjectionMode;
 	orientation?: Quaternion;
 	/** Of the projection the chart ends up in. */
@@ -188,7 +188,7 @@ export function applySharedView(view: ChartView, shared: SharedView): ChartView 
 }
 
 /** The address bar, as far as the view's fragment goes. */
-export interface Address {
+interface Address {
 	/** The fragment, with its `#`. */
 	readonly hash: string;
 	/**

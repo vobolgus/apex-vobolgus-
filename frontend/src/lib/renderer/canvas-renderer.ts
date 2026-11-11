@@ -130,7 +130,7 @@ type _AllReferenceLinesCovered = AssertNever<
 
 const FLUBBER_MAX_SEGMENT_LENGTH = 5;
 
-export function viewportKeyEquals(a: ViewportCacheKey, b: ViewportCacheKey): boolean {
+function viewportKeyEquals(a: ViewportCacheKey, b: ViewportCacheKey): boolean {
 	return (
 		a.cx === b.cx &&
 		a.cy === b.cy &&

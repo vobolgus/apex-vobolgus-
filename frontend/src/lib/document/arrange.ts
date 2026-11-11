@@ -83,7 +83,7 @@ export interface ArrangeItem {
 }
 
 /** A chart Add to PDF brings. */
-export interface ArrangeChart {
+interface ArrangeChart {
 	kind: ChartKind;
 	aspect: number;
 }
@@ -122,7 +122,7 @@ export function typeKey(item: ArrangeChart): string {
 // === Envelopes ===
 
 /** Affine pieces `[slope, const]`: a block dimension at uniform share s is the max of slope·s + const. */
-export type Envelope = [number, number][];
+type Envelope = [number, number][];
 
 /** Keeps the pieces that are the maximum somewhere in s ∈ [0, 1]. Sorts `pieces` in place. */
 function prune(pieces: Envelope): Envelope {
@@ -174,7 +174,7 @@ export function envelopeOf(tree: LayoutTree, base: readonly Size[]): { W: Envelo
 
 // === Trees ===
 
-export interface EnumeratedTree {
+interface EnumeratedTree {
 	tree: LayoutTree;
 	W: Envelope;
 	H: Envelope;
@@ -254,7 +254,7 @@ function mapLeaves(tree: LayoutTree, f: (i: number) => number): LayoutTree {
 }
 
 /** Kids of a node's own direction merged into it, single-kid nodes dropped. */
-export function normalizeTree(tree: LayoutTree): LayoutTree {
+function normalizeTree(tree: LayoutTree): LayoutTree {
 	if (typeof tree === 'number') return tree;
 	const kids: LayoutTree[] = [];
 	for (const k of tree.kids.map(normalizeTree)) {
@@ -490,7 +490,7 @@ export function raggedPairs(
 }
 
 /** The area a chart covers: a disc's, or its frame's. */
-export function chartArea(frame: Rect, kind: ChartKind): number {
+function chartArea(frame: Rect, kind: ChartKind): number {
 	return kind === 'stereo' ? (Math.PI * frame.w * frame.w) / 4 : frame.w * frame.h;
 }
 
@@ -521,7 +521,7 @@ function overlapArea(a: Rect, ka: ChartKind, b: Rect, kb: ChartKind): number {
  * Mirror symmetry about the box's vertical (`lr`) or horizontal (`tb`) centre line, 0..1: the
  * exact same-kind overlap of the mirrored charts with the charts, over their area.
  */
-export function symmetry(
+function symmetry(
 	frames: readonly Rect[],
 	items: readonly { kind: ChartKind }[],
 	box: Rect,
@@ -543,7 +543,7 @@ export function symmetry(
 }
 
 /** 1 when the charts' area centroid is on the optical centre (2 % above the middle), less off it. */
-export function balance(
+function balance(
 	frames: readonly Rect[],
 	items: readonly { kind: ChartKind }[],
 	box: Rect
@@ -563,7 +563,7 @@ export function balance(
 }
 
 /** Where one chart lies from another: left of, right of, above, below (0.5 mm of slack). */
-export type Relation = 'L' | 'R' | 'A' | 'B';
+type Relation = 'L' | 'R' | 'A' | 'B';
 
 function relations(a: Rect, b: Rect): Relation[] {
 	const r: Relation[] = [];
@@ -578,7 +578,7 @@ function relations(a: Rect, b: Rect): Relation[] {
 const TURN_RELATION: Record<Relation, Relation> = { L: 'A', R: 'B', A: 'L', B: 'R' };
 
 /** Pairs out of order. */
-export function inversions(seq: readonly number[]): number {
+function inversions(seq: readonly number[]): number {
 	let inv = 0;
 	for (let i = 0; i < seq.length; i++) {
 		for (let j = i + 1; j < seq.length; j++) if (seq[i] > seq[j]) inv++;
@@ -587,7 +587,7 @@ export function inversions(seq: readonly number[]): number {
 }
 
 /** The old layout `stability` compares against. */
-export interface StabilityRef {
+interface StabilityRef {
 	/** Each old chart's centre in box fractions; null for a chart with no old frame. */
 	pts: ([number, number] | null)[];
 	/** Each pair of old charts and where the first lies from the second. */
@@ -595,7 +595,7 @@ export interface StabilityRef {
 }
 
 /** The reference for `stability` from the old frames; on a turn, centres and relations transposed. */
-export function stabilityRef(
+function stabilityRef(
 	old: readonly (Rect | null)[] | null,
 	oldBox: Rect,
 	turned: boolean
@@ -628,7 +628,7 @@ function centreFrac(f: Rect, box: Rect): [number, number] {
  * 1 with no old layout. Else half the share of old pairwise relations kept, plus half of
  * 1 − the mean centre displacement over half the box (capped at 1).
  */
-export function stability(frames: readonly Rect[], ref: StabilityRef | null, box: Rect): number {
+function stability(frames: readonly Rect[], ref: StabilityRef | null, box: Rect): number {
 	if (!ref) return 1;
 	let kept = 0;
 	for (const [i, j, was] of ref.rel) {
@@ -663,7 +663,7 @@ function permutations(a: readonly number[]): number[][] {
  * kind at the very same aspect, not a whole type: each frame was made for its chart's aspect.
  * `frames` are by item, `seq` the item in each slot; returns the new `seq`.
  */
-export function assignSlots(
+function assignSlots(
 	seq: readonly number[],
 	frames: readonly Rect[],
 	items: readonly ArrangeChart[],
@@ -764,9 +764,9 @@ function groupedOrder(items: readonly ArrangeChart[]): number[] {
 
 // === Arrange ===
 
-export type ArrangeMode = 'scratch' | 'add' | 'turn';
+type ArrangeMode = 'scratch' | 'add' | 'turn';
 
-export interface ArrangeOptions {
+interface ArrangeOptions {
 	/**
 	 * `scratch` (the default) lays the charts out afresh. `add`: the last item is new and the
 	 * others' frames are the old layout. `turn`: the frames are the old layout on a page of
@@ -781,7 +781,7 @@ export interface ArrangeOptions {
 }
 
 /** The looks of a layout, each 0..1 (`ARRANGE.weights`). */
-export interface LayoutMetrics {
+interface LayoutMetrics {
 	lr: number;
 	tb: number;
 	stab: number;
@@ -793,7 +793,7 @@ export interface LayoutMetrics {
 }
 
 /** One sized tree. `frames` and `t` are by item index; `seq` is the item in each slot. */
-export interface LayoutCandidate {
+interface LayoutCandidate {
 	frames: Rect[];
 	seq: number[];
 	tree: LayoutTree;
@@ -1446,7 +1446,7 @@ export function planAdd(
 export type TurnHow = 'unchanged' | 'empty' | 'restored' | 'transposed' | 're-laid' | 'fallback';
 
 /** A page after a turn (`turnLayout`). */
-export interface TurnPlan {
+interface TurnPlan {
 	/** The page's charts in their new reading order. */
 	items: PlacedChart[];
 	layout?: PageLayout;

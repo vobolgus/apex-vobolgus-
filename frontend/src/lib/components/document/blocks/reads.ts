@@ -13,14 +13,14 @@ import { boundItem, hasFields } from '$lib/document/text';
 import type { DocPage, TypesetBlock } from '$lib/document/types';
 
 /** A chart on another page, to read: its id, and what to call it. */
-export interface ChartChoice {
+interface ChartChoice {
 	id: string;
 	/** "Page 2 · chart 1". */
 	label: string;
 }
 
 /** What a block reads, told apart as its Reads row tells it. */
-export interface Reading {
+interface Reading {
 	/** 0-based position on its page of the chart it reads, null when that is not on its page. */
 	at: number | null;
 	/** It was told a chart of its page; else it reads that one for being the nearest. */

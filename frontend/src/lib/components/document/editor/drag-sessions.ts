@@ -67,7 +67,7 @@ export interface Press {
 }
 
 /** What the editor does once a drag has been let go and the document written. */
-export interface DragOutcome {
+interface DragOutcome {
 	/** How the block comes to rest on screen: played into its new place, or eased back to its old. */
 	rest?: 'settle' | 'return';
 	/** What is read out. */

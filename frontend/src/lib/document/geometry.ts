@@ -12,15 +12,15 @@
 
 import type { PageOrientation, Rect } from './types';
 
-export const A4_WIDTH_MM = 210;
-export const A4_HEIGHT_MM = 297;
-export const PAGE_MARGIN_MM = 12;
+const A4_WIDTH_MM = 210;
+const A4_HEIGHT_MM = 297;
+const PAGE_MARGIN_MM = 12;
 export const GUTTER_MM = 6;
 /** The grid splits each axis into 1..MAX_SPLIT cells. */
-export const MAX_SPLIT = 4;
+const MAX_SPLIT = 4;
 export const MIN_CHART_SIDE_MM = 40;
 /** Snap reach in screen px; `snapThresholdMm` converts it at the current zoom. */
-export const SNAP_THRESHOLD_PX = 8;
+const SNAP_THRESHOLD_PX = 8;
 /**
  * A full-width portrait chart (186 mm) is the preview disc (1104 px), so stars and
  * lines are drawn at preview px × this whatever the chart's size on the page.
@@ -30,7 +30,7 @@ export const PRINT_MM_PER_PREVIEW_PX = 186 / 1104;
 /** Below this, two millimetre values are the same line. */
 const EPS = 1e-6;
 
-export type Axis = 'x' | 'y';
+type Axis = 'x' | 'y';
 export type ResizeAnchor = 'nw' | 'ne' | 'sw' | 'se';
 
 /** A line to draw, mm: `axis: 'x'` is the vertical line x = `at` from y = `from` to `to`. */
@@ -41,7 +41,7 @@ export interface SnapGuide {
 	to: number;
 }
 
-export interface SnapResult {
+interface SnapResult {
 	frame: Rect;
 	guides: SnapGuide[];
 }

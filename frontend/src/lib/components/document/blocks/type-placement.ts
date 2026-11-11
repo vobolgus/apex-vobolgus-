@@ -22,7 +22,7 @@ const TOOLS_GAP_PX = 10;
 /** Below this far down the page, the toolbar goes above the text. */
 const LOW_ON_PAGE = 0.72;
 
-export interface TypePlacement {
+interface TypePlacement {
 	/** Where it is drawn, mm on its page: its frame as tall as its lines. */
 	box: Rect;
 	/** The toolbar goes above it. */

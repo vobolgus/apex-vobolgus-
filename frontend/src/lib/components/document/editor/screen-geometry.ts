@@ -36,7 +36,7 @@ export interface PageBox {
 	box: Box;
 }
 
-export interface EditorLayoutOptions {
+interface EditorLayoutOptions {
 	/** Height of the label row above each page, px. */
 	labelHeight: number;
 	/** Between neighbouring pages when all three are in view, px. */

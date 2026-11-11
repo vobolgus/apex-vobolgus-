@@ -16,7 +16,7 @@ export const STAR_FADE_MS = 320;
  * brightest first, and the second is the first with the fainter stars appended, so
  * "the new ones" are those from `from` on.
  */
-export interface StarFade {
+interface StarFade {
 	/** How many stars the last frame had. */
 	count: number;
 	/** Stars from this index on are the ones fading in. */

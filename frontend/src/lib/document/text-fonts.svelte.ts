@@ -66,7 +66,7 @@ function declare() {
 }
 
 /** Fetch the face `style` is set in, once; resolves when it can be measured and drawn. */
-export function loadTextFont(style: Pick<TextStyle, 'font' | 'bold' | 'italic'>): Promise<void> {
+function loadTextFont(style: Pick<TextStyle, 'font' | 'bold' | 'italic'>): Promise<void> {
 	declare();
 	const entry = faces.get(faceKey(style));
 	if (!entry) return Promise.resolve();

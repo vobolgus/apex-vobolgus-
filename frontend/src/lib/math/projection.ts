@@ -40,7 +40,7 @@ export const PROJECTION_MODES = ['stereographic', 'pinhole'] as const;
 export type ProjectionMode = (typeof PROJECTION_MODES)[number];
 
 /** The view-space axes as sky directions (equatorial frame). */
-export interface ViewBasis {
+interface ViewBasis {
 	right: Vec3Tuple;
 	up: Vec3Tuple;
 	forward: Vec3Tuple;
@@ -77,7 +77,7 @@ export interface ProjectionFrameParams {
 	stereoScale: number;
 }
 
-export interface StarMorphSample {
+interface StarMorphSample {
 	px: number;
 	py: number;
 	visibility: number;
@@ -191,7 +191,7 @@ export function sampleStarMorphFrame(
 // To keep stars fixed when resizing the frame width, we must hold
 // viewportWidth / tan(horizontalFov/2) constant. Height can change freely (only
 // reveals/hides stars above and below).
-export interface PinholeWidthResize {
+interface PinholeWidthResize {
 	pinholeFovDeg: number;
 	pinholeAspectRatio: number;
 }

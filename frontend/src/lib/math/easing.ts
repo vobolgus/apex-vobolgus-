@@ -1,4 +1,4 @@
-export const EPSILON = 1e-7;
+const EPSILON = 1e-7;
 
 export function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));

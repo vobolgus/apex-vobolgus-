@@ -12,12 +12,12 @@ const CATALOG_SLOW_MS = 500;
 /** What the chart is drawn from, each fetched on its own. */
 export type CatalogPart = 'stars' | 'constellations' | 'boundaries';
 /** Each part's loader: whether it arrived. */
-export type CatalogLoaders = Readonly<Record<CatalogPart, () => Promise<boolean>>>;
+type CatalogLoaders = Readonly<Record<CatalogPart, () => Promise<boolean>>>;
 
 const CATALOG_PARTS: readonly CatalogPart[] = ['stars', 'constellations', 'boundaries'];
 
 /** The backend's loaders; `arrived` is told each time there is something new to draw. */
-export function catalogLoaders(arrived: () => void): CatalogLoaders {
+function catalogLoaders(arrived: () => void): CatalogLoaders {
 	return {
 		// Stars are drawn twice: the bright ones first, then all of them.
 		stars: () => loadStars(arrived),

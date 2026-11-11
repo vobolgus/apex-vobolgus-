@@ -7,17 +7,17 @@
 
 import type { ReferenceLinesState } from '$lib/renderer/types';
 
-export type ReferenceLineKey = keyof ReferenceLinesState;
-export type LayerKey = ReferenceLineKey | 'planets';
+type ReferenceLineKey = keyof ReferenceLinesState;
+type LayerKey = ReferenceLineKey | 'planets';
 
-export interface LayerOption {
+interface LayerOption {
 	key: LayerKey;
 	label: string;
 	/** One quiet line under the label, for layers whose effect is not obvious. */
 	note?: string;
 }
 
-export interface LayerGroup {
+interface LayerGroup {
 	id: string;
 	label: string;
 	layers: readonly LayerOption[];

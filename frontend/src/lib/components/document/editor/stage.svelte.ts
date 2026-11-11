@@ -31,7 +31,7 @@ import {
 const FALLBACK_STAGE: Size = { w: 1200, h: 640 };
 
 /** A page on the stage: which of the three it is, and its paper in stage px. */
-export interface Slot {
+interface Slot {
 	role: SlotRole;
 	page: DocPage;
 	/** 1-based. */
@@ -39,7 +39,7 @@ export interface Slot {
 	box: Box;
 }
 
-export interface StageHost {
+interface StageHost {
 	readonly store: DocumentStore;
 	/** The page to open on; null keeps the editor closed. */
 	readonly pageId: string | null;

@@ -26,7 +26,7 @@ export interface PageCellActions {
 	pickTemplate(event: MouseEvent, pageId: string): void;
 }
 
-export interface PagesListHost {
+interface PagesListHost {
 	readonly store: DocumentStore;
 	/** Show a toast, with an Undo when `undo` is given. */
 	notify(message: string, undo?: () => void): void;

@@ -59,7 +59,7 @@ export interface PdfFlightHost {
 }
 
 /** The copy of the chart in the air, on its way to its place on a page's thumbnail. */
-export interface FlightCopy {
+interface FlightCopy {
 	/** One per flight: a new flight is a new element. */
 	id: number;
 	chart: ChartSnapshot;

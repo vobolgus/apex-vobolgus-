@@ -16,7 +16,7 @@ const SAMPLE_COUNT = 360 / SAMPLE_STEP_DEG + 1; // 361, closes the loop
 
 const BOUNDARY_BISECT_ITERATIONS = 6;
 
-export interface DashPattern {
+interface DashPattern {
 	dashDeg: number;
 	gapDeg: number;
 }
@@ -143,7 +143,7 @@ function findVisibilityBoundary(
 	return { x: lastVisibleX, y: lastVisibleY, t: lo };
 }
 
-export interface DrawReferenceLineArgs {
+interface DrawReferenceLineArgs {
 	ctx: CanvasRenderingContext2D;
 	cx: number;
 	cy: number;

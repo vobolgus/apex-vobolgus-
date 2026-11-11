@@ -40,7 +40,7 @@ export const PAPER_STYLE = {
 /** Previews kept as object URLs; the least recently used one is revoked beyond this. */
 export const PREVIEW_CACHE_LIMIT = 60;
 
-export interface DocumentItemRequest {
+interface DocumentItemRequest {
 	x_mm: number;
 	y_mm: number;
 	width_mm: number;
@@ -49,7 +49,7 @@ export interface DocumentItemRequest {
 }
 
 /** A text, line by line: where each baseline starts (or its middle, or its end), mm. */
-export interface DocumentTextRequest {
+interface DocumentTextRequest {
 	font: TextFont;
 	bold: boolean;
 	italic: boolean;
@@ -71,7 +71,7 @@ export interface DocumentTextRequest {
 	rules?: { x1_mm: number; y1_mm: number; x2_mm: number; y2_mm: number; width_mm: number }[];
 }
 
-export interface DocumentPageRequest {
+interface DocumentPageRequest {
 	width_mm: number;
 	height_mm: number;
 	items: DocumentItemRequest[];
@@ -79,7 +79,7 @@ export interface DocumentPageRequest {
 }
 
 /** Body of `POST /api/export/document`. */
-export interface DocumentRequest {
+interface DocumentRequest {
 	pages: DocumentPageRequest[];
 }
 

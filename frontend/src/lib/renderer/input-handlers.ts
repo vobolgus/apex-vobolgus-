@@ -96,7 +96,7 @@ function axisAngle(q: Quaternion): { axis: Vec3; angle: number } | null {
 	};
 }
 
-export interface InputControllerOptions {
+interface InputControllerOptions {
 	canvas: () => HTMLCanvasElement | null;
 	onChange: () => void;
 	getMode: () => ProjectionMode;

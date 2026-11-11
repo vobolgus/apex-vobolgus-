@@ -80,7 +80,7 @@ export const MAX_CHARTS = 200;
 const SAVE_DELAY_MS = 250;
 
 /** What `updateTypeset` changes of a text or a table; a field left out stays as it is. */
-export interface TypesetPatch {
+interface TypesetPatch {
 	/** A text's words; a table has none to change. */
 	text?: string;
 	/** A table's spec; a text does not become a table by being told one. */
@@ -93,7 +93,7 @@ export interface TypesetPatch {
 	rotation?: number;
 }
 
-export interface AddChartResult {
+interface AddChartResult {
 	pageId: string;
 	blockId: string;
 	/** Whether the chart fitted nowhere and got a page of its own. */

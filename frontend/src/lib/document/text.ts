@@ -37,7 +37,7 @@ export const MM_PER_PT = 25.4 / 72;
 export const LINE_HEIGHT = 1.35;
 export const MIN_TEXT_WIDTH_MM = 20;
 /** A free place narrower than this is no place for a new text. */
-export const MIN_NEW_TEXT_WIDTH_MM = 40;
+const MIN_NEW_TEXT_WIDTH_MM = 40;
 /** The backend's limits (backend/src/handlers/document.rs), and room to type. */
 export const MAX_TEXTS_PER_PAGE = 50;
 export const MAX_TEXT_CHARS = 4000;

@@ -35,7 +35,7 @@ import { clamp } from './easing';
 import { resizePinholeWidthKeepStars } from './projection';
 
 export type EdgeHandle = 'n' | 'e' | 's' | 'w';
-export type CornerHandle = 'nw' | 'ne' | 'se' | 'sw';
+type CornerHandle = 'nw' | 'ne' | 'se' | 'sw';
 export type FrameHandle = EdgeHandle | CornerHandle;
 type Sign = -1 | 0 | 1;
 
@@ -43,7 +43,7 @@ export const EDGE_HANDLES: readonly EdgeHandle[] = ['n', 'e', 's', 'w'];
 export const CORNER_HANDLES: readonly CornerHandle[] = ['nw', 'ne', 'se', 'sw'];
 
 /** Outward direction of each handle on screen; 0 on an axis the handle leaves alone. */
-export const HANDLE_DIRECTION: Readonly<Record<FrameHandle, { x: Sign; y: Sign }>> = {
+const HANDLE_DIRECTION: Readonly<Record<FrameHandle, { x: Sign; y: Sign }>> = {
 	n: { x: 0, y: -1 },
 	e: { x: 1, y: 0 },
 	s: { x: 0, y: 1 },
@@ -92,14 +92,14 @@ export interface PinholeShape {
 	heightFrac: number;
 }
 
-export interface Rect {
+interface Rect {
 	x: number;
 	y: number;
 	width: number;
 	height: number;
 }
 
-export interface FrameRect extends Rect {
+interface FrameRect extends Rect {
 	/** Corner radius of the frame as the renderer draws it, in CSS px. */
 	cornerRadius: number;
 }
@@ -189,7 +189,7 @@ export interface HitSizes {
 	corner: number;
 }
 
-export interface HandleLayout {
+interface HandleLayout {
 	brackets: Record<CornerHandle, string>;
 	/** `null` when the side is too short to carry a pill. */
 	pills: Record<EdgeHandle, Rect | null>;
@@ -252,7 +252,7 @@ export function pinholeHandleLayout(frame: FrameRect, hit: HitSizes): HandleLayo
 
 export type HandleState = 'idle' | 'near' | 'hover' | 'active' | 'mirror' | 'dim';
 
-export interface HandleStateInput {
+interface HandleStateInput {
 	/** The dragged handle, else the keyboard-focused one. */
 	lead: FrameHandle | null;
 	hovered: FrameHandle | null;
@@ -356,7 +356,7 @@ export function pinholeLimits(
 	};
 }
 
-export interface PinholeResizeRequest {
+interface PinholeResizeRequest {
 	widthFrac: number;
 	heightFrac: number;
 	/** Axes the gesture may change; the other one keeps its start value. */
@@ -595,7 +595,7 @@ function axisExtremes(
 	];
 }
 
-export interface FovRange {
+interface FovRange {
 	min: number;
 	max: number;
 }
@@ -611,7 +611,7 @@ export function pinholeFovRange(
 }
 
 /** +1 on the upper bound, −1 on the lower one, 0 off both. */
-export interface PinholeLimitState {
+interface PinholeLimitState {
 	/** Horizontal fov at its bound, or the frame width at the widest the surface allows. */
 	x: Sign;
 	/** Frame height at its bound. */
@@ -683,7 +683,7 @@ export function nearestAspectName(aspectRatio: number): string {
 	return `${best[0]}:${best[1]}`;
 }
 
-export interface PinholeReadout {
+interface PinholeReadout {
 	/** "72° × 44°", with "max" / "min" after a side whose fov or size sits on its bound. */
 	size: string;
 	/** "16:9", "7:2 max" on an aspect bound, or "1:1" while Shift snaps the frame square. */
@@ -702,7 +702,7 @@ export function formatPinholeReadout(
 	return { size: `${h} × ${v}`, ratio };
 }
 
-export interface ReadoutPlacement {
+interface ReadoutPlacement {
 	/** Top of the pill, surface px. */
 	top: number;
 	/** The pill sits inside the frame, over its bottom edge. */

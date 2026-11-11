@@ -46,7 +46,7 @@ const EXPORT_DONE_MS = 1400;
 const EXPORT_BUSY_DELAY_MS = 350;
 
 /** What the export button shows: its icon, a spinner while a file is drawn, a check once saved. */
-export type ExportPhase = 'idle' | 'busy' | 'done';
+type ExportPhase = 'idle' | 'busy' | 'done';
 
 /** What an export needs of the page. */
 export interface ExportHost {
