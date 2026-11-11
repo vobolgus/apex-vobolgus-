@@ -10,22 +10,17 @@ import { isBlank } from '$lib/document/blocks';
 import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 import { measuredLayout } from '$lib/document/text-fonts.svelte';
 import type { DocPage, PageOrientation } from '$lib/document/types';
+import type { TemplatePick } from '../templates/pick';
 import type { PageActions } from './actions';
 import type { BlockOperations } from './block-operations.svelte';
 import type { EditorContext } from './context.svelte';
 import type { DragController } from './drag.svelte';
 
-/** A page being laid out as a template, and the button its picker stands under, screen px. */
-export interface TemplatePick {
-	pageId: string;
-	anchor: { left: number; top: number; right: number; bottom: number };
-}
-
 export class PageOperations implements PageActions {
 	readonly #editor: EditorContext;
 	readonly #drag: DragController;
 	readonly #blocks: BlockOperations;
-	/** Set while the template picker is open. */
+	/** Set while the template picker is open: the page, and the button it stands under. */
 	picking = $state<TemplatePick | null>(null);
 	/** The page the picker lays out, while it is still there. */
 	readonly pickedPage: DocPage | undefined;

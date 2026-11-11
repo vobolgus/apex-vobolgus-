@@ -14,8 +14,8 @@
 	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
 	import type { Box, Landing, LandingTarget } from '$lib/document/flight';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
-	import type { TemplatePick } from '../editor/page-operations.svelte';
-	import TemplatePicker from '../TemplatePicker.svelte';
+	import type { TemplatePick } from '../templates/pick';
+	import TemplatePicker from '../templates/TemplatePicker.svelte';
 	import { slideIn } from './list-motion';
 	import PageCell from './PageCell.svelte';
 	import { PagesList, type PageCellActions } from './pages-list.svelte';

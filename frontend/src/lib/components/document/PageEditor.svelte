@@ -63,7 +63,7 @@
 	import { EDITOR_LAYOUT } from './editor-geometry';
 	import EditorPage from './EditorPage.svelte';
 	import EditorStrip from './EditorStrip.svelte';
-	import TemplatePicker from './TemplatePicker.svelte';
+	import TemplatePicker from './templates/TemplatePicker.svelte';
 
 	interface Props {
 		store: DocumentStore;

@@ -1,4 +1,9 @@
-/** Words for counts of pages and charts, one spelling everywhere a page is named. */
+/**
+ * Words for counts of pages and charts, one spelling everywhere a page is named,
+ * and the names of the languages a template or a table writes in.
+ */
+
+import type { TemplateLanguage } from './templates';
 
 /** "1 page", "3 pages", "0 charts". */
 export function plural(count: number, word: string): string {
@@ -9,3 +14,6 @@ export function plural(count: number, word: string): string {
 export function chartCountLabel(count: number): string {
 	return count === 0 ? 'no charts' : plural(count, 'chart');
 }
+
+/** A language by its name in English, as its buttons are named: "Russian". */
+export const LANGUAGE_NAMES: Record<TemplateLanguage, string> = { en: 'English', ru: 'Russian' };

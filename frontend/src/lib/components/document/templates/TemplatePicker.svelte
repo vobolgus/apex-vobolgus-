@@ -1,13 +1,14 @@
 <script lang="ts">
 	/**
 	 * "Lay page N out as": the templates, each shown as what it would make of this
-	 * very page, with the page's own charts. A click on one lays the page out; the
-	 * way back is the toast's Undo, which whoever opened this offers.
+	 * very page, with the page's own charts (`TemplateTile`). A click on one lays the
+	 * page out; the way back is the toast's Undo, which whoever opened this offers.
 	 *
 	 * A finder card asks one thing more: what to draw the close-up of. Its tile opens
 	 * a list of the Messier objects on the page's wide sky, brightest first, with the
-	 * card drawn beside it for the object under the pointer (or the focus); a click on
-	 * an object lays the page out. The close-up's field is chosen there too.
+	 * card drawn beside it for the object under the pointer or the focus
+	 * (`FinderObjects`); a click on an object lays the page out. The close-up's field
+	 * is chosen there too.
 	 *
 	 * Under the tiles: the orientation of the pages to make, the language the template
 	 * writes its words in (English or Russian; Russian to begin with in a browser set
@@ -20,27 +21,27 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { loadMessier } from '$lib/api/catalog';
-	import { chartsOf, typesetOf } from '$lib/document/blocks';
-	import { pageSize } from '$lib/document/geometry';
-	import { plural } from '$lib/document/labels';
+	import { chartsOf } from '$lib/document/blocks';
+	import { LANGUAGE_NAMES } from '$lib/document/labels';
 	import {
 		CLOSE_UP_FIELD_DEG,
 		CLOSE_UP_FIELDS,
 		finderSky,
-		isOnChart,
-		layTemplate,
 		TEMPLATE_LANGUAGES,
 		TEMPLATES,
-		type CloseUp,
 		type LaidPage,
 		type TemplateInfo,
 		type TemplateLanguage
 	} from '$lib/document/templates';
 	import { measuredLayout } from '$lib/document/text-fonts.svelte';
-	import type { ChartBlock, DocPage, PageOrientation, TextStyle } from '$lib/document/types';
+	import type { DocPage, PageOrientation, TextStyle } from '$lib/document/types';
 	import { catalog, type MessierObject } from '$lib/stores.svelte';
-	import EditorOrientation from './EditorOrientation.svelte';
-	import PageThumbnail from './PageThumbnail.svelte';
+	import EditorOrientation from '../EditorOrientation.svelte';
+	import FinderObjects from './FinderObjects.svelte';
+	import { closeUpOf, FinderChoice } from './finder.svelte';
+	import type { PickerAnchor } from './pick';
+	import TemplateTile from './TemplateTile.svelte';
+	import { layFinder, previewOf, templateTiles, type Tile } from './tiles';
 
 	interface Props {
 		page: DocPage;
@@ -49,7 +50,7 @@
 		/** How many more pages the document can take. */
 		room: number;
 		/** What opened it, in the window: the picker stands beside it (`side`) or under it. */
-		anchor: { left: number; top: number; right: number; bottom: number };
+		anchor: PickerAnchor;
 		placement?: 'side' | 'under';
 		onapply: (template: TemplateInfo, laid: LaidPage[]) => void;
 		onclose: () => void;
@@ -57,14 +58,8 @@
 
 	let { page, number, room, anchor, placement = 'side', onapply, onclose }: Props = $props();
 
-	/** A tile's sheet is this wide, px, whichever way the page is turned. */
-	const TILE_PX = 92;
-	/** The finder card drawn beside the list of objects. */
-	const CARD_PX = 176;
 	/** Clear of the window's edge, and of what opened it, px. */
 	const EDGE_PX = 12;
-	/** What a language's button says, and its name for the tooltip. */
-	const LANGUAGE_NAMES: Record<TemplateLanguage, string> = { en: 'English', ru: 'Russian' };
 
 	const id = $props.id();
 	let dialogEl = $state<HTMLDialogElement>();
@@ -76,125 +71,40 @@
 	/** The tiles, or the objects a finder card's close-up may be of. */
 	let step = $state<'templates' | 'objects'>('templates');
 	let fovDeg = $state(CLOSE_UP_FIELD_DEG);
-	/** What the list is narrowed to, as typed. */
-	let query = $state('');
-	/** The object the card is drawn for: the one under the pointer or the focus. */
-	let shownNumber = $state<number | null>(null);
 	/** Whether the Messier catalogue could not be had. */
 	let failed = $state(false);
 	/** True from the press on the backdrop to the click: a drag that ends there is no click. */
 	let pressedOutside = false;
 
 	const own = $derived(chartsOf(page));
-	const charts = $derived(own.length);
-	const scale = $derived(TILE_PX / pageSize(orientation).w);
 	const height = (text: string, style: TextStyle, width: number) =>
 		measuredLayout(text, style, width).height;
 
-	// === A finder card's close-up ===
-
 	/** The chart a finder card would be made of, in the order the charts are taken. */
 	const sky = $derived(finderSky(swap ? [...own].reverse() : own));
-	/** The Messier objects on that sky, brightest first. */
-	const objects = $derived(
-		sky
-			? catalog.messier
-					.filter((object) => isOnChart(sky.chart, object.ra_deg, object.dec_deg))
-					.sort((a, b) => a.mag - b.mag || a.m - b.m)
-			: []
+	const finder = new FinderChoice(
+		() => sky?.chart,
+		() => catalog.messier
 	);
-	const listed = $derived.by(() => {
-		const words = query.trim().toLowerCase().replace(/\s+/g, ' ');
-		if (words === '') return objects;
-		return objects.filter((object) => objectWords(object).includes(words));
-	});
-	const shownObject = $derived(
-		listed.find((object) => object.m === shownNumber) ?? listed[0] ?? null
-	);
+	/** How the picker's controls have the templates laid out. */
+	const laying = $derived({ orientation, swap, height, language });
 
-	function objectName(object: MessierObject): string {
-		return object.name ? `M ${object.m} · ${object.name}` : `M ${object.m}`;
-	}
-
-	/** What a search may match: "m 42", "m42", the name, the kind, the constellation. */
-	function objectWords(object: MessierObject): string {
-		const { m, name, kind, constellation } = object;
-		return `m ${m} m${m} ${name} ${kind} ${constellation}`.toLowerCase();
-	}
-
-	function closeUpOf(object: MessierObject): CloseUp {
-		return { name: objectName(object), raDeg: object.ra_deg, decDeg: object.dec_deg, fovDeg };
-	}
-
-	function layFinder(object: MessierObject | null): LaidPage[] {
-		const closeUp = object ? closeUpOf(object) : undefined;
-		return layTemplate('finder', page, { orientation, swap, height, closeUp, language });
-	}
-
-	// === The tiles ===
-
-	interface Tile {
-		info: TemplateInfo;
-		laid: LaidPage[];
-		/** The first page it makes, to draw. */
-		preview: DocPage | null;
-		/** Why it cannot be chosen, or null when it can. */
-		blocked: string | null;
-		note: string;
-	}
-
+	/** A finder card is shown with the brightest object on the sky, as an example. */
 	const tiles = $derived(
-		TEMPLATES.map((info): Tile => {
-			const finder = info.id === 'finder';
-			// A finder card is shown with the brightest object on the sky, as an example.
-			const laid =
-				charts < info.minCharts
-					? []
-					: finder
-						? layFinder(objects[0] ?? null)
-						: layTemplate(info.id, page, { orientation, swap, height, language });
-			const blocked =
-				charts < info.minCharts
-					? `Needs ${plural(info.minCharts, 'chart')}`
-					: laid.length - 1 > room
-						? `No room for ${plural(laid.length, 'page')}`
-						: finder && failed
-							? 'No catalogue to choose from'
-							: null;
-			const pages = laid.length > 1 ? ` · ${laid.length} pages` : '';
-			return {
-				info,
-				laid,
-				preview: laid[0] ? previewOf(laid[0]) : null,
-				blocked,
-				note: blocked ?? `${info.note}${pages}`
-			};
+		templateTiles(page, {
+			...laying,
+			room,
+			failed,
+			example: finder.objects[0] ? closeUpOf(finder.objects[0], fovDeg) : undefined
 		})
 	);
 
-	/** A laid page as a page to draw: the page's own charts in their new frames, and the text. */
-	function previewOf(laid: LaidPage): DocPage {
-		const kept = typesetOf(page).filter((text) => text.role === undefined);
-		const placed = laid.charts.flatMap(({ id: chartId, frame, chart, marks }): ChartBlock[] => {
-			if (chart) return [{ kind: 'chart', id: chartId, chart, frame }];
-			const item = own.find((it) => it.id === chartId);
-			if (!item) return [];
-			// Ringed where the template rings it, and nowhere else, as the page will be.
-			const shown = { ...item.chart };
-			if (marks?.length) shown.marks = marks;
-			else delete shown.marks;
-			return [{ ...item, chart: shown, frame }];
-		});
-		const texts = laid.texts.map((text, i) => ({ ...text, id: `preview-text-${i}` }));
-		return {
-			id: `${page.id}-preview`,
-			orientation: laid.orientation,
-			blocks: [...placed, ...kept, ...texts]
-		};
+	function layCard(object: MessierObject | null): LaidPage[] {
+		return layFinder(page, laying, object ? closeUpOf(object, fovDeg) : undefined);
 	}
 
-	const card = $derived(step === 'objects' ? layFinder(shownObject) : []);
-	const cardPreview = $derived(card[0] ? previewOf(card[0]) : null);
+	const card = $derived(step === 'objects' ? layCard(finder.shown) : []);
+	const cardPreview = $derived(card[0] ? previewOf(page, card[0]) : null);
 
 	// The catalogue a finder card chooses from: asked for as the picker opens.
 	$effect(() => {
@@ -217,7 +127,7 @@
 		void step;
 		void orientation;
 		void tiles.length;
-		void listed.length;
+		void finder.listed.length;
 		if (dialogEl?.open) void tick().then(position);
 	});
 
@@ -238,7 +148,7 @@
 		if (tile.blocked || tile.laid.length === 0) return;
 		if (tile.info.id === 'finder') {
 			step = 'objects';
-			shownNumber = null;
+			finder.shownNumber = null;
 			void tick().then(() => dialogEl?.querySelector<HTMLElement>('[data-search]')?.focus());
 			return;
 		}
@@ -247,7 +157,7 @@
 	}
 
 	function chooseObject(object: MessierObject) {
-		const laid = layFinder(object);
+		const laid = layCard(object);
 		const info = TEMPLATES.find((template) => template.id === 'finder')!;
 		if (laid.length === 0 || laid.length - 1 > room) return;
 		onapply(info, laid);
@@ -256,26 +166,8 @@
 
 	function back() {
 		step = 'templates';
-		query = '';
+		finder.query = '';
 		void tick().then(() => dialogEl?.querySelector<HTMLElement>('[data-finder]')?.focus());
-	}
-
-	/** In the list: ↓ and ↑ go from the search field through the objects, Enter takes the first found. */
-	function handleListKeydown(event: KeyboardEvent) {
-		const rows = Array.from(dialogEl?.querySelectorAll<HTMLElement>('[data-object]') ?? []);
-		const search = dialogEl?.querySelector<HTMLElement>('[data-search]');
-		const at = rows.indexOf(document.activeElement as HTMLElement);
-		if (event.key === 'ArrowDown') {
-			event.preventDefault();
-			rows[Math.min(at + 1, rows.length - 1)]?.focus();
-		} else if (event.key === 'ArrowUp') {
-			event.preventDefault();
-			if (at <= 0) search?.focus();
-			else rows[at - 1].focus();
-		} else if (event.key === 'Enter' && document.activeElement === search && listed[0]) {
-			event.preventDefault();
-			chooseObject(listed[0]);
-		}
 	}
 
 	/** Keys here are the picker's own. Escape among the objects goes back to the templates. */
@@ -320,31 +212,8 @@
 			<h2 id="{id}-title">Lay page {number} out as</h2>
 			<ul class="tiles">
 				{#each tiles as tile (tile.info.id)}
-					{@const finder = tile.info.id === 'finder'}
 					<li>
-						<button
-							class="tile"
-							type="button"
-							disabled={tile.blocked !== null}
-							aria-label="{tile.info.name}: {tile.note}"
-							aria-haspopup={finder ? 'listbox' : undefined}
-							data-finder={finder ? '' : undefined}
-							onclick={() => choose(tile)}
-						>
-							<span class="sheet">
-								{#if tile.preview}
-									<PageThumbnail page={tile.preview} {scale} />
-								{:else}
-									<span
-										class="blank"
-										style:width="{TILE_PX}px"
-										style:height="{pageSize(orientation).h * scale}px"
-									></span>
-								{/if}
-							</span>
-							<span class="name">{tile.info.name}{finder && !tile.blocked ? '…' : ''}</span>
-							<span class="note">{tile.note}</span>
-						</button>
+						<TemplateTile {tile} {orientation} onchoose={choose} />
 					</li>
 				{/each}
 			</ul>
@@ -355,60 +224,7 @@
 				</button>
 				<h2 id="{id}-title">Finder card of page {number}: a close-up of</h2>
 			</div>
-			<div class="finder">
-				<div class="card" aria-hidden="true">
-					{#if cardPreview}
-						<PageThumbnail page={cardPreview} scale={CARD_PX / pageSize(orientation).w} />
-					{/if}
-				</div>
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="objects" onkeydown={handleListKeydown}>
-					<input
-						class="search"
-						type="search"
-						data-search
-						aria-label="Find an object"
-						placeholder="Find an object: M 42, Orion, cluster…"
-						autocomplete="off"
-						spellcheck="false"
-						bind:value={query}
-					/>
-					{#if listed.length > 0}
-						<ul class="list" aria-label="Objects on this sky">
-							{#each listed as object (object.m)}
-								<li>
-									<button
-										class="object"
-										class:is-shown={object.m === shownObject?.m}
-										type="button"
-										data-object
-										onpointerenter={() => (shownNumber = object.m)}
-										onfocus={() => (shownNumber = object.m)}
-										onclick={() => chooseObject(object)}
-									>
-										<span class="object-name">{objectName(object)}</span>
-										<span class="object-note">
-											{object.kind} · {object.constellation} · {object.mag.toFixed(1)}
-										</span>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="none">
-							{#if failed}
-								Couldn’t load the Messier catalogue.
-							{:else if catalog.messier.length === 0}
-								Loading the Messier catalogue…
-							{:else if objects.length === 0}
-								No Messier object is on this chart.
-							{:else}
-								Nothing on this chart matches.
-							{/if}
-						</p>
-					{/if}
-				</div>
-			</div>
+			<FinderObjects {finder} card={cardPreview} {orientation} {failed} onchoose={chooseObject} />
 		{/if}
 		<div class="foot">
 			<EditorOrientation
@@ -445,7 +261,7 @@
 					{/each}
 				</div>
 			{/if}
-			{#if charts >= 2}
+			{#if own.length >= 2}
 				<button class="swap" type="button" aria-pressed={swap} onclick={() => (swap = !swap)}>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13" />
@@ -556,158 +372,7 @@
 		list-style: none;
 	}
 
-	.tile {
-		display: grid;
-		justify-items: center;
-		gap: 2px;
-		width: 112px;
-		padding: 10px 6px 8px;
-		border: 0;
-		border-radius: 10px;
-		background: transparent;
-		color: inherit;
-		cursor: pointer;
-		transition: background var(--ease-ui);
-	}
-
-	.sheet {
-		display: grid;
-		place-items: center;
-		margin-bottom: 6px;
-		pointer-events: none;
-	}
-
-	.blank {
-		display: block;
-		box-sizing: border-box;
-		border: 1px dashed var(--hairline);
-		border-radius: 2px;
-	}
-
-	.name {
-		color: var(--fg-1);
-		font:
-			500 12px/16px Inter,
-			system-ui,
-			sans-serif;
-	}
-
-	.note {
-		color: var(--fg-3);
-		font:
-			400 11px/14px Inter,
-			system-ui,
-			sans-serif;
-		text-align: center;
-	}
-
-	/* The card for the object in hand on the left, the objects to choose from on the right. */
-	.finder {
-		display: flex;
-		gap: 14px;
-		width: min(584px, calc(100vw - 54px));
-	}
-
-	.card {
-		display: grid;
-		flex: none;
-		place-items: center;
-		width: 190px;
-		min-height: 260px;
-	}
-
-	.objects {
-		display: flex;
-		flex: 1;
-		flex-direction: column;
-		gap: 6px;
-		min-width: 0;
-	}
-
-	.search {
-		box-sizing: border-box;
-		width: 100%;
-		height: 30px;
-		padding: 0 10px;
-		border: 1px solid var(--hairline);
-		border-radius: var(--r-ctl);
-		background: transparent;
-		color: var(--fg-1);
-		font:
-			400 12px/1 Inter,
-			system-ui,
-			sans-serif;
-	}
-
-	.search::placeholder {
-		color: var(--fg-3);
-	}
-
-	.search:focus-visible {
-		outline: 2px solid transparent;
-		box-shadow: var(--ring);
-	}
-
-	.list {
-		height: 248px;
-		margin: 0;
-		padding: 0;
-		overflow-y: auto;
-		list-style: none;
-	}
-
-	.object {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 12px;
-		box-sizing: border-box;
-		width: 100%;
-		padding: 6px 8px;
-		border: 0;
-		border-radius: 8px;
-		background: transparent;
-		color: inherit;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.object.is-shown {
-		background: var(--fill-hover);
-	}
-
-	.object-name {
-		overflow: hidden;
-		color: var(--fg-1);
-		font:
-			400 12px/16px Inter,
-			system-ui,
-			sans-serif;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.object-note {
-		flex: none;
-		color: var(--fg-3);
-		font:
-			400 11px/16px Inter,
-			system-ui,
-			sans-serif;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.none {
-		margin: 12px 2px;
-		color: var(--fg-3);
-		font:
-			400 12px/16px Inter,
-			system-ui,
-			sans-serif;
-	}
-
 	@media (hover: hover) {
-		.tile:not(:disabled):hover,
 		.swap:hover,
 		.back:hover,
 		.chip:hover {
@@ -719,34 +384,18 @@
 		}
 	}
 
-	.tile:not(:disabled):active,
 	.swap:active,
 	.back:active,
-	.chip:active,
-	.object:active {
+	.chip:active {
 		background: var(--fill-press);
 	}
 
-	.tile:disabled {
-		cursor: default;
-	}
-
-	.tile:disabled .name {
-		color: var(--fg-3);
-	}
-
-	.tile:focus-visible,
 	.swap:focus-visible,
 	.back:focus-visible,
 	.chip:focus-visible {
 		outline: 2px solid transparent;
 		outline-offset: 2px;
 		box-shadow: var(--ring);
-	}
-
-	.object:focus-visible {
-		outline: 2px solid var(--fg-1);
-		outline-offset: -2px;
 	}
 
 	/* Four groups at the most; on a narrow screen the last goes under the others whole. */
@@ -817,12 +466,6 @@
 		stroke-width: 1.5;
 		stroke-linecap: round;
 		stroke-linejoin: round;
-	}
-
-	@media (max-width: 560px) {
-		.card {
-			display: none;
-		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {

@@ -14,6 +14,7 @@
 		TABLE_SOURCE_NAMES,
 		TABLE_SOURCES
 	} from '$lib/document/table';
+	import { LANGUAGE_NAMES } from '$lib/document/labels';
 	import type { TableBlock, TableSpec } from '$lib/document/types';
 	import type { BlockActions } from '../editor/actions';
 	import Chip from './Chip.svelte';
@@ -77,8 +78,8 @@
 	{#each TABLE_LANGUAGES as language (language)}
 		<Chip
 			pressed={(spec.language ?? 'en') === language}
-			label={language === 'ru' ? 'Russian' : 'English'}
-			title={language === 'ru' ? 'Its words in Russian' : 'Its words in English'}
+			label={LANGUAGE_NAMES[language]}
+			title="Its words in {LANGUAGE_NAMES[language]}"
 			onpress={() => retable({ language })}
 		>
 			{language.toUpperCase()}
