@@ -1,3 +1,6 @@
+// The workspace's pedantic lints and missing docs: lifted in the backend step.
+#![allow(clippy::pedantic, missing_docs)]
+
 use anyhow::Context;
 use axum::{
     Router,

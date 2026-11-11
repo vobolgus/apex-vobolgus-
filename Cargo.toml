@@ -4,3 +4,22 @@ members = [
     "rust-core",
     "backend"
 ]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Stars are kept in f32, the maths runs in f64 and a chart ends in whole pixels: the
+# casts between them are part of the formulas, on values in range by construction.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+# Exact comparisons are what the golden tests are for.
+float_cmp = "allow"
+# Formulas keep the letters of the books they come from (Meeus' D, M, M', F).
+many_single_char_names = "allow"
+# Coefficients are written as they are printed, to be checked against the page.
+unreadable_literal = "allow"
