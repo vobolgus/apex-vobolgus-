@@ -1,46 +1,19 @@
-<script module lang="ts">
-	import type { SnapGuide } from '$lib/document/geometry';
-	import type { Rect } from '$lib/document/types';
-
-	/** What a drag (or a keyboard nudge) draws on one page. */
-	export interface PageDrag {
-		/** This page's chart or text being dragged, if it is this page's. */
-		itemId: string | null;
-		/** Where to draw it, this page's mm. */
-		frame: Rect | null;
-		kind: 'moving' | 'detached' | 'resizing';
-		/** A chart is being resized: the margins it is held to are drawn. */
-		margins: boolean;
-		/** A text of this page being turned by its knob: where to, degrees. */
-		rotation: number | null;
-		/** Snap guides to draw on this page, mm. */
-		guides: SnapGuide[];
-		/** The chart would land on this page if dropped now. */
-		target: boolean;
-	}
-</script>
-
 <script lang="ts">
 	/**
 	 * One page in the editor: its label and orientation toggle above white paper,
 	 * and the charts and text on it. The current page's are editable; a neighbouring
 	 * page is a button that makes it current, and a drop target.
 	 */
-	import { contentBox, pageSize, type ResizeAnchor } from '$lib/document/geometry';
+	import { contentBox, pageSize } from '$lib/document/geometry';
 	import { chartsOf, isBlank, typesetOf } from '$lib/document/blocks';
 	import { boundItem, hasFields, shownText } from '$lib/document/text';
-	import type {
-		ChartBlock,
-		DocPage,
-		PageOrientation,
-		TableSpec,
-		TextStyle,
-		TypesetBlock
-	} from '$lib/document/types';
+	import type { DocPage, TypesetBlock } from '$lib/document/types';
 	import { chartCountLabel, plural } from '$lib/document/labels';
-	import EditorItem, { type ChartAction } from './EditorItem.svelte';
+	import type { EditorActions } from './editor/actions';
+	import type { PageDrag } from './editor/drag-view';
+	import EditorItem from './EditorItem.svelte';
 	import EditorOrientation from './EditorOrientation.svelte';
-	import EditorText, { type TextSide } from './EditorText.svelte';
+	import EditorText from './EditorText.svelte';
 	import type { Box, SlotRole } from './editor-geometry';
 
 	interface Props {
@@ -69,35 +42,8 @@
 		pages?: readonly DocPage[];
 		hintId: string;
 		textHintId?: string;
-		onactivate: (pageId: string) => void;
-		onorientation: (pageId: string, orientation: PageOrientation) => void;
-		/** Delete this page; offered while it is empty. */
-		ondelete?: (pageId: string) => void;
-		/** Put a new text on this page; offered on the current one. */
-		onaddtext?: (pageId: string) => void;
-		/** Put a new table on this page; offered on the current one. */
-		onaddtable?: (pageId: string) => void;
-		/** Lay this page out as a template; offered on the current one while it has charts. */
-		ontemplate?: (pageId: string, button: HTMLElement) => void;
-		onmovestart: (event: PointerEvent, item: ChartBlock) => void;
-		onresizestart: (event: PointerEvent, item: ChartBlock, handle: ResizeAnchor) => void;
-		onitemkeydown: (event: KeyboardEvent, item: ChartBlock) => void;
-		onremove: (item: ChartBlock) => void;
-		onitemaction: (item: ChartBlock, action: ChartAction) => void;
-		ontextmovestart?: (event: PointerEvent, text: TypesetBlock) => void;
-		ontextresizestart?: (event: PointerEvent, text: TypesetBlock, side: TextSide) => void;
-		ontextrotatestart?: (event: PointerEvent, text: TypesetBlock) => void;
-		ontextturn?: (text: TypesetBlock) => void;
-		ontextkeydown?: (event: KeyboardEvent, text: TypesetBlock) => void;
-		ontextstyle?: (text: TypesetBlock, style: TextStyle) => void;
-		ontextremove?: (text: TypesetBlock) => void;
-		ontextedit?: (text: TypesetBlock) => void;
-		ontextcommit?: (text: TypesetBlock, value: string) => void;
-		ontextheight?: (text: TypesetBlock, height: number) => void;
-		/** A text is told the chart to read, or with null to read the nearest again. */
-		ontextbind?: (text: TypesetBlock, chartId: string | null) => void;
-		/** A table lists something else, or in more or fewer rows. */
-		ontexttable?: (text: TypesetBlock, table: TableSpec) => void;
+		/** What the page and what is on it ask of the editor. */
+		actions: EditorActions;
 	}
 
 	let {
@@ -117,29 +63,7 @@
 		pages = [],
 		hintId,
 		textHintId,
-		onactivate,
-		onorientation,
-		ondelete,
-		onaddtext,
-		onaddtable,
-		ontemplate,
-		onmovestart,
-		onresizestart,
-		onitemkeydown,
-		onremove,
-		onitemaction,
-		ontextmovestart,
-		ontextresizestart,
-		ontextrotatestart,
-		ontextturn,
-		ontextkeydown,
-		ontextstyle,
-		ontextremove,
-		ontextedit,
-		ontextcommit,
-		ontextheight,
-		ontextbind,
-		ontexttable
+		actions
 	}: Props = $props();
 
 	const current = $derived(role === 'current');
@@ -147,6 +71,7 @@
 	const margin = $derived(contentBox(page.orientation));
 	const charts = $derived(chartsOf(page));
 	const count = $derived(charts.length);
+	const chartIds = $derived(charts.map((item) => item.id));
 	const texts = $derived(typesetOf(page));
 	const blank = $derived(isBlank(page));
 	/** "2 charts", and "2 charts, 1 text" once the page has text. */
@@ -166,7 +91,7 @@
 	 */
 	const lifted = $derived(
 		page.blocks.some(
-			(item) => item.id === drag?.itemId || item.id === settlingId || item.id === returningId
+			(item) => item.id === drag?.blockId || item.id === settlingId || item.id === returningId
 		)
 	);
 
@@ -217,7 +142,7 @@
 	}
 
 	function itemState(item: { id: string }) {
-		if (drag?.itemId === item.id) return drag.kind;
+		if (drag?.blockId === item.id) return drag.kind;
 		if (settlingId === item.id) return 'settling';
 		return returningId === item.id ? 'returning' : 'idle';
 	}
@@ -232,7 +157,7 @@
 	function handlePaperKeydown(event: KeyboardEvent) {
 		if (current || (event.key !== 'Enter' && event.key !== ' ')) return;
 		event.preventDefault();
-		onactivate(page.id);
+		actions.pages.show(page.id);
 	}
 </script>
 
@@ -251,40 +176,38 @@
 	<div class="label">
 		<span class="name">Page {number} <span class="format">· A4</span></span>
 		<div class="actions">
-			{#if current && ontemplate && count > 0}
+			{#if current && count > 0}
 				<button
 					class="action"
 					type="button"
 					aria-label="Lay page {number} out as a template"
 					aria-haspopup="dialog"
 					title="Lay out as a template"
-					onclick={(event) => ontemplate(page.id, event.currentTarget)}
+					onclick={(event) => actions.pages.pickTemplate(page.id, event.currentTarget)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M3.5 3.5h9v9h-9zM3.5 6.5h9M8 6.5v6" />
 					</svg>
 				</button>
 			{/if}
-			{#if current && onaddtext}
+			{#if current}
 				<button
 					class="action"
 					type="button"
 					aria-label="Add text to page {number}"
 					title="Add text"
-					onclick={() => onaddtext(page.id)}
+					onclick={() => actions.blocks.addText(page.id)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M3.5 5V3.5h9V5M8 3.5v9M6.25 12.5h3.5" />
 					</svg>
 				</button>
-			{/if}
-			{#if current && onaddtable}
 				<button
 					class="action"
 					type="button"
 					aria-label="Add a table to page {number}"
 					title="Add a table"
-					onclick={() => onaddtable(page.id)}
+					onclick={() => actions.blocks.addTable(page.id)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M2.5 4h11M2.5 8h11M2.5 12h11M6.5 4v8" />
@@ -292,14 +215,14 @@
 				</button>
 			{/if}
 			<!-- Only an empty page: one with charts is deleted from the pages panel, where they show. -->
-			{#if blank && ondelete}
+			{#if blank}
 				<button
 					class="action"
 					type="button"
 					aria-label="Delete page {number}"
 					aria-keyshortcuts={current ? 'Delete' : undefined}
 					title="Delete this empty page"
-					onclick={() => ondelete(page.id)}
+					onclick={() => actions.pages.remove(page.id)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5M6.75 7v3.5M9.25 7v3.5" />
@@ -309,7 +232,7 @@
 			<EditorOrientation
 				label="Page {number} orientation"
 				value={page.orientation}
-				onselect={(orientation) => onorientation(page.id, orientation)}
+				onselect={(orientation) => actions.pages.setOrientation(page.id, orientation)}
 			/>
 		</div>
 	</div>
@@ -329,12 +252,12 @@
 			if (textOf(event.relatedTarget) === null) selectedTextId = null;
 		}}
 		onclick={() => {
-			if (!current) onactivate(page.id);
+			if (!current) actions.pages.show(page.id);
 		}}
 		onkeydown={handlePaperKeydown}
 	>
 		{#each charts as item, index (item.id)}
-			{@const dragged = drag?.itemId === item.id && drag.frame ? drag.frame : null}
+			{@const dragged = drag?.blockId === item.id && drag.frame ? drag.frame : null}
 			<EditorItem
 				{item}
 				{index}
@@ -350,17 +273,13 @@
 				badge={readId === null ? null : index + 1}
 				linked={readId === item.id}
 				{hintId}
-				{onmovestart}
-				{onresizestart}
-				onkeydown={onitemkeydown}
-				{onremove}
-				onaction={onitemaction}
+				{actions}
 			/>
 		{/each}
 
 		{#each texts as text, index (text.id)}
-			{@const dragged = drag?.itemId === text.id && drag.frame ? drag.frame : null}
-			{@const turned = drag?.itemId === text.id ? drag.rotation : null}
+			{@const dragged = drag?.blockId === text.id && drag.frame ? drag.frame : null}
+			{@const turned = drag?.blockId === text.id ? drag.rotation : null}
 			<EditorText
 				{text}
 				shown={text.kind === 'text' ? shownText(page, text, pages) : ''}
@@ -368,7 +287,6 @@
 				{pages}
 				{others}
 				readsOther={readOther(text)}
-				ontable={ontexttable}
 				{index}
 				count={texts.length}
 				page={size}
@@ -380,22 +298,11 @@
 				mode={itemState(text)}
 				quiet={carrying && itemState(text) === 'idle'}
 				editing={current && editingId === text.id}
-				charts={count}
+				{chartIds}
 				reads={readIndex(text)}
 				pinned={charts.some((item) => item.id === text.chartId)}
-				onbind={(bound, chart) =>
-					ontextbind?.(bound, typeof chart === 'number' ? (charts[chart]?.id ?? null) : chart)}
 				hintId={textHintId}
-				onmovestart={ontextmovestart}
-				onresizestart={ontextresizestart}
-				onrotatestart={ontextrotatestart}
-				onturn={ontextturn}
-				onkeydown={ontextkeydown}
-				onstyle={ontextstyle}
-				onremove={ontextremove}
-				onedit={ontextedit}
-				oncommit={ontextcommit}
-				onheight={ontextheight}
+				{actions}
 			/>
 		{/each}
 

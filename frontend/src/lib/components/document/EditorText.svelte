@@ -1,15 +1,10 @@
-<script module lang="ts">
-	/** The side of a text a width handle is on. */
-	export type TextSide = 'w' | 'e';
-</script>
-
 <script lang="ts">
 	/**
 	 * One text on a page in the editor: its lines drawn as the PDF sets them, and on
 	 * the current page what moves it, sets its width and style, and edits it.
 	 *
 	 * Its width is the frame's; its height is the lines', so the frame's height is
-	 * told to the store whenever the lines turn out taller or shorter (`onheight`).
+	 * told to the store whenever the lines turn out taller or shorter (`setHeight`).
 	 *
 	 * Selected (focused), it shows a toolbar: the font, the size, bold, italic, the
 	 * alignment, and Delete. Enter or a double click turns it into a field to type in,
@@ -55,6 +50,7 @@
 	} from '$lib/document/table';
 	import { measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage, Rect, TableSpec, TextStyle, TypesetBlock } from '$lib/document/types';
+	import type { EditorActions, TextSide } from './editor/actions';
 	import type { ItemState } from './EditorItem.svelte';
 	import type { Size } from './editor-geometry';
 	import TextLines from './TextLines.svelte';
@@ -91,35 +87,16 @@
 		quiet?: boolean;
 		/** It is being typed in. */
 		editing?: boolean;
-		/** How many charts its page has: with two or more, the text says which it reads. */
-		charts?: number;
+		/** The charts of its page, by their ids in their order: with two or more, the text says which it reads. */
+		chartIds?: readonly string[];
 		/** 0-based position on the page of the chart its fields read, null with none. */
 		reads?: number | null;
 		/** It was told that chart; else it reads it for being the nearest. */
 		pinned?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
-		/**
-		 * Read chart `chart` of its page (0-based) whatever is nearer, the chart of
-		 * another page with that id, or with null the nearest again.
-		 */
-		onbind?: (text: TypesetBlock, chart: number | string | null) => void;
-		/** A table lists something else, or in more or fewer rows. */
-		ontable?: (text: TypesetBlock, table: TableSpec) => void;
-		onmovestart?: (event: PointerEvent, text: TypesetBlock) => void;
-		onresizestart?: (event: PointerEvent, text: TypesetBlock, side: TextSide) => void;
-		onrotatestart?: (event: PointerEvent, text: TypesetBlock) => void;
-		/** A quarter turn clockwise. */
-		onturn?: (text: TypesetBlock) => void;
-		onkeydown?: (event: KeyboardEvent, text: TypesetBlock) => void;
-		onstyle?: (text: TypesetBlock, style: TextStyle) => void;
-		onremove?: (text: TypesetBlock) => void;
-		/** Start typing in it. */
-		onedit?: (text: TypesetBlock) => void;
-		/** Typing is over: what it says now. */
-		oncommit?: (text: TypesetBlock, value: string) => void;
-		/** Its lines are this tall now, mm. */
-		onheight?: (text: TypesetBlock, height: number) => void;
+		/** What the text asks of the editor: to be carried, made wider, turned, typed in, set, removed. */
+		actions: EditorActions;
 	}
 
 	let {
@@ -140,22 +117,11 @@
 		mode = 'idle',
 		quiet = false,
 		editing = false,
-		charts = 0,
+		chartIds = [],
 		reads = null,
 		pinned = false,
 		hintId,
-		onbind,
-		ontable,
-		onmovestart,
-		onresizestart,
-		onrotatestart,
-		onturn,
-		onkeydown,
-		onstyle,
-		onremove,
-		onedit,
-		oncommit,
-		onheight
+		actions
 	}: Props = $props();
 
 	const SIDES: readonly TextSide[] = ['w', 'e'];
@@ -180,6 +146,7 @@
 		editing ? measuredLayout(draft, text.style, frame.w) : shownLayout(sheet, text, frame.w, pages)
 	);
 	const style = $derived(text.style);
+	const charts = $derived(chartIds.length);
 	const table = $derived(text.kind === 'table' ? text.table : undefined);
 	const name = $derived.by(() => {
 		if (table) return `Table ${index + 1} of ${count}: ${tableName(table)}`;
@@ -228,7 +195,7 @@
 	$effect(() => {
 		if (mode !== 'idle' || editing) return;
 		const height = layout.height;
-		if (Math.abs(height - text.frame.h) > 0.01) onheight?.(text, height);
+		if (Math.abs(height - text.frame.h) > 0.01) actions.blocks.setHeight(text, height);
 	});
 
 	// Typing begins: the field takes the words and the focus.
@@ -264,11 +231,11 @@
 
 	function handleBodyPointerDown(event: PointerEvent) {
 		pressed = null;
-		onmovestart?.(event, text);
+		actions.pointer.carry(event, text);
 	}
 
 	function restyle(event: MouseEvent, patch: Partial<TextStyle>) {
-		if (pressedHere(event)) onstyle?.(text, { ...style, ...patch });
+		if (pressedHere(event)) actions.blocks.restyle(text, { ...style, ...patch });
 	}
 
 	function nextAlign() {
@@ -283,23 +250,25 @@
 		input.focus({ preventScroll: true });
 	}
 
+	/** Read chart `chart` of its page (0-based) whatever is nearer, or with null the nearest again. */
 	function bind(event: MouseEvent, chart: number | null) {
-		if (pressedHere(event)) onbind?.(text, chart);
+		if (!pressedHere(event)) return;
+		actions.blocks.bind(text, chart === null ? null : (chartIds[chart] ?? null));
 	}
 
 	/** A chart on another page, chosen from the list; the focus goes back to the text. */
 	function bindOther(event: Event) {
 		const chosen = (event.currentTarget as HTMLSelectElement).value;
-		if (chosen !== '') onbind?.(text, chosen);
+		if (chosen !== '') actions.blocks.bind(text, chosen);
 		bodyEl?.focus({ preventScroll: true });
 	}
 
 	function retable(event: MouseEvent, patch: Partial<TableSpec>) {
-		if (pressedHere(event) && table) ontable?.(text, { ...table, ...patch });
+		if (pressedHere(event) && table) actions.blocks.setTable(text, { ...table, ...patch });
 	}
 
 	function commit() {
-		if (editing) oncommit?.(text, draft);
+		if (editing) actions.blocks.commitText(text, draft);
 	}
 
 	/** Keys in the field are its own: none reaches the editor's shortcuts behind it. */
@@ -340,9 +309,9 @@
 				aria-keyshortcuts="Enter ArrowLeft ArrowRight ArrowUp ArrowDown = - R PageUp PageDown Delete"
 				onpointerdown={handleBodyPointerDown}
 				ondblclick={() => {
-					if (!table) onedit?.(text);
+					if (!table) actions.blocks.edit(text);
 				}}
-				onkeydown={(event) => onkeydown?.(event, text)}
+				onkeydown={(event) => actions.blocks.keydown(event, text)}
 			>
 				<TextLines {layout} {style} width={frame.w} />
 			</div>
@@ -373,14 +342,14 @@
 						class="handle"
 						data-handle={side}
 						aria-hidden="true"
-						onpointerdown={(event) => onresizestart?.(event, text, side)}
+						onpointerdown={(event) => actions.pointer.resize(event, text, side)}
 					></span>
 				{/each}
 				<!-- Pointer only: the toolbar turns it by quarters, as R does. -->
 				<span
 					class="knob"
 					aria-hidden="true"
-					onpointerdown={(event) => onrotatestart?.(event, text)}
+					onpointerdown={(event) => actions.pointer.turn(event, text)}
 				>
 					<svg viewBox="0 0 16 16">
 						<path d="M12.5 8a4.5 4.5 0 1 1-1.6-3.45M12.75 2.5v2.75H10" />
@@ -483,7 +452,7 @@
 					title="Turn · R"
 					onpointerdown={handleToolPointerDown}
 					onclick={(event) => {
-						if (pressedHere(event)) onturn?.(text);
+						if (pressedHere(event)) actions.blocks.turn(text);
 					}}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
@@ -499,7 +468,7 @@
 					title="Remove · Delete"
 					onpointerdown={handleToolPointerDown}
 					onclick={(event) => {
-						if (pressedHere(event)) onremove?.(text);
+						if (pressedHere(event)) actions.blocks.remove(text);
 					}}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">

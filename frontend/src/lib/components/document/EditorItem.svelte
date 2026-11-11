@@ -1,8 +1,3 @@
-<script module lang="ts">
-	/** The toolbar's commands on a selected chart, also on the keys. */
-	export type ChartAction = 'smaller' | 'larger' | 'prev' | 'next';
-</script>
-
 <script lang="ts">
 	/**
 	 * One chart on a page in the editor: its vector preview, and on the current page
@@ -20,6 +15,7 @@
 	import { stepSize, type ResizeAnchor } from '$lib/document/geometry';
 	import { itemPreviewUrl } from '$lib/document/render';
 	import type { ChartBlock, PageOrientation, Rect } from '$lib/document/types';
+	import type { EditorActions } from './editor/actions';
 	import { sizeLabel, spokenSize, type Size } from './editor-geometry';
 
 	/** What the chart is doing: dragged on a page, dragged off every page, resized, or easing back. */
@@ -49,11 +45,8 @@
 		linked?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
-		onmovestart?: (event: PointerEvent, item: ChartBlock) => void;
-		onresizestart?: (event: PointerEvent, item: ChartBlock, handle: ResizeAnchor) => void;
-		onkeydown?: (event: KeyboardEvent, item: ChartBlock) => void;
-		onremove?: (item: ChartBlock) => void;
-		onaction?: (item: ChartBlock, action: ChartAction) => void;
+		/** What the chart asks of the editor: to be carried, resized, stepped, sent on, removed. */
+		actions: EditorActions;
 	}
 
 	let {
@@ -71,11 +64,7 @@
 		badge = null,
 		linked = false,
 		hintId,
-		onmovestart,
-		onresizestart,
-		onkeydown,
-		onremove,
-		onaction
+		actions
 	}: Props = $props();
 
 	const HANDLES: readonly ResizeAnchor[] = ['nw', 'ne', 'sw', 'se'];
@@ -151,7 +140,7 @@
 
 	function handleChartPointerDown(event: PointerEvent) {
 		pressed = null;
-		onmovestart?.(event, item);
+		actions.pointer.carry(event, item);
 	}
 
 	function handleRemovePointerDown(event: PointerEvent) {
@@ -166,8 +155,14 @@
 		pressed = event.currentTarget;
 	}
 
-	function act(event: MouseEvent, action: ChartAction) {
-		if (pressedHere(event)) onaction?.(item, action);
+	/** The toolbar's size buttons, also on + and −. */
+	function step(event: MouseEvent, direction: 1 | -1) {
+		if (pressedHere(event)) actions.blocks.step(item, direction);
+	}
+
+	/** The toolbar's page buttons, also on Page Up and Page Down. */
+	function send(event: MouseEvent, by: 1 | -1) {
+		if (pressedHere(event)) actions.blocks.toPage(item, by);
 	}
 </script>
 
@@ -202,7 +197,7 @@
 			aria-describedby={hintId}
 			aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown = - PageUp PageDown Delete"
 			onpointerdown={handleChartPointerDown}
-			onkeydown={(event) => onkeydown?.(event, item)}
+			onkeydown={(event) => actions.blocks.keydown(event, item)}
 		>
 			{@render preview()}
 		</div>
@@ -212,7 +207,7 @@
 				class="handle"
 				data-handle={handle}
 				aria-hidden="true"
-				onpointerdown={(event) => onresizestart?.(event, item, handle)}
+				onpointerdown={(event) => actions.pointer.resize(event, item, handle)}
 			>
 				<svg viewBox="0 0 24 24">
 					<path class="halo" d="M9 19V9h10" />
@@ -228,7 +223,7 @@
 			title="Remove chart"
 			onpointerdown={handleRemovePointerDown}
 			onclick={(event) => {
-				if (pressedHere(event)) onremove?.(item);
+				if (pressedHere(event)) actions.blocks.remove(item);
 			}}
 		>
 			<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8h7" /></svg>
@@ -242,7 +237,7 @@
 				title="Smaller · −"
 				disabled={!canShrink}
 				onpointerdown={handleToolPointerDown}
-				onclick={(event) => act(event, 'smaller')}
+				onclick={(event) => step(event, -1)}
 			>
 				<svg viewBox="0 0 16 16" aria-hidden="true">
 					<path d="M9.25 3.25v3.5h3.5M6.75 12.75v-3.5h-3.5M9.25 6.75l3.5-3.5M6.75 9.25l-3.5 3.5" />
@@ -256,7 +251,7 @@
 				title="Larger · +"
 				disabled={!canGrow}
 				onpointerdown={handleToolPointerDown}
-				onclick={(event) => act(event, 'larger')}
+				onclick={(event) => step(event, 1)}
 			>
 				<svg viewBox="0 0 16 16" aria-hidden="true">
 					<path
@@ -275,7 +270,7 @@
 					aria-label="Move chart {index + 1} to page {prevPage}"
 					title="To page {prevPage} · Page Up"
 					onpointerdown={handleToolPointerDown}
-					onclick={(event) => act(event, 'prev')}
+					onclick={(event) => send(event, -1)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.75 4.5 6.25 8l3.5 3.5" /></svg>
 				</button>
@@ -288,7 +283,7 @@
 					aria-label="Move chart {index + 1} to page {nextPage}"
 					title="To page {nextPage} · Page Down"
 					onpointerdown={handleToolPointerDown}
-					onclick={(event) => act(event, 'next')}
+					onclick={(event) => send(event, 1)}
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.25 4.5 9.75 8l-3.5 3.5" /></svg>
 				</button>

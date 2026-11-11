@@ -30,6 +30,12 @@ export interface Box {
 
 export type SlotRole = 'prev' | 'current' | 'next';
 
+/** A page's paper on screen, px. */
+export interface PageBox {
+	id: string;
+	box: Box;
+}
+
 export interface EditorLayoutOptions {
 	/** Height of the label row above each page, px. */
 	labelHeight: number;
@@ -174,7 +180,7 @@ export function distanceToBox(box: Box, point: Point): number {
  */
 export function landingPage(
 	centre: Point,
-	pages: readonly { id: string; box: Box }[],
+	pages: readonly PageBox[],
 	slack: number
 ): string | null {
 	let nearest: string | null = null;
