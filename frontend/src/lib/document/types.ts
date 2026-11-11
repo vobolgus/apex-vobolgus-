@@ -122,6 +122,21 @@ export interface DocText {
 	chartId?: string;
 }
 
+/**
+ * A chart or a text as copied: what goes on the clipboard, and what `pasteBlock`
+ * reads back (from anywhere, so it is parsed like saved data).
+ */
+export type BlockCopy =
+	| { kind: 'chart'; chart: ChartSnapshot; frame: Rect }
+	| {
+			kind: 'text';
+			text: string;
+			style: TextStyle;
+			frame: Rect;
+			rotation?: number;
+			table?: TableSpec;
+	  };
+
 /** How Add to PDF and a turn lay a page out: stereo charts are discs, the rest pinholes. */
 export type ChartKind = 'stereo' | 'pinhole';
 

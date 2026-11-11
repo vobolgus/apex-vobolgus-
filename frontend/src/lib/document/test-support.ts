@@ -1,0 +1,59 @@
+/** What the document's tests share: a chart to put on a page, and a storage to save to. */
+
+import { expect } from 'vitest';
+import { contentBox } from './geometry';
+import { DOCUMENT_STORAGE_KEY } from './storage';
+import type { ChartSnapshot, DocPage, Rect } from './types';
+
+/** A disc at `aspect` 1, else a pinhole frame of that aspect. */
+export function chart(aspect = 1): ChartSnapshot {
+	return {
+		view: {
+			projection: aspect === 1 ? 'stereographic' : 'pinhole',
+			orientation: { x: 0, y: 0, z: 0, w: 1 },
+			stereoFovDeg: 180,
+			pinholeFovDeg: 100,
+			pinholeAspectRatio: aspect === 1 ? 1.61 : aspect,
+			pinholeHeightFrac: 1.18
+		},
+		layers: {
+			constellations: true,
+			constellationBoundaries: false,
+			equator: false,
+			ecliptic: true,
+			galacticEquator: false,
+			planets: false
+		},
+		aspect,
+		createdAt: '2026-10-27T12:00:00.000Z'
+	};
+}
+
+/** A storage in memory that counts its writes, and takes none longer than `limit`. */
+export function memoryStorage(limit = Infinity) {
+	const data = new Map<string, string>();
+	const storage = {
+		data,
+		writes: 0,
+		getItem: (key: string) => data.get(key) ?? null,
+		setItem(key: string, value: string) {
+			storage.writes += 1;
+			if (value.length > limit) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+			data.set(key, value);
+		}
+	};
+	return storage;
+}
+
+/** The document as `storage` holds it. */
+export function saved(storage: ReturnType<typeof memoryStorage>): { pages: DocPage[] } {
+	return JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
+}
+
+export function expectInside(frame: Rect, page: DocPage) {
+	const box = contentBox(page.orientation);
+	expect(frame.x).toBeGreaterThanOrEqual(box.x - 1e-9);
+	expect(frame.y).toBeGreaterThanOrEqual(box.y - 1e-9);
+	expect(frame.x + frame.w).toBeLessThanOrEqual(box.x + box.w + 1e-9);
+	expect(frame.y + frame.h).toBeLessThanOrEqual(box.y + box.h + 1e-9);
+}

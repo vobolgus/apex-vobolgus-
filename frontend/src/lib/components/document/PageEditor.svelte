@@ -48,7 +48,6 @@
 		isBlank,
 		MAX_ITEMS_PER_PAGE,
 		MAX_PAGES,
-		type BlockCopy,
 		type DocumentStore
 	} from '$lib/document/document.svelte';
 	import {
@@ -89,6 +88,7 @@
 		shownLayout
 	} from '$lib/document/text-fonts.svelte';
 	import type {
+		BlockCopy,
 		DocItem,
 		DocPage,
 		DocText,

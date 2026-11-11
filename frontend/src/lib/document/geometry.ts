@@ -499,6 +499,17 @@ export function fitFrame(frame: Rect, aspect: number, o: PageOrientation): Rect 
 }
 
 /**
+ * `frame` as it is when it lies inside the content box at `aspect`, as every frame
+ * the editor or the arranger makes does, else fitted in (`fitFrame`). A crowded
+ * turn lays charts out under the smallest side; raised to it, they would overlap.
+ */
+export function keptFrame(frame: Rect, aspect: number, o: PageOrientation): Rect {
+	return inside(frame, contentBox(o)) && Math.abs(frame.w / frame.h - aspect) <= 1e-9 * aspect
+		? frame
+		: fitFrame(frame, aspect, o);
+}
+
+/**
  * Whether a side of `frame` is under MIN_CHART_SIDE_MM. Only a crowded turn lays a
  * chart out that small (`turnLayout`), and the editor says so.
  */
