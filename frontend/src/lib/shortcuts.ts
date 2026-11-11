@@ -1,8 +1,8 @@
 /**
- * Generator shortcuts, as listed in the About dialog, and the matchers for the
- * ones the page binds itself.
+ * Generator shortcuts, as listed in the About dialog, and the table of the ones
+ * the page binds itself (`pageCommand`).
  *
- * The list documents bindings that live in the page (`+page.svelte`), the input
+ * The list documents bindings that live in the page (the table below), the input
  * controller and the frame overlay; it binds nothing on its own. Keys are
  * written as names: `mod` is ⌘ on Apple platforms and Ctrl elsewhere, `shift`
  * and `ctrl` are the modifiers, anything else is printed as is.
@@ -78,4 +78,34 @@ export function isHelpShortcut(event: KeyboardEvent): boolean {
 export function isModShortcut(event: KeyboardEvent, code: string, apple: boolean): boolean {
 	const mod = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 	return mod && !event.shiftKey && !event.altKey && event.code === code;
+}
+
+/** What a key does on the generator page itself; the keys it leaves alone turn the sky. */
+export type PageCommand = 'undo' | 'help' | 'exportMenu' | 'savePng' | 'switchProjection';
+
+/** The page's own keys, in the order they are tried: the first that matches is the one. */
+const PAGE_KEYS: readonly {
+	command: PageCommand;
+	matches: (event: KeyboardEvent, apple: boolean) => boolean;
+}[] = [
+	{ command: 'undo', matches: (event, apple) => isModShortcut(event, 'KeyZ', apple) },
+	{ command: 'help', matches: isHelpShortcut },
+	{ command: 'exportMenu', matches: (event, apple) => isModShortcut(event, 'KeyK', apple) },
+	{ command: 'savePng', matches: (event, apple) => isModShortcut(event, 'KeyS', apple) },
+	{
+		command: 'switchProjection',
+		// A held Shift+P switches once; its repeats go on to the sky, as any other key.
+		matches: (event) =>
+			event.code === 'KeyP' &&
+			event.shiftKey &&
+			!event.repeat &&
+			!event.metaKey &&
+			!event.ctrlKey &&
+			!event.altKey
+	}
+];
+
+/** The page's command for a key, or null for one it leaves to the sky. */
+export function pageCommand(event: KeyboardEvent, apple: boolean): PageCommand | null {
+	return PAGE_KEYS.find((key) => key.matches(event, apple))?.command ?? null;
 }

@@ -6,6 +6,7 @@ import {
 	isHelpShortcut,
 	isModShortcut,
 	keyLabel,
+	pageCommand,
 	spokenKeys
 } from './shortcuts';
 
@@ -91,5 +92,36 @@ describe('isModShortcut', () => {
 			isModShortcut(key({ key: 'S', code: 'KeyS', metaKey: true, shiftKey: true }), 'KeyS', true)
 		).toBe(false);
 		expect(isModShortcut(key({ key: 'k', code: 'KeyK' }), 'KeyK', true)).toBe(false);
+	});
+});
+
+describe('pageCommand', () => {
+	it('names the page’s own keys, ⌘ on a Mac and Ctrl elsewhere', () => {
+		expect(pageCommand(key({ code: 'KeyZ', metaKey: true }), true)).toBe('undo');
+		expect(pageCommand(key({ code: 'KeyZ', ctrlKey: true }), false)).toBe('undo');
+		expect(pageCommand(key({ code: 'KeyK', metaKey: true }), true)).toBe('exportMenu');
+		expect(pageCommand(key({ code: 'KeyS', ctrlKey: true }), false)).toBe('savePng');
+		expect(pageCommand(key({ key: '?', code: 'Slash', shiftKey: true }), true)).toBe('help');
+		expect(pageCommand(key({ key: 'P', code: 'KeyP', shiftKey: true }), true)).toBe(
+			'switchProjection'
+		);
+	});
+
+	it('leaves every other key to the sky', () => {
+		expect(pageCommand(key({ code: 'KeyS' }), true)).toBeNull();
+		expect(pageCommand(key({ code: 'KeyS', ctrlKey: true }), true)).toBeNull();
+		expect(pageCommand(key({ code: 'KeyP' }), true)).toBeNull();
+		expect(pageCommand(key({ code: 'KeyP', shiftKey: true, metaKey: true }), true)).toBeNull();
+		expect(pageCommand(key({ code: 'ArrowLeft' }), true)).toBeNull();
+	});
+
+	it('switches the projection once for a held Shift+P', () => {
+		expect(pageCommand(key({ code: 'KeyP', shiftKey: true, repeat: true }), true)).toBeNull();
+		// The others are still theirs while held: the page takes the repeats and does nothing.
+		expect(pageCommand(key({ code: 'KeyS', metaKey: true, repeat: true }), true)).toBe('savePng');
+	});
+
+	it('takes ? first on a layout where Shift+P types it', () => {
+		expect(pageCommand(key({ key: '?', code: 'KeyP', shiftKey: true }), true)).toBe('help');
 	});
 });
