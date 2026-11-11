@@ -420,6 +420,82 @@ function subdivideGreatCircle(
 	return result;
 }
 
+/**
+ * One subdivided segment, stroked where it is seen: a run of seen points is one
+ * stroke, and a run that leaves or enters the seen area ends or starts where it
+ * crosses the edge (`findVisibilityBoundary`).
+ */
+function strokeVisibleRuns(
+	ctx: CanvasRenderingContext2D,
+	cx: number,
+	cy: number,
+	pts: readonly ConstellationSegmentPoint[],
+	projected: readonly ProjectedSample[],
+	visualBlend: number,
+	params: ProjectionFrameParams,
+	rotateVector: Rotator
+): void {
+	let inRun = false;
+	for (let i = 0; i < pts.length - 1; i += 1) {
+		const aVis = projected[i].visible;
+		const bVis = projected[i + 1].visible;
+
+		if (!aVis && !bVis) {
+			if (inRun) {
+				ctx.stroke();
+				inRun = false;
+			}
+			continue;
+		}
+
+		if (aVis && bVis) {
+			if (!inRun) {
+				ctx.beginPath();
+				ctx.moveTo(cx + projected[i].x, cy + projected[i].y);
+				inRun = true;
+			}
+			ctx.lineTo(cx + projected[i + 1].x, cy + projected[i + 1].y);
+			continue;
+		}
+
+		if (aVis && !bVis) {
+			const b = findVisibilityBoundary(
+				pts[i],
+				pts[i + 1],
+				projected[i],
+				visualBlend,
+				params,
+				rotateVector
+			);
+			if (!inRun) {
+				ctx.beginPath();
+				ctx.moveTo(cx + projected[i].x, cy + projected[i].y);
+			}
+			// This segment leaves the visible area, so the run always ends here.
+			ctx.lineTo(cx + b.x, cy + b.y);
+			ctx.stroke();
+			inRun = false;
+			continue;
+		}
+
+		// !aVis && bVis
+		const b = findVisibilityBoundary(
+			pts[i + 1],
+			pts[i],
+			projected[i + 1],
+			visualBlend,
+			params,
+			rotateVector
+		);
+		if (inRun) ctx.stroke();
+		ctx.beginPath();
+		ctx.moveTo(cx + b.x, cy + b.y);
+		ctx.lineTo(cx + projected[i + 1].x, cy + projected[i + 1].y);
+		inRun = true;
+	}
+	if (inRun) ctx.stroke();
+}
+
 export function drawConstellationLines(
 	ctx: CanvasRenderingContext2D,
 	cx: number,
@@ -451,65 +527,7 @@ export function drawConstellationLines(
 				projected[i] = projectVec(pts[i], visualBlend, params, rotateVector);
 			}
 
-			let inRun = false;
-			for (let i = 0; i < pts.length - 1; i += 1) {
-				const aVis = projected[i].visible;
-				const bVis = projected[i + 1].visible;
-
-				if (!aVis && !bVis) {
-					if (inRun) {
-						ctx.stroke();
-						inRun = false;
-					}
-					continue;
-				}
-
-				if (aVis && bVis) {
-					if (!inRun) {
-						ctx.beginPath();
-						ctx.moveTo(cx + projected[i].x, cy + projected[i].y);
-						inRun = true;
-					}
-					ctx.lineTo(cx + projected[i + 1].x, cy + projected[i + 1].y);
-					continue;
-				}
-
-				if (aVis && !bVis) {
-					const b = findVisibilityBoundary(
-						pts[i],
-						pts[i + 1],
-						projected[i],
-						visualBlend,
-						params,
-						rotateVector
-					);
-					if (!inRun) {
-						ctx.beginPath();
-						ctx.moveTo(cx + projected[i].x, cy + projected[i].y);
-					}
-					// This segment leaves the visible area, so the run always ends here.
-					ctx.lineTo(cx + b.x, cy + b.y);
-					ctx.stroke();
-					inRun = false;
-					continue;
-				}
-
-				// !aVis && bVis
-				const b = findVisibilityBoundary(
-					pts[i + 1],
-					pts[i],
-					projected[i + 1],
-					visualBlend,
-					params,
-					rotateVector
-				);
-				if (inRun) ctx.stroke();
-				ctx.beginPath();
-				ctx.moveTo(cx + b.x, cy + b.y);
-				ctx.lineTo(cx + projected[i + 1].x, cy + projected[i + 1].y);
-				inRun = true;
-			}
-			if (inRun) ctx.stroke();
+			strokeVisibleRuns(ctx, cx, cy, pts, projected, visualBlend, params, rotateVector);
 		}
 	}
 

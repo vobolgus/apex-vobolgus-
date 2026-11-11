@@ -338,87 +338,100 @@ export class InputController {
 		this.pressedKeys.clear();
 	}
 
+	/**
+	 * One frame of motion: a flight, a glide, an eased zoom and the held keys, each in
+	 * turn. True while any of them still moves the view.
+	 */
 	tick(dtMs: number): boolean {
-		let active = false;
+		const flying = this.stepFlight(dtMs);
+		const gliding = this.stepGlide(dtMs);
+		const zooming = this.stepZoomTarget(dtMs);
+		const zoomKeys = this.stepZoomKeys(dtMs);
+		const turnKeys = this.stepTurnKeys(dtMs);
+		return flying || gliding || zooming || zoomKeys || turnKeys;
+	}
 
-		if (this.flight) {
-			active = true;
-			const flight = this.flight;
-			flight.elapsedMs += dtMs;
-			const t = Math.min(flight.elapsedMs / flight.durationMs, 1);
-			const eased = easeInOutCubic(t);
-			view.orientation = slerpQuaternion(flight.from, flight.to, eased);
-			if (flight.fov) {
-				// Evenly in scale, not in degrees: half way there looks half way zoomed.
-				const { mode, from, to } = flight.fov;
-				this.writeFov(from * Math.pow(to / from, eased), mode);
-			}
-			if (t >= 1) {
-				view.orientation = normalizeQuaternion(flight.to);
-				if (flight.fov) this.writeFov(flight.fov.to, flight.fov.mode);
-				this.flight = null;
-			}
+	private stepFlight(dtMs: number): boolean {
+		if (!this.flight) return false;
+		const flight = this.flight;
+		flight.elapsedMs += dtMs;
+		const t = Math.min(flight.elapsedMs / flight.durationMs, 1);
+		const eased = easeInOutCubic(t);
+		view.orientation = slerpQuaternion(flight.from, flight.to, eased);
+		if (flight.fov) {
+			// Evenly in scale, not in degrees: half way there looks half way zoomed.
+			const { mode, from, to } = flight.fov;
+			this.writeFov(from * Math.pow(to / from, eased), mode);
 		}
-
-		if (this.glide) {
-			active = true;
-			const glide = this.glide;
-			const turn = quaternionFromAxisAngle(glide.axis, glide.speedRadPerMs * dtMs);
-			view.orientation = normalizeQuaternion(multiplyQuaternions(turn, view.orientation));
-			glide.speedRadPerMs *= Math.exp(-dtMs / GLIDE_DECAY_MS);
-			if (glide.speedRadPerMs < GLIDE_STOP_RAD_PER_MS) this.glide = null;
+		if (t >= 1) {
+			view.orientation = normalizeQuaternion(flight.to);
+			if (flight.fov) this.writeFov(flight.fov.to, flight.fov.mode);
+			this.flight = null;
 		}
+		return true;
+	}
 
-		if (this.zoomTarget) {
-			const { mode, fovDeg: target } = this.zoomTarget;
-			if (mode !== this.opts.getMode()) {
-				// The projection changed under it: the target was the other one's.
-				this.zoomTarget = null;
-			} else {
-				active = true;
-				const current = this.getFov(mode);
-				const next = current + (target - current) * (1 - Math.exp(-dtMs / ZOOM_EASE_MS));
-				if (Math.abs(target - next) <= ZOOM_SNAP_DEG) {
-					this.writeFov(target, mode);
-					this.zoomTarget = null;
-				} else {
-					this.writeFov(next, mode);
-				}
-			}
+	private stepGlide(dtMs: number): boolean {
+		if (!this.glide) return false;
+		const glide = this.glide;
+		const turn = quaternionFromAxisAngle(glide.axis, glide.speedRadPerMs * dtMs);
+		view.orientation = normalizeQuaternion(multiplyQuaternions(turn, view.orientation));
+		glide.speedRadPerMs *= Math.exp(-dtMs / GLIDE_DECAY_MS);
+		if (glide.speedRadPerMs < GLIDE_STOP_RAD_PER_MS) this.glide = null;
+		return true;
+	}
+
+	private stepZoomTarget(dtMs: number): boolean {
+		if (!this.zoomTarget) return false;
+		const { mode, fovDeg: target } = this.zoomTarget;
+		if (mode !== this.opts.getMode()) {
+			// The projection changed under it: the target was the other one's.
+			this.zoomTarget = null;
+			return false;
 		}
-
-		if (this.pressedKeys.has('KeyI') || this.pressedKeys.has('KeyO')) {
-			active = true;
-			const factor = Math.exp((ZOOM_SPEED_PER_S * dtMs) / 1000);
-			const mode = this.opts.getMode();
-			const fov = this.getFov(mode);
-			this.setFov(this.pressedKeys.has('KeyI') ? fov / factor : fov * factor, mode);
+		const current = this.getFov(mode);
+		const next = current + (target - current) * (1 - Math.exp(-dtMs / ZOOM_EASE_MS));
+		if (Math.abs(target - next) <= ZOOM_SNAP_DEG) {
+			this.writeFov(target, mode);
+			this.zoomTarget = null;
+		} else {
+			this.writeFov(next, mode);
 		}
+		return true;
+	}
 
-		if (this.pressedKeys.size > 0 && !this.flight) {
-			active = true;
-			const pan = PAN_SPEED_RAD_PER_S * (dtMs / 1000) * this.fovScale();
-			const roll = ROLL_SPEED_RAD_PER_S * (dtMs / 1000);
+	private stepZoomKeys(dtMs: number): boolean {
+		if (!this.pressedKeys.has('KeyI') && !this.pressedKeys.has('KeyO')) return false;
+		const factor = Math.exp((ZOOM_SPEED_PER_S * dtMs) / 1000);
+		const mode = this.opts.getMode();
+		const fov = this.getFov(mode);
+		this.setFov(this.pressedKeys.has('KeyI') ? fov / factor : fov * factor, mode);
+		return true;
+	}
 
-			let delta: Quaternion = { x: 0, y: 0, z: 0, w: 1 };
+	/** The held keys pan and roll the view; not during a flight. */
+	private stepTurnKeys(dtMs: number): boolean {
+		if (this.pressedKeys.size === 0 || this.flight) return false;
+		const pan = PAN_SPEED_RAD_PER_S * (dtMs / 1000) * this.fovScale();
+		const roll = ROLL_SPEED_RAD_PER_S * (dtMs / 1000);
 
-			if (this.pressedKeys.has('KeyW') || this.pressedKeys.has('ArrowUp'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, pan), delta);
-			if (this.pressedKeys.has('KeyS') || this.pressedKeys.has('ArrowDown'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, -pan), delta);
-			if (this.pressedKeys.has('KeyA') || this.pressedKeys.has('ArrowLeft'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, -pan), delta);
-			if (this.pressedKeys.has('KeyD') || this.pressedKeys.has('ArrowRight'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, pan), delta);
-			if (this.pressedKeys.has('KeyQ'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, -roll), delta);
-			if (this.pressedKeys.has('KeyE'))
-				delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, roll), delta);
+		let delta: Quaternion = { x: 0, y: 0, z: 0, w: 1 };
 
-			view.orientation = normalizeQuaternion(multiplyQuaternions(delta, view.orientation));
-		}
+		if (this.pressedKeys.has('KeyW') || this.pressedKeys.has('ArrowUp'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, pan), delta);
+		if (this.pressedKeys.has('KeyS') || this.pressedKeys.has('ArrowDown'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 1, y: 0, z: 0 }, -pan), delta);
+		if (this.pressedKeys.has('KeyA') || this.pressedKeys.has('ArrowLeft'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, -pan), delta);
+		if (this.pressedKeys.has('KeyD') || this.pressedKeys.has('ArrowRight'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 1, z: 0 }, pan), delta);
+		if (this.pressedKeys.has('KeyQ'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, -roll), delta);
+		if (this.pressedKeys.has('KeyE'))
+			delta = multiplyQuaternions(quaternionFromAxisAngle({ x: 0, y: 0, z: 1 }, roll), delta);
 
-		return active;
+		view.orientation = normalizeQuaternion(multiplyQuaternions(delta, view.orientation));
+		return true;
 	}
 
 	private startNorthUpAnimation() {

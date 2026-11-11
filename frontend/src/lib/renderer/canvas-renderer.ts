@@ -18,7 +18,12 @@ import {
 	VISIBILITY_CULL_THRESHOLD
 } from '../constants';
 import { clamp, lerp } from '../math/easing';
-import { getProjectionFrameParams, sampleStarMorphFrame, toViewSpace } from '../math/projection';
+import {
+	getProjectionFrameParams,
+	sampleStarMorphFrame,
+	toViewSpace,
+	type ProjectionFrameParams
+} from '../math/projection';
 import {
 	advanceStarFade,
 	makeLineAnim,
@@ -237,30 +242,7 @@ export class CanvasRenderer {
 			state.pinholeAspectRatio,
 			state.pinholeHeightFrac
 		);
-		let morphViewportPath2D: Path2D;
-		if (visualBlend >= 1) {
-			morphViewportPath2D = new Path2D(
-				buildRoundedRectPath(
-					cx - params.pinholeViewportWidth * 0.5,
-					cy - params.pinholeViewportHeight * 0.5,
-					params.pinholeViewportWidth,
-					params.pinholeViewportHeight,
-					PINHOLE_CORNER_RADIUS
-				)
-			);
-		} else if (visualBlend <= 0) {
-			morphViewportPath2D = new Path2D(buildCirclePath(cx, cy, params.radius));
-		} else {
-			const viewportInterpolator = this.getViewportMorphInterpolator(
-				cx,
-				cy,
-				params.radius,
-				params.pinholeViewportWidth,
-				params.pinholeViewportHeight,
-				PINHOLE_CORNER_RADIUS
-			);
-			morphViewportPath2D = this.getMorphViewportPath2D(visualBlend, viewportInterpolator).path2D;
-		}
+		const morphViewportPath2D = this.viewportPath(visualBlend, params, cx, cy);
 
 		ctx.fillStyle = CHART_PAGE_COLOR;
 		ctx.fillRect(0, 0, width, height);
@@ -304,6 +286,36 @@ export class CanvasRenderer {
 
 		ctx.restore();
 		ctx.globalAlpha = 1;
+	}
+
+	/** The viewport's outline at `visualBlend`: the disc, the frame, or the morph between them. */
+	private viewportPath(
+		visualBlend: number,
+		params: ProjectionFrameParams,
+		cx: number,
+		cy: number
+	): Path2D {
+		if (visualBlend >= 1) {
+			return new Path2D(
+				buildRoundedRectPath(
+					cx - params.pinholeViewportWidth * 0.5,
+					cy - params.pinholeViewportHeight * 0.5,
+					params.pinholeViewportWidth,
+					params.pinholeViewportHeight,
+					PINHOLE_CORNER_RADIUS
+				)
+			);
+		}
+		if (visualBlend <= 0) return new Path2D(buildCirclePath(cx, cy, params.radius));
+		const viewportInterpolator = this.getViewportMorphInterpolator(
+			cx,
+			cy,
+			params.radius,
+			params.pinholeViewportWidth,
+			params.pinholeViewportHeight,
+			PINHOLE_CORNER_RADIUS
+		);
+		return this.getMorphViewportPath2D(visualBlend, viewportInterpolator).path2D;
 	}
 
 	private drawReferenceLines(
