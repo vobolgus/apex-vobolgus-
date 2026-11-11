@@ -71,8 +71,3 @@ export function insertBlock(page: Blocks, block: DocBlock, at = Infinity): void 
 	const [from, to] = isChart(block) ? [0, charts] : [charts, page.blocks.length];
 	page.blocks.splice(Math.min(from + at, to), 0, block);
 }
-
-/** `blocks` in the order a page keeps them: the charts first, each kind in the order it came. */
-export function layered(blocks: readonly DocBlock[]): DocBlock[] {
-	return [...blocks.filter(isChart), ...blocks.filter(isTypeset)];
-}

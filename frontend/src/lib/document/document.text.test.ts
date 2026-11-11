@@ -228,7 +228,7 @@ describe('DocumentStore: text', () => {
 		expect(typesetOf(again.pages[1])[0].rotation).toBe(180);
 		// What does not read as an angle is upright.
 		const raw = saved(storage);
-		(typesetOf(raw.pages[1])[0] as { rotation: unknown }).rotation = 'sideways';
+		(raw.pages[1].texts![0] as { rotation: unknown }).rotation = 'sideways';
 		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
 		const odd = new DocumentStore(storage);
 		odd.load();

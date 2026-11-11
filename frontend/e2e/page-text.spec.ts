@@ -1,14 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { contentBox } from '../src/lib/document/geometry';
-import {
-	chartsOf,
-	documentOf,
-	savedPages,
-	seedDocument,
-	seedFirstShape,
-	typesetOf,
-	type SavedType
-} from './saved-document';
+import { chartsOf, savedPages, seedDocument, typesetOf, type SavedText } from './saved-document';
 
 /**
  * Text on a page, in the page editor: added from the page's name, typed in place,
@@ -42,30 +34,22 @@ const STEREO = {
 
 const STYLE = { font: 'serif', size: 12, bold: false, italic: false, align: 'left' };
 
-/** A text as it is saved, with its words. */
-type SavedText = SavedType & { kind: 'text'; text: string };
-
 /** A disc on the first page with room under it, and an empty second page. */
 function documentWith(texts: SavedText[] = []) {
-	const disc = {
-		kind: 'chart',
-		id: 'e2e-a',
-		chart: STEREO,
-		frame: { x: 42, y: 30, w: 126, h: 126 }
+	return {
+		pages: [
+			{
+				id: 'e2e-page-1',
+				orientation: 'portrait',
+				items: [{ id: 'e2e-a', chart: STEREO, frame: { x: 42, y: 30, w: 126, h: 126 } }],
+				...(texts.length > 0 ? { texts, manual: true } : {})
+			},
+			{ id: 'e2e-page-2', orientation: 'portrait', items: [] }
+		]
 	};
-	return documentOf([
-		{
-			id: 'e2e-page-1',
-			orientation: 'portrait',
-			blocks: [disc, ...texts],
-			...(texts.length > 0 ? { manual: true } : {})
-		},
-		{ id: 'e2e-page-2', orientation: 'portrait', blocks: [] }
-	]);
 }
 
 const CAPTION: SavedText = {
-	kind: 'text',
 	id: 'e2e-text',
 	text: 'Find the zenith and name the ten brightest stars of this sky.',
 	style: STYLE,
@@ -83,7 +67,7 @@ async function seedAndOpen(page: Page, texts: SavedText[] = []) {
 }
 
 /** The texts of the saved page `at` (saves are debounced: poll this). */
-async function savedTexts(page: Page, at = 0): Promise<SavedType[]> {
+async function savedTexts(page: Page, at = 0): Promise<SavedText[]> {
 	const saved = (await savedPages(page))[at];
 	return saved ? typesetOf(saved) : [];
 }
@@ -315,14 +299,8 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		view: { ...STEREO.view, projection: 'pinhole', pinholeFovDeg: 40 },
 		aspect: 1.6
 	};
-	// Saved in the first shape, charts in `items` and text in `texts`: the app brings it over.
-	const caption = {
-		id: CAPTION.id,
-		text: 'Field {fov}',
-		style: STYLE,
-		frame: { x: 112, y: 80, w: 86, h: 6 }
-	};
-	await seedFirstShape(page, {
+	const caption = { ...CAPTION, text: 'Field {fov}', frame: { x: 112, y: 80, w: 86, h: 6 } };
+	await seedDocument(page, {
 		pages: [
 			{
 				id: 'e2e-page-1',

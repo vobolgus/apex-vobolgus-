@@ -4,17 +4,11 @@ import { MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { chartsOf, typesetOf } from './blocks';
 import { DocumentStore } from './document.svelte';
 import { GUTTER_MM, MIN_CHART_SIDE_MM, overlaps } from './geometry';
-import {
-	DOCUMENT_STORAGE_KEY,
-	FIRST_SHAPE_STORAGE_KEY,
-	parseDocument,
-	parseFirstShape,
-	THUMB_BUDGET_CHARS
-} from './storage';
+import { DOCUMENT_STORAGE_KEY, parseDocument, THUMB_BUDGET_CHARS } from './storage';
 import { layTemplate } from './templates';
 import { chart, expectInside, memoryStorage, saved, wordsOf } from './test-support';
 import { DEFAULT_TEXT_STYLE } from './text';
-import type { DocPage, Rect } from './types';
+import type { Rect } from './types';
 
 const style = { ...DEFAULT_TEXT_STYLE };
 
@@ -27,7 +21,7 @@ describe('the saved document', () => {
 		doc.addChart(chart(), big);
 		doc.addChart(chart(), 'data:image/png;base64,small');
 		doc.flush();
-		const items = saved(storage).pages.flatMap((p) => chartsOf(p));
+		const items = saved(storage).pages.flatMap((p) => p.items);
 		expect(items.map((item) => item.thumb?.length ?? 0)).toEqual([
 			big.length,
 			0,
@@ -42,20 +36,18 @@ describe('the saved document', () => {
 		const doc = new DocumentStore(storage);
 		doc.addChart(chart(), `data:image/png;base64,${'A'.repeat(10000)}`);
 		doc.flush();
-		const [item] = chartsOf(saved(storage).pages[0]);
+		const [item] = saved(storage).pages[0].items;
 		expect(item).not.toHaveProperty('thumb');
 		expect(item.frame).toEqual({ x: 12, y: 55.5, w: 186, h: 186 });
 	});
 
 	it('ignores data that is not a document', () => {
-		for (const key of [DOCUMENT_STORAGE_KEY, FIRST_SHAPE_STORAGE_KEY]) {
-			for (const raw of ['not json', 'null', '[]', '{"pages": 3}', '"x"']) {
-				const storage = memoryStorage();
-				storage.data.set(key, raw);
-				const doc = new DocumentStore(storage);
-				expect(doc.load()).toBe(false);
-				expect(doc.pages).toEqual([]);
-			}
+		for (const raw of ['not json', 'null', '[]', '{"pages": 3}', '"x"']) {
+			const storage = memoryStorage();
+			storage.data.set(DOCUMENT_STORAGE_KEY, raw);
+			const doc = new DocumentStore(storage);
+			expect(doc.load()).toBe(false);
+			expect(doc.pages).toEqual([]);
 		}
 		expect(new DocumentStore(memoryStorage()).load()).toBe(false);
 	});
@@ -102,7 +94,7 @@ describe('the saved document', () => {
 			]
 		};
 		const storage = memoryStorage();
-		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(document));
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(document));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		expect(doc.pages.map((p) => p.id)).toEqual(['p1', 'p4']);
@@ -199,7 +191,7 @@ describe('the saved document', () => {
 			})
 		];
 		const storage = memoryStorage();
-		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify({ pages }));
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages }));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		const [ok, ...rest] = doc.pages;
@@ -275,8 +267,7 @@ describe('the saved document', () => {
 		});
 		const page = (texts: unknown) => ({ id: 'p', orientation: 'portrait', items: [], texts });
 		const load = (texts: unknown) => {
-			storage.data.delete(DOCUMENT_STORAGE_KEY);
-			storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify({ pages: [page(texts)] }));
+			storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages: [page(texts)] }));
 			const store = new DocumentStore(storage);
 			expect(store.load()).toBe(true);
 			return store.pages[0];
@@ -362,12 +353,8 @@ describe('the saved document', () => {
 		});
 		doc.flush();
 		const raw = saved(storage);
-		expect(typesetOf(raw.pages[0])[0].role).toBe('title');
-		raw.pages[0].blocks.push({
-			...typesetOf(raw.pages[0])[0],
-			id: 'odd',
-			role: 'footnote' as never
-		});
+		expect(raw.pages[0].texts![0].role).toBe('title');
+		raw.pages[0].texts!.push({ ...raw.pages[0].texts![0], id: 'odd', role: 'footnote' as never });
 		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
 		const again = new DocumentStore(storage);
 		again.load();
@@ -395,8 +382,8 @@ describe('the shape it is saved in', () => {
 		...extra
 	});
 
-	/** A document as the first shape had it: every thing a page could hold then. */
-	function first() {
+	/** A document as it is saved: every thing a page can hold. */
+	function document() {
 		const mark = { raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 };
 		return {
 			pages: [
@@ -453,40 +440,55 @@ describe('the shape it is saved in', () => {
 		};
 	}
 
-	it('writes under a key of its own and, to a page, one list of blocks', () => {
+	it('writes under the key it always had: to a page its charts in `items`, its type in `texts`', () => {
 		const storage = memoryStorage();
 		const doc = new DocumentStore(storage);
-		const { pageId } = doc.addChart(chart());
+		const { pageId, blockId } = doc.addChart(chart());
+		const bare = doc.addPage();
 		doc.addBlock(pageId, { kind: 'text', text: 'T', style, frame: { x: 12, y: 250, w: 80, h: 6 } });
 		doc.addBlock(pageId, {
 			kind: 'table',
 			style,
 			table: { source: 'stars', rows: 3 },
-			frame: { x: 100, y: 250, w: 80, h: 20 }
+			frame: { x: 100, y: 250, w: 80, h: 20 },
+			rotation: 90
 		});
 		doc.flush();
-		expect(DOCUMENT_STORAGE_KEY).toBe('skycharts.document.v2');
-		expect(FIRST_SHAPE_STORAGE_KEY).toBe('skycharts.document.v1');
+		expect(DOCUMENT_STORAGE_KEY).toBe('skycharts.document.v1');
 		expect([...storage.data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
 		const raw = JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
 		expect(Object.keys(raw)).toEqual(['pages']);
-		const [page] = raw.pages;
-		expect(page).not.toHaveProperty('items');
-		expect(page).not.toHaveProperty('texts');
-		expect(page.blocks.map((block: { kind: string }) => block.kind)).toEqual([
-			'chart',
-			'text',
-			'table'
+		const [page, empty] = raw.pages;
+		expect(page).not.toHaveProperty('blocks');
+		expect(page.manual).toBe(true);
+		// A chart is saved as itself, a text with its words: neither says what kind it is.
+		expect(page.items).toEqual([
+			{ id: blockId, chart: chart(), frame: { x: 12, y: 55.5, w: 186, h: 186 } }
 		]);
-		// A table is saved as what it is: a spec, and no words.
-		expect(page.blocks[2]).not.toHaveProperty('text');
+		expect(page.texts).toHaveLength(2);
+		expect(page.texts[0]).toEqual({
+			id: expect.any(String),
+			text: 'T',
+			style,
+			frame: { x: 12, y: 250, w: 80, h: 6 }
+		});
+		// A table is a text of no words that carries its spec.
+		expect(page.texts[1]).toMatchObject({
+			text: '',
+			style,
+			table: { source: 'stars', rows: 3 },
+			rotation: 90
+		});
+		expect(page.texts[1]).not.toHaveProperty('kind');
+		// A page with no text has no list of it.
+		expect(empty).toEqual({ id: bare, orientation: 'portrait', items: [] });
 	});
 
-	it('reads a document saved in the first shape as the same pages', () => {
-		const pages = parseFirstShape(first())!;
+	it('reads a saved document as the same pages, each of one list of blocks', () => {
+		const pages = parseDocument(document())!;
 		expect(pages.map((page) => page.id)).toEqual(['turned', 'card', 'bare']);
 		const [turned, card, bare] = pages;
-		const saved = first().pages;
+		const saved = document().pages;
 
 		// Charts with their thumbnail, and how the page was laid out and turned.
 		expect(turned).toEqual({
@@ -540,34 +542,44 @@ describe('the shape it is saved in', () => {
 		expect(bare).toEqual({ id: 'bare', orientation: 'portrait', blocks: [] });
 	});
 
-	it('reads the same pages from either shape, and from what it writes itself', () => {
-		const pages = parseFirstShape(first())!;
+	it('writes a document back in the shape it read it in, and reads the same pages from that', () => {
+		const pages = parseDocument(document())!;
 		const storage = memoryStorage();
-		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(first()));
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(document()));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		expect(doc.pages).toEqual(pages);
-		// Nothing is written by reading: the first shape stays as it is until the document changes.
+		// Nothing is written by reading.
 		expect(storage.writes).toBe(0);
-		expect([...storage.data.keys()]).toEqual([FIRST_SHAPE_STORAGE_KEY]);
 
-		// Changed, it is saved in the shape of now, and the first's copy goes.
+		// Changed, it is saved where it was and as it was: nothing a build before would not read.
 		doc.selectedPageId = 'card';
 		const added = doc.addPage();
 		doc.removePage(added);
 		doc.flush();
 		expect([...storage.data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
 		const raw = JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
-		expect(raw.pages.every((page: object) => 'blocks' in page && !('items' in page))).toBe(true);
+		expect(raw.pages.every((page: object) => 'items' in page && !('blocks' in page))).toBe(true);
+		const [turned, card, bare] = document().pages;
+		expect(raw.pages[0]).toEqual(turned);
+		expect(raw.pages[1]).toMatchObject({ ...card, texts: card.texts!.map(({ id }) => ({ id })) });
+		expect(raw.pages[1].texts.map((text: { text: string }) => text.text)).toEqual([
+			'Latitude {lat}',
+			'Latitude {lat}',
+			'',
+			'',
+			'Latitude {lat}'
+		]);
+		expect(raw.pages[2]).toEqual(bare);
 		expect(parseDocument(raw)).toEqual(pages);
 		const again = new DocumentStore(storage);
 		expect(again.load()).toBe(true);
 		expect(again.pages).toEqual(pages);
 	});
 
-	it('reads the first shape only where nothing newer is, and each shape only under its own key', () => {
-		const { pages } = first();
-		const now = { pages: parseFirstShape({ pages })!.slice(0, 1) };
+	it('reads only under its own key, and a page only in the shape it is saved in', () => {
+		const { pages } = document();
+		const blocks = { pages: parseDocument({ pages })!.slice(0, 1) };
 		const load = (entries: Record<string, unknown>) => {
 			const storage = memoryStorage();
 			for (const [key, value] of Object.entries(entries)) {
@@ -576,29 +588,25 @@ describe('the shape it is saved in', () => {
 			const doc = new DocumentStore(storage);
 			return doc.load() ? doc.pages.map((page) => page.id) : null;
 		};
-		// Both there (an older build wrote again since): the newer shape is the document.
-		expect(load({ [DOCUMENT_STORAGE_KEY]: now, [FIRST_SHAPE_STORAGE_KEY]: { pages } })).toEqual([
-			'turned'
-		]);
-		// What is under the newer key is no document: the first shape's copy is.
+		expect(load({ [DOCUMENT_STORAGE_KEY]: { pages } })).toEqual(['turned', 'card', 'bare']);
+		// Under any other key there is no document, whatever is there.
+		expect(load({ 'skycharts.document.v2': { pages } })).toBeNull();
+		expect(load({ 'skycharts.document.v2': blocks })).toBeNull();
 		expect(
-			load({ [DOCUMENT_STORAGE_KEY]: 'nonsense', [FIRST_SHAPE_STORAGE_KEY]: { pages } })
-		).toEqual(['turned', 'card', 'bare']);
-		// A page of one shape is no page of the other: it has no blocks, or no items.
-		expect(load({ [DOCUMENT_STORAGE_KEY]: { pages } })).toEqual([]);
-		expect(load({ [FIRST_SHAPE_STORAGE_KEY]: now })).toEqual([]);
-		expect(parseDocument({ pages })).toEqual([]);
-		expect(parseFirstShape(now)).toEqual([]);
-		expect(parseFirstShape({ pages: 3 })).toBeNull();
+			load({ [DOCUMENT_STORAGE_KEY]: 'nonsense', 'skycharts.document.v2': blocks })
+		).toBeNull();
+		// The model's page is no saved page: it has blocks, and no list of charts.
+		expect(load({ [DOCUMENT_STORAGE_KEY]: blocks })).toEqual([]);
+		expect(parseDocument(blocks)).toEqual([]);
+		expect(parseDocument({ pages: 3 })).toBeNull();
 	});
 
-	it("makes room for the document by taking the first shape's copy away before its thumbnails", () => {
-		// Room for one copy with its thumbnail, not for two.
+	it('makes room for the document by leaving its thumbnails out, and takes nothing else away', () => {
+		// Room for the document with its thumbnail, while nothing else is kept beside it.
 		const data = new Map<string, string>();
 		const used = () => [...data.values()].reduce((sum, value) => sum + value.length, 0);
 		const storage = {
 			getItem: (key: string) => data.get(key) ?? null,
-			removeItem: (key: string) => void data.delete(key),
 			setItem(key: string, value: string) {
 				const others = used() - (data.get(key)?.length ?? 0);
 				if (others + value.length > 9000) throw new DOMException('Quota', 'QuotaExceededError');
@@ -615,61 +623,88 @@ describe('the shape it is saved in', () => {
 				}
 			]
 		};
-		data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(old));
+		data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(old));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
+		// Written over its own copy, it fits as it did.
 		doc.addPage();
 		doc.flush();
 		expect([...data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
 		const again = new DocumentStore(storage);
 		again.load();
+		expect(again.pages).toHaveLength(2);
 		expect(chartsOf(again.pages[0])[0].thumb).toBe(thumb);
+
+		// With something else in the storage there is room for the charts alone: the
+		// thumbnail goes, and what is not the document's stays.
+		const other = 'x'.repeat(5000);
+		data.set('skycharts.other', other);
+		doc.addPage();
+		doc.flush();
+		expect(data.get('skycharts.other')).toBe(other);
+		const later = new DocumentStore(storage);
+		later.load();
+		expect(later.pages).toHaveLength(3);
+		expect(chartsOf(later.pages[0])[0]).not.toHaveProperty('thumb');
+		expect(chartsOf(later.pages[0])[0].frame).toEqual({ x: 12, y: 55.5, w: 186, h: 186 });
 	});
 
-	it('keeps charts under the type whatever order they were saved in, and drops what is of no kind', () => {
-		const block = (kind: string, id: string, rest: object) => ({ kind, id, ...rest });
+	it('reads charts from the list of charts and type from the list of type, and drops what is in the wrong one', () => {
 		const frame = { x: 12, y: 12, w: 90, h: 90 };
 		const type = { style, frame: { x: 12, y: 200, w: 90, h: 6 } };
-		const page = (blocks: unknown[]) =>
-			parseDocument({ pages: [{ id: 'p', orientation: 'portrait', blocks }] })![0];
-		const read = page([
-			block('text', 't1', { ...type, text: 'one' }),
-			block('chart', 'c1', { chart: chart(), frame }),
-			block('poster', 'x1', { chart: chart(), frame }),
-			block('table', 'l1', { ...type, table: { source: 'stars', rows: 3 } }),
-			{ id: 'x2', chart: chart(), frame },
-			block('chart', 'c2', { chart: chart(), frame }),
-			block('table', 'x3', { ...type, table: { source: 'comets', rows: 3 } }),
-			block('table', 'x4', { ...type, text: 'words, and no spec' }),
-			block('text', 'x5', { ...type, table: { source: 'stars', rows: 3 } }),
-			block('text', 'c1', { ...type, text: 'an id a chart has' }),
-			'nonsense'
+		const page = (items: unknown[], texts: unknown[]) =>
+			parseDocument({ pages: [{ id: 'p', orientation: 'portrait', items, texts }] })![0];
+		const read = page(
+			[
+				{ id: 'c1', chart: chart(), frame },
+				{ id: 'x1', ...type, text: 'a text among the charts' },
+				{ id: 'c2', chart: chart(), frame, kind: 'text', text: 'a chart, whatever it says' },
+				{ id: 'x2', ...type, text: '', table: { source: 'stars', rows: 3 } },
+				'nonsense'
+			],
+			[
+				{ id: 't1', ...type, text: 'one' },
+				{ id: 'x3', chart: chart(), frame },
+				{ id: 'l1', ...type, text: '', table: { source: 'stars', rows: 3 } },
+				{ id: 'x4', ...type, table: { source: 'stars', rows: 3 } },
+				{ id: 'c1', ...type, text: 'an id a chart has' },
+				'nonsense'
+			]
+		);
+		expect(read.blocks.map((it) => [it.kind, it.id])).toEqual([
+			['chart', 'c1'],
+			['chart', 'c2'],
+			['text', 't1'],
+			['table', 'l1']
 		]);
-		expect(read.blocks.map((it) => it.id)).toEqual(['c1', 'c2', 't1', 'l1']);
 		expect(read.manual).toBe(true);
-		// A text has no spec to keep, whatever was saved with it.
-		const kept = page([
-			block('text', 't', { ...type, text: 'x', table: { source: 'stars', rows: 3 } })
+		// A text with a spec that reads as one is a table, whatever words were saved with it.
+		const kept = page([], [{ id: 't', ...type, text: 'x', table: { source: 'stars', rows: 3 } }]);
+		expect(kept.blocks).toEqual([
+			{ kind: 'table', id: 't', table: { source: 'stars', look: 'names', rows: 3 }, ...type }
 		]);
-		expect(kept.blocks).toEqual([{ kind: 'text', id: 't', text: 'x', ...type }]);
 	});
 
-	it('holds a page to the texts and tables the backend takes, of either shape', () => {
+	it('holds a page to the texts and tables the backend takes, written and read again', () => {
 		const many = Array.from({ length: MAX_TEXTS_PER_PAGE + 5 }, (_, i) =>
 			i % 2 ? list(`l${i}`, { source: 'stars', rows: 3 }) : words(`t${i}`)
 		);
-		const old = parseFirstShape({
-			pages: [{ id: 'p', orientation: 'portrait', items: [], texts: many }]
-		})!;
+		const raw = { pages: [{ id: 'p', orientation: 'portrait', items: [], texts: many }] };
+		const old = parseDocument(raw)!;
 		expect(typesetOf(old[0])).toHaveLength(MAX_TEXTS_PER_PAGE);
 		expect(
 			typesetOf(old[0])
 				.map((it) => it.kind)
 				.slice(0, 2)
 		).toEqual(['text', 'table']);
-		const now = parseDocument(JSON.parse(JSON.stringify({ pages: old })))!;
-		expect(now).toEqual(old);
-		const page: DocPage = { ...old[0], blocks: [...old[0].blocks, ...old[0].blocks] };
-		expect(typesetOf(parseDocument({ pages: [page] })![0])).toHaveLength(MAX_TEXTS_PER_PAGE);
+		const storage = memoryStorage();
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		const doc = new DocumentStore(storage);
+		doc.load();
+		doc.removePage(doc.addPage());
+		doc.flush();
+		const written = saved(storage);
+		expect(written.pages[0].texts).toHaveLength(MAX_TEXTS_PER_PAGE);
+		expect(parseDocument(written)).toEqual(old);
 	});
 });

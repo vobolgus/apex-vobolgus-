@@ -10,6 +10,7 @@
  */
 
 import { tick } from 'svelte';
+import { clipboardCopy } from '$lib/document/storage';
 import type { BlockOperations } from './block-operations.svelte';
 import type { EditorContext } from './context.svelte';
 import type { DragController } from './drag.svelte';
@@ -48,7 +49,7 @@ export class ClipboardController {
 		const copy = block && store.copyBlock(block.id);
 		if (!block || !copy) return;
 		event.preventDefault();
-		const json = JSON.stringify(copy);
+		const json = JSON.stringify(clipboardCopy(copy));
 		const plain = copy.kind === 'text' ? copy.text : '';
 		this.#copied = { json, plain };
 		event.clipboardData?.setData(CLIP_TYPE, json);

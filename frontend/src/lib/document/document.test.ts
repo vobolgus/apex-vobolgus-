@@ -497,12 +497,12 @@ describe('DocumentStore', () => {
 			for (let x = 12; x < 60; x++) doc.setFrame(pageId, blockId, { x, y: 12, w: 90, h: 90 });
 			vi.runAllTimers();
 			expect(storage.writes).toBe(1);
-			expect(chartsOf(saved(storage).pages[0])[0].frame.x).toBe(59);
+			expect(saved(storage).pages[0].items[0].frame.x).toBe(59);
 
 			doc.setFrame(pageId, blockId, { x: 20, y: 12, w: 90, h: 90 });
 			doc.flush();
 			expect(storage.writes).toBe(2);
-			expect(chartsOf(saved(storage).pages[0])[0].frame.x).toBe(20);
+			expect(saved(storage).pages[0].items[0].frame.x).toBe(20);
 			vi.runAllTimers();
 			expect(storage.writes).toBe(2);
 		});
@@ -513,9 +513,6 @@ describe('DocumentStore', () => {
 					throw new Error('SecurityError');
 				},
 				setItem: () => {
-					throw new Error('SecurityError');
-				},
-				removeItem: () => {
 					throw new Error('SecurityError');
 				}
 			};

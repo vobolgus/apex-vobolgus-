@@ -3,7 +3,15 @@
 import { expect } from 'vitest';
 import { contentBox } from './geometry';
 import { DOCUMENT_STORAGE_KEY } from './storage';
-import type { ChartSnapshot, DocPage, Rect, TableSpec, TypesetBlock } from './types';
+import type {
+	ChartBlock,
+	ChartSnapshot,
+	DocPage,
+	Rect,
+	TableSpec,
+	TextBlock,
+	TypesetBlock
+} from './types';
 
 /** A disc at `aspect` 1, else a pinhole frame of that aspect. */
 export function chart(aspect = 1): ChartSnapshot {
@@ -46,8 +54,17 @@ export function memoryStorage(limit = Infinity) {
 	return storage;
 }
 
+/** A text as storage holds it; a table is one of no words that carries its spec. */
+export type SavedText = Omit<TextBlock, 'kind'> & { table?: TableSpec };
+
+/** A page as storage holds it: its charts in `items`, its texts and tables in `texts`. */
+export interface SavedPage extends Omit<DocPage, 'blocks'> {
+	items: Omit<ChartBlock, 'kind'>[];
+	texts?: SavedText[];
+}
+
 /** The document as `storage` holds it. */
-export function saved(storage: ReturnType<typeof memoryStorage>): { pages: DocPage[] } {
+export function saved(storage: ReturnType<typeof memoryStorage>): { pages: SavedPage[] } {
 	return JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
 }
 

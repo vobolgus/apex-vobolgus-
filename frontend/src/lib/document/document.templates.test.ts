@@ -229,7 +229,7 @@ describe('DocumentStore: templates', () => {
 		expect(chartsOf(again.pages[0])[1].closeUpOf).toBe('sky');
 		// A mark that is no place on the sky is not read.
 		const raw = saved(storage);
-		(chartsOf(raw.pages[0])[0].chart as { marks: unknown }).marks = [
+		(raw.pages[0].items[0].chart as { marks: unknown }).marks = [
 			{ raDeg: 1, decDeg: 2, radiusDeg: 3 },
 			{ raDeg: 'east', decDeg: 2, radiusDeg: 3 },
 			{ raDeg: 1, decDeg: 95, radiusDeg: 3 },

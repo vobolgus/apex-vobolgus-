@@ -1,11 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { contentBox, gridLines } from '../src/lib/document/geometry';
-import {
-	chartsOf,
-	savedPages as savedDocumentPages,
-	seedFirstShape,
-	type SavedChart
-} from './saved-document';
+import { chartsOf, savedPages, seedDocument, type SavedChart } from './saved-document';
 
 /**
  * The page editor, opened from the pages panel: a chart dragged near a grid line
@@ -35,11 +30,7 @@ const STEREO = {
 	createdAt: '2026-10-27T12:00:00.000Z'
 };
 
-/**
- * Two portrait pages: two discs on the first, none on the second. In the shape the
- * document was first saved in (`items`, no `blocks`, under the first key): every test
- * here begins with the app bringing it over.
- */
+/** Two portrait pages: two discs on the first, none on the second. */
 const DOCUMENT = {
 	pages: [
 		{
@@ -54,10 +45,8 @@ const DOCUMENT = {
 	]
 };
 
-type SavedItem = SavedChart;
-
 async function seedAndOpen(page: Page) {
-	await seedFirstShape(page, DOCUMENT);
+	await seedDocument(page, DOCUMENT);
 	await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -65,12 +54,12 @@ async function seedAndOpen(page: Page) {
 }
 
 /** The saved charts of each page (saves are debounced: poll this). */
-async function savedPages(page: Page): Promise<SavedItem[][]> {
-	return (await savedDocumentPages(page)).map(chartsOf);
+async function savedCharts(page: Page): Promise<SavedChart[][]> {
+	return (await savedPages(page)).map(chartsOf);
 }
 
 async function savedFrame(page: Page, id: string) {
-	return (await savedPages(page)).flat().find((item) => item.id === id)?.frame;
+	return (await savedCharts(page)).flat().find((item) => item.id === id)?.frame;
 }
 
 /** Press at `from`, move to `to` in steps (pointer events, coalesced per frame), release. */
@@ -104,7 +93,7 @@ function onLine(value: number, lines: number[]) {
 }
 
 /** A frame's start or end on a grid edge line, or its centre on a centre line, along `axis`. */
-function onGrid(frame: SavedItem['frame'], axis: 'x' | 'y') {
+function onGrid(frame: SavedChart['frame'], axis: 'x' | 'y') {
 	const { edges, centres } = gridLines('portrait', axis);
 	const start = axis === 'x' ? frame.x : frame.y;
 	const size = axis === 'x' ? frame.w : frame.h;
@@ -136,7 +125,7 @@ test('a chart dragged onto the next page moves there, Escape closes', async ({ p
 	await drag(page, centre((await chart.boundingBox())!), centre((await next.boundingBox())!));
 
 	await expect
-		.poll(async () => (await savedPages(page)).map((items) => items.map((it) => it.id)))
+		.poll(async () => (await savedCharts(page)).map((items) => items.map((it) => it.id)))
 		.toEqual([['e2e-a'], ['e2e-b']]);
 	const frame = (await savedFrame(page, 'e2e-b'))!;
 	const box = contentBox('portrait');
@@ -162,7 +151,7 @@ test('a chart on a neighbouring page can be dragged onto the current one', async
 	await drag(page, centre(await settledBox(side)), centre(await settledBox(current)));
 
 	await expect
-		.poll(async () => (await savedPages(page)).map((items) => items.map((it) => it.id)))
+		.poll(async () => (await savedCharts(page)).map((items) => items.map((it) => it.id)))
 		.toEqual([['e2e-b'], ['e2e-a']]);
 	// The drop keeps page 2 current (the release's click does not turn to page 1) and selects the chart.
 	await expect(editor.getByRole('group', { name: 'Page 2, A4 portrait, 1 chart' })).toBeVisible();
@@ -214,7 +203,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 
 	await page.mouse.up();
 	await expect
-		.poll(async () => (await savedPages(page)).map((items) => items.map((it) => it.id)))
+		.poll(async () => (await savedCharts(page)).map((items) => items.map((it) => it.id)))
 		.toEqual([['e2e-b'], ['e2e-a']]);
 });
 
@@ -224,7 +213,7 @@ test('a click on a neighbour’s chart, without a drag, turns to that page', asy
 	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .body');
 	await page.mouse.click(...(Object.values(centre(await settledBox(side))) as [number, number]));
 	await expect(editor.getByRole('group', { name: 'Page 1, A4 portrait, 2 charts' })).toBeVisible();
-	expect((await savedPages(page)).map((items) => items.length)).toEqual([2, 0]);
+	expect((await savedCharts(page)).map((items) => items.length)).toEqual([2, 0]);
 });
 
 test('opening the editor puts the focus on the editor, not on its close button', async ({
@@ -291,7 +280,7 @@ test('a chart in the hand follows the pointer off the paper, and is brought onto
 	await expect.poll(async () => (await savedFrame(page, 'e2e-a'))?.x).toBeCloseTo(box.x, 6);
 	const rest = await settledBox(item);
 	expect(rest.x).toBeGreaterThan(paper.x);
-	expect((await savedPages(page)).map((items) => items.map((it) => it.id))).toEqual([
+	expect((await savedCharts(page)).map((items) => items.map((it) => it.id))).toEqual([
 		['e2e-a', 'e2e-b'],
 		[]
 	]);
@@ -306,7 +295,7 @@ test('a chart let go just short of another page lands on that page', async ({ pa
 	await drag(page, from, { x: next.x + next.width + 25, y: next.y + next.height / 2 });
 
 	await expect
-		.poll(async () => (await savedPages(page)).map((items) => items.map((it) => it.id)))
+		.poll(async () => (await savedCharts(page)).map((items) => items.map((it) => it.id)))
 		.toEqual([['e2e-b'], ['e2e-a']]);
 	const box = contentBox('portrait');
 	const frame = (await savedFrame(page, 'e2e-a'))!;
@@ -322,12 +311,12 @@ test('an empty page is deleted from the editor, a page with charts is not offere
 	// Page 1 has two charts: no delete on its label. Page 2 is empty: it has one.
 	await expect(editor.getByRole('button', { name: 'Delete page 1' })).toHaveCount(0);
 	await editor.getByRole('button', { name: 'Delete page 2' }).click();
-	await expect.poll(async () => (await savedPages(page)).length).toBe(1);
+	await expect.poll(async () => (await savedCharts(page)).length).toBe(1);
 	await expect(editor.getByRole('group', { name: 'Page 1, A4 portrait, 2 charts' })).toBeVisible();
 
 	// The toast's Undo brings the page back and shows it.
 	await page.getByRole('button', { name: 'Undo' }).click();
-	await expect.poll(async () => (await savedPages(page)).length).toBe(2);
+	await expect.poll(async () => (await savedCharts(page)).length).toBe(2);
 	await expect(editor.getByRole('group', { name: 'Page 2, A4 portrait, no charts' })).toBeVisible();
 });
 
@@ -360,7 +349,7 @@ test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ doe
 	});
 	const page = await context.newPage();
 	try {
-		await seedFirstShape(page, DOCUMENT);
+		await seedDocument(page, DOCUMENT);
 		// Collapsed on a phone: open the panel, then the page.
 		await page.getByRole('button', { name: /^PDF pages/ }).click();
 		await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
@@ -373,7 +362,7 @@ test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ doe
 		await page.touchscreen.tap(box.x + 30, box.y + 30);
 		await expect(editor.getByRole('button', { name: /^Chart 2 of 2,/ })).toBeFocused();
 		await page.waitForTimeout(400);
-		expect((await savedPages(page)).map((items) => items.map((it) => it.id))).toEqual([
+		expect((await savedCharts(page)).map((items) => items.map((it) => it.id))).toEqual([
 			['e2e-a', 'e2e-b'],
 			[]
 		]);

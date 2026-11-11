@@ -5,18 +5,17 @@
  * anybody's. A broken page or block is dropped and the rest kept; every frame is
  * put back inside its page. The clipboard is read the same way (`parseBlockCopy`).
  *
- * The saved shape has a number, and the key it is kept under carries it, so that
- * no build writes over a shape it does not know. In the first (`…v1`) a page kept
- * its charts in `items` and its texts in `texts`, a table being a text with a `table`
- * and no words. The second (`…v2`), written now, is the model's own: a page's
- * `blocks`, each of a `kind`. A document found only in the first is brought to the
- * second as it is read (`parseFirstShape`); once it is saved in the second, the
- * first's copy is taken away, the browser having no room to keep both for long.
+ * The saved shape is older than the model's, and stays as it is, so that a build
+ * from before reads what this one writes: a page keeps its charts in `items` and its
+ * texts in `texts`, a table being a text with a `table` and no words. The model's
+ * page holds one list of blocks, each of a `kind`. The one is made of the other here
+ * and nowhere else (`savedPage` writing, `parsePage` reading); a copy on the
+ * clipboard is of the same age, and is written as it was too (`clipboardCopy`).
  */
 
 import { MAX_MARKS, MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { PROJECTION_MODES, type ProjectionMode } from '$lib/math/projection';
-import { chartsOf, layered, typesetOf } from './blocks';
+import { chartsOf, typesetOf } from './blocks';
 import { keptFrame } from './geometry';
 import { MAX_TABLE_ROWS, MIN_TABLE_ROWS, TABLE_LOOKS, TABLE_SOURCES } from './table';
 import { TEMPLATES, TEXT_ROLES } from './templates';
@@ -33,7 +32,6 @@ import type {
 	BlockCopy,
 	ChartBlock,
 	ChartSnapshot,
-	DocBlock,
 	DocPage,
 	LayoutTree,
 	PageLayout,
@@ -41,24 +39,20 @@ import type {
 	PageTemplate,
 	Rect,
 	SkyMark,
-	TableBlock,
 	TableLook,
 	TableSpec,
-	TextBlock,
 	TextRole,
 	TextStyle,
 	TurnMemo,
 	TypesetBlock
 } from './types';
 
-/** Where the document is kept, in the shape written now. */
-export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v2';
-/** Where it was kept in the first shape, and is still read from when nothing newer is there. */
-export const FIRST_SHAPE_STORAGE_KEY = 'skycharts.document.v1';
+/** Where the document is kept. */
+export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v1';
 /** Thumbnails are saved while their total stays under this many chars (≈ bytes). */
 export const THUMB_BUDGET_CHARS = 2_000_000;
 
-export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 export function browserStorage(): DocumentStorage | null {
 	try {
@@ -69,70 +63,62 @@ export function browserStorage(): DocumentStorage | null {
 }
 
 /**
- * The saved document's pages, from the shape written now or else from the first;
- * null when there is none, or what is there is no document, or the storage cannot
- * be read.
+ * The saved document's pages; null when there is none, or what is there is no
+ * document, or the storage cannot be read.
  */
 export function readDocument(storage: DocumentStorage | null): DocPage[] | null {
 	if (!storage) return null;
-	return (
-		parseDocument(readJson(storage, DOCUMENT_STORAGE_KEY)) ??
-		parseFirstShape(readJson(storage, FIRST_SHAPE_STORAGE_KEY))
-	);
-}
-
-/** What is under `key`, read as JSON; undefined for nothing, or nothing that reads. */
-function readJson(storage: DocumentStorage, key: string): unknown {
 	try {
-		const raw = storage.getItem(key);
-		return raw === null ? undefined : JSON.parse(raw);
+		const raw = storage.getItem(DOCUMENT_STORAGE_KEY);
+		return raw === null ? null : parseDocument(JSON.parse(raw));
 	} catch {
-		return undefined;
+		return null;
 	}
 }
 
-/**
- * Save `pages` (plain data, no proxies), with their thumbnails while the storage has
- * room. Saved, the document needs its copy in the first shape no more.
- */
+/** Save `pages` (plain data, no proxies), with their thumbnails while the storage has room. */
 export function writeDocument(storage: DocumentStorage, pages: DocPage[]): void {
-	const write = (budget: number): boolean => {
+	try {
+		storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, THUMB_BUDGET_CHARS));
+	} catch {
+		// Over the quota with thumbnails: the charts matter more.
 		try {
-			storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, budget));
-			return true;
+			storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, 0));
 		} catch {
-			return false;
+			// Storage is unavailable; the document lives for this session only.
 		}
-	};
-	const forgetFirstShape = () => {
-		try {
-			storage.removeItem(FIRST_SHAPE_STORAGE_KEY);
-		} catch {
-			// It stays, and is read only while there is nothing newer.
-		}
-	};
-	if (write(THUMB_BUDGET_CHARS)) return forgetFirstShape();
-	// Over the quota: the first shape's copy goes, to make room, then the thumbnails. The
-	// charts matter more. If that fails too, storage is unavailable; the document lives
-	// for this session only.
-	forgetFirstShape();
-	if (!write(THUMB_BUDGET_CHARS)) write(0);
+	}
 }
 
 /** The saved form: thumbnails kept in document order while they fit `budget`. */
 function serialize(pages: DocPage[], budget: number): string {
-	let left = budget;
-	const saved = pages.map((page) => ({
-		...page,
-		blocks: page.blocks.map((block) => {
-			if (block.kind !== 'chart') return block;
-			const { thumb, ...chart } = block;
-			if (!thumb || thumb.length > left) return chart;
-			left -= thumb.length;
-			return { ...chart, thumb };
-		})
-	}));
-	return JSON.stringify({ pages: saved });
+	const left = { chars: budget };
+	return JSON.stringify({ pages: pages.map((page) => savedPage(page, left)) });
+}
+
+/**
+ * A page as it is saved: its charts in `items`, its texts and tables in `texts` (none
+ * when it has none), neither with a `kind`. A thumbnail is kept while `left` has room.
+ */
+function savedPage(page: DocPage, left: { chars: number }): object {
+	const { id, orientation, blocks: _blocks, ...rest } = page;
+	const items = chartsOf(page).map(({ kind: _kind, thumb, ...chart }) => {
+		if (!thumb || thumb.length > left.chars) return chart;
+		left.chars -= thumb.length;
+		return { ...chart, thumb };
+	});
+	const texts = typesetOf(page).map(savedText);
+	return { id, orientation, items, ...(texts.length > 0 ? { texts } : {}), ...rest };
+}
+
+/** A text as it is saved; a table as a text of no words that carries its spec. */
+function savedText(block: TypesetBlock): object {
+	if (block.kind === 'text') {
+		const { kind: _kind, ...text } = block;
+		return text;
+	}
+	const { kind: _kind, id, ...table } = block;
+	return { id, text: '', ...table };
 }
 
 const LAYER_KEYS = [
@@ -158,7 +144,7 @@ function isPositive(value: unknown): value is number {
 	return isFiniteNumber(value) && value > 0;
 }
 
-/** The pages of a document as it is saved now; null for what is no document. */
+/** The pages of a document as it is saved; null for what is no document. */
 export function parseDocument(value: unknown): DocPage[] | null {
 	if (!isRecord(value) || !Array.isArray(value.pages)) return null;
 	const ids = new Set<string>();
@@ -167,58 +153,23 @@ export function parseDocument(value: unknown): DocPage[] | null {
 		.filter((page): page is DocPage => page !== null);
 }
 
-// === The first shape ===
-
-/** The pages of a document as the first shape saved it; null for what is no document. */
-export function parseFirstShape(value: unknown): DocPage[] | null {
-	if (!isRecord(value) || !Array.isArray(value.pages)) return null;
-	return parseDocument({ pages: value.pages.map(fromFirstShape) });
-}
-
-/**
- * A page saved in the first shape, in the second: its charts, then its texts, one
- * list. Nothing is judged here but what the shapes differ in; what does not read as
- * a page or a block is passed on as it is, for the parser to drop.
- */
-function fromFirstShape(page: unknown): unknown {
-	if (!isRecord(page)) return page;
-	const { items, texts, ...rest } = page;
-	// Without its charts' list it was no page then, and is none now, whatever else it carries.
-	if (!Array.isArray(items)) return { ...rest, blocks: undefined };
-	const blocks = [
-		...items.map((item) => (isRecord(item) ? { ...item, kind: 'chart' } : item)),
-		...(Array.isArray(texts) ? texts.map(typesetFromFirstShape) : [])
-	];
-	return { ...rest, blocks };
-}
-
-/**
- * A text of the first shape: a table when it carried a table's spec that reads as
- * one, and then without the empty words it had to have; else a text. Words were
- * asked of both: one with none that read as words is no block.
- */
-function typesetFromFirstShape(text: unknown): unknown {
-	if (!isRecord(text)) return text;
-	const { text: words, ...rest } = text;
-	if (typeof words !== 'string') return { ...rest, kind: undefined };
-	return parseTableSpec(text.table) ? { ...rest, kind: 'table' } : { ...text, kind: 'text' };
-}
-
 // === Pages ===
 
+/** A page with its charts' list, an orientation and an id no page or block before it has. */
 function parsePage(value: unknown, ids: Set<string>): DocPage | null {
-	if (!isRecord(value) || !Array.isArray(value.blocks)) return null;
+	if (!isRecord(value) || !Array.isArray(value.items)) return null;
 	const { id, orientation } = value;
 	if (!isOrientation(orientation)) return null;
 	if (typeof id !== 'string' || id === '' || ids.has(id)) return null;
 	ids.add(id);
-	const read = layered(
-		value.blocks
-			.map((block) => parseBlock(block, ids, orientation))
-			.filter((block): block is DocBlock => block !== null)
-	);
-	const charts = chartsOf({ blocks: read });
-	const type = typesetOf({ blocks: read }).slice(0, MAX_TEXTS_PER_PAGE);
+	const charts = value.items
+		.map((item) => parseChartBlock(item, ids, orientation))
+		.filter((chart): chart is ChartBlock => chart !== null);
+	// A page saved before text was has no list of it.
+	const type = (Array.isArray(value.texts) ? value.texts : [])
+		.map((text) => parseTypesetBlock(text, ids, orientation))
+		.filter((block): block is TypesetBlock => block !== null)
+		.slice(0, MAX_TEXTS_PER_PAGE);
 	const page: DocPage = { id, orientation, blocks: [...charts, ...type] };
 	// A page with text is hand-arranged, whatever was saved.
 	if (value.manual === true || type.length > 0) page.manual = true;
@@ -312,49 +263,33 @@ function parseTurnMemo(value: unknown, page: DocPage): TurnMemo | null {
 
 // === Blocks ===
 
-/** A block of a kind there is, with an id no page or block before it has; else null. */
-function parseBlock(
+/** The id of a saved block, when it is one no page or block before it has; else null. */
+function freshId(value: Json, ids: Set<string>): string | null {
+	const { id } = value;
+	return typeof id === 'string' && id !== '' && !ids.has(id) ? id : null;
+}
+
+function parseChartBlock(
 	value: unknown,
 	ids: Set<string>,
 	orientation: PageOrientation
-): DocBlock | null {
+): ChartBlock | null {
 	if (!isRecord(value)) return null;
-	const { id } = value;
-	if (typeof id !== 'string' || id === '' || ids.has(id)) return null;
-	const block = blockOfKind(value, id, orientation);
-	if (block) ids.add(id);
-	return block;
-}
-
-function blockOfKind(value: Json, id: string, orientation: PageOrientation): DocBlock | null {
-	switch (value.kind) {
-		case 'chart':
-			return parseChartBlock(value, id, orientation);
-		case 'text':
-			return parseTextBlock(value, id, orientation);
-		case 'table':
-			return parseTableBlock(value, id, orientation);
-		default:
-			return null;
-	}
-}
-
-function parseChartBlock(value: Json, id: string, orientation: PageOrientation): ChartBlock | null {
-	const { thumb } = value;
+	const id = freshId(value, ids);
 	const chart = parseChart(value.chart);
 	const frame = parseRect(value.frame);
-	if (!chart || !frame) return null;
-	const item: ChartBlock = {
+	if (id === null || !chart || !frame) return null;
+	ids.add(id);
+	const block: ChartBlock = {
 		kind: 'chart',
 		id,
 		chart,
 		frame: keptFrame(frame, chart.aspect, orientation)
 	};
-	if (typeof thumb === 'string' && thumb.startsWith('data:image/')) item.thumb = thumb;
-	if (typeof value.closeUpOf === 'string' && value.closeUpOf !== '') {
-		item.closeUpOf = value.closeUpOf;
-	}
-	return item;
+	const { thumb, closeUpOf } = value;
+	if (typeof thumb === 'string' && thumb.startsWith('data:image/')) block.thumb = thumb;
+	if (typeof closeUpOf === 'string' && closeUpOf !== '') block.closeUpOf = closeUpOf;
+	return block;
 }
 
 /** The places ringed on a chart: those that read as places, sixteen at the most. */
@@ -374,34 +309,34 @@ function parseMarks(value: unknown): SkyMark[] {
 		.map(({ raDeg, decDeg, radiusDeg }) => ({ raDeg, decDeg, radiusDeg }));
 }
 
-function parseTextBlock(value: Json, id: string, orientation: PageOrientation): TextBlock | null {
-	const { text } = value;
-	const style = parseTextStyle(value.style);
-	const frame = parseRect(value.frame);
-	if (typeof text !== 'string' || !style || !frame) return null;
-	const parsed: TextBlock = { kind: 'text', id, text: text.slice(0, MAX_TEXT_CHARS), style, frame };
-	return typeset(parsed, value, orientation);
-}
-
-function parseTableBlock(value: Json, id: string, orientation: PageOrientation): TableBlock | null {
-	const table = parseTableSpec(value.table);
-	const style = parseTextStyle(value.style);
-	const frame = parseRect(value.frame);
-	if (!table || !style || !frame) return null;
-	return typeset({ kind: 'table', id, table, style, frame }, value, orientation);
-}
-
 /**
- * What a text and a table are read alike: the turn (what does not read as an angle
- * is upright), the frame fitted to the page at that turn, the part it plays and the
- * chart it is told to read.
+ * A saved text, as the block it is: a table when it carries a spec that reads as
+ * one, and then without the empty words it was saved with; else a text. Words are
+ * asked of both. Then what the two are read alike: the turn (what does not read as
+ * an angle is upright), the frame fitted to the page at that turn, the part it plays
+ * and the chart it is told to read.
  */
-function typeset<B extends TypesetBlock>(block: B, value: Json, orientation: PageOrientation): B {
+function parseTypesetBlock(
+	value: unknown,
+	ids: Set<string>,
+	orientation: PageOrientation
+): TypesetBlock | null {
+	if (!isRecord(value)) return null;
+	const id = freshId(value, ids);
+	const { text, role, chartId } = value;
+	const style = parseTextStyle(value.style);
+	const frame = parseRect(value.frame);
+	if (id === null || typeof text !== 'string' || !style || !frame) return null;
+	ids.add(id);
+	const table = parseTableSpec(value.table);
 	const rotation = isFiniteNumber(value.rotation) ? normalizeRotation(value.rotation) : 0;
-	block.frame = fitTextFrame(block.frame, orientation, rotation);
+	const place = { id, style, frame: fitTextFrame(frame, orientation, rotation) };
+	const block: TypesetBlock = table
+		? { kind: 'table', table, ...place }
+		: { kind: 'text', text: text.slice(0, MAX_TEXT_CHARS), ...place };
 	if (rotation !== 0) block.rotation = rotation;
-	if (TEXT_ROLES.includes(value.role as TextRole)) block.role = value.role as TextRole;
-	if (typeof value.chartId === 'string' && value.chartId !== '') block.chartId = value.chartId;
+	if (TEXT_ROLES.includes(role as TextRole)) block.role = role as TextRole;
+	if (typeof chartId === 'string' && chartId !== '') block.chartId = chartId;
 	return block;
 }
 
@@ -485,9 +420,21 @@ function parseChart(value: unknown): ChartSnapshot | null {
 // === The clipboard ===
 
 /**
+ * A copy as it goes on the clipboard: as it is, but for a table, which travels as
+ * the text of no words with a spec that it is saved as, for a build from before to
+ * paste it.
+ */
+export function clipboardCopy(copy: BlockCopy): object {
+	if (copy.kind !== 'table') return copy;
+	const { table, style, frame, rotation } = copy;
+	return { kind: 'text', text: '', style, frame, ...(rotation ? { rotation } : {}), table };
+}
+
+/**
  * A copy as the clipboard holds it, from anywhere: null for what is no copy. A turn
- * that does not read as an angle is none. A table copied by a build that knew the
- * first shape came as a text with a table's spec, and is read as the table it was.
+ * that does not read as an angle is none. A text with a table's spec is the table
+ * it was copied as (`clipboardCopy`); a copy that never left the model is read as
+ * it is.
  */
 export function parseBlockCopy(value: unknown): BlockCopy | null {
 	if (!isRecord(value)) return null;

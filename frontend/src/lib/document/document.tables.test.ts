@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { typesetOf } from './blocks';
 import { DocumentStore } from './document.svelte';
-import { DOCUMENT_STORAGE_KEY, FIRST_SHAPE_STORAGE_KEY } from './storage';
+import { clipboardCopy, DOCUMENT_STORAGE_KEY } from './storage';
 import { memoryStorage, saved, specOf } from './test-support';
 import { DEFAULT_TEXT_STYLE } from './text';
 
@@ -69,6 +69,24 @@ describe('DocumentStore: tables', () => {
 		})!;
 		const copy = doc.copyBlock(id)!;
 		expect(copy).toEqual({ kind: 'table', table: { source: 'stars', rows: 7 }, style, frame });
+		// On the clipboard it is what a table always was there: a text of no words, with a spec.
+		expect(clipboardCopy(copy)).toEqual({
+			kind: 'text',
+			text: '',
+			style,
+			frame,
+			table: { source: 'stars', rows: 7 }
+		});
+		const turned = clipboardCopy({
+			kind: 'table',
+			table: { source: 'stars', rows: 7 },
+			style,
+			frame,
+			rotation: 90
+		});
+		expect(turned).toMatchObject({ kind: 'text', text: '', rotation: 90 });
+		expect(doc.pasteBlock(doc.addPage(), turned)).toMatchObject({ kind: 'table' });
+		doc.removePage(doc.pages[1].id);
 		const pasted = doc.pasteBlock(pageId, copy) as { kind: string; id: string };
 		expect(pasted.kind).toBe('table');
 		expect(specOf(typesetOf(doc.pages[0]).find((text) => text.id === pasted.id)!)).toEqual({
@@ -86,48 +104,22 @@ describe('DocumentStore: tables', () => {
 		});
 		doc.removeBlock(pageId, older.id);
 		doc.flush();
+		// Saved, a table is a text of no words that carries its spec.
 		const raw = saved(storage);
-		expect(typesetOf(raw.pages[0])[0]).toMatchObject({
-			kind: 'table',
-			table: { source: 'stars', rows: 7 }
-		});
-		expect(typesetOf(raw.pages[0])[0]).not.toHaveProperty('text');
-		// A table whose spec does not read as one is no block at all; one that nearly does is put right.
-		(typesetOf(raw.pages[0])[0] as { table: unknown }).table = { source: 'comets', rows: 7 };
-		(typesetOf(raw.pages[0])[1] as { table: unknown }).table = { source: 'messier', rows: 3.4 };
+		expect(raw.pages[0].texts![0]).toMatchObject({ text: '', table: { source: 'stars', rows: 7 } });
+		expect(raw.pages[0].texts![0]).not.toHaveProperty('kind');
+		// A spec that does not read as one leaves the text it was saved as; one that nearly
+		// does is put right.
+		(raw.pages[0].texts![0] as { table: unknown }).table = { source: 'comets', rows: 7 };
+		(raw.pages[0].texts![1] as { table: unknown }).table = { source: 'messier', rows: 3.4 };
 		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
 		const again = new DocumentStore(storage);
 		again.load();
-		expect(typesetOf(again.pages[0])).toHaveLength(1);
-		expect(specOf(typesetOf(again.pages[0])[0])).toEqual({
-			source: 'messier',
-			look: 'names',
-			rows: 3
-		});
-		// Saved in the first shape, where a table was a text with a spec, the same two read
-		// back as they did then: the one with no table's spec as a text, the other as a table.
-		const text = (id: string, table: unknown) => ({ id, text: '', style, frame, table });
-		const first = {
-			pages: [
-				{
-					id: 'p',
-					orientation: 'portrait',
-					items: [],
-					texts: [
-						text('a', { source: 'comets', rows: 7 }),
-						text('b', { source: 'messier', rows: 3.4 })
-					]
-				}
-			]
-		};
-		storage.data.delete(DOCUMENT_STORAGE_KEY);
-		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(first));
-		const before = new DocumentStore(storage);
-		before.load();
-		expect(typesetOf(before.pages[0])[0]).toMatchObject({ kind: 'text', text: '' });
-		expect(typesetOf(before.pages[0])[0]).not.toHaveProperty('table');
-		expect(typesetOf(before.pages[0])[1]).not.toHaveProperty('text');
-		expect(specOf(typesetOf(before.pages[0])[1])).toEqual({
+		expect(typesetOf(again.pages[0])).toHaveLength(2);
+		expect(typesetOf(again.pages[0])[0]).toMatchObject({ kind: 'text', text: '' });
+		expect(typesetOf(again.pages[0])[0]).not.toHaveProperty('table');
+		expect(typesetOf(again.pages[0])[1]).not.toHaveProperty('text');
+		expect(specOf(typesetOf(again.pages[0])[1])).toEqual({
 			source: 'messier',
 			look: 'names',
 			rows: 3

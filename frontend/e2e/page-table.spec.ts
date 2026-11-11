@@ -1,12 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
-	documentOf,
-	savedDocuments,
 	savedPages,
 	seedDocument,
-	seedFirstShape,
+	storageKeys,
+	STORAGE_KEY,
 	typesetOf,
-	type SavedType
+	type SavedText
 } from './saved-document';
 
 /**
@@ -42,17 +41,19 @@ const STEREO = {
 };
 
 /** A disc in the lower part of the first page, room over it; an empty second page. */
-const DOCUMENT = documentOf([
-	{
-		id: 'e2e-page-1',
-		orientation: 'portrait',
-		blocks: [{ kind: 'chart', id: 'e2e-a', chart: STEREO, frame: { x: 30, y: 90, w: 150, h: 150 } }]
-	},
-	{ id: 'e2e-page-2', orientation: 'portrait', blocks: [] }
-]);
+const DOCUMENT = {
+	pages: [
+		{
+			id: 'e2e-page-1',
+			orientation: 'portrait',
+			items: [{ id: 'e2e-a', chart: STEREO, frame: { x: 30, y: 90, w: 150, h: 150 } }]
+		},
+		{ id: 'e2e-page-2', orientation: 'portrait', items: [] }
+	]
+};
 
-async function seedAndOpen(page: Page, seeded = seedDocument(page, DOCUMENT)) {
-	await seeded;
+async function seedAndOpen(page: Page, saved: object = DOCUMENT) {
+	await seedDocument(page, saved);
 	await page.getByRole('button', { name: /^Page 1,/ }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -61,7 +62,7 @@ async function seedAndOpen(page: Page, seeded = seedDocument(page, DOCUMENT)) {
 }
 
 /** The texts and tables of the saved page `at` (saves are debounced: poll this). */
-async function savedTexts(page: Page, at = 0): Promise<SavedType[]> {
+async function savedTexts(page: Page, at = 0): Promise<SavedText[]> {
 	const saved = (await savedPages(page))[at];
 	return saved ? typesetOf(saved) : [];
 }
@@ -96,9 +97,7 @@ test('a table is a title over the names of what is on its chart, three to a row;
 	// At the top left, as wide as its names, six lines tall.
 	await expect.poll(async () => (await savedTexts(page)).length).toBe(1);
 	const [first] = await savedTexts(page);
-	// A block of its own kind: a spec, and no words.
-	expect(first.kind).toBe('table');
-	expect(first).not.toHaveProperty('text');
+	expect(first.text).toBe('');
 	expect(first.table).toEqual({ source: 'messier', look: 'names', rows: 5 });
 	expect(first.frame).toMatchObject({ x: 12, y: 12 });
 	expect(first.frame.w).toBeGreaterThan(30);
@@ -326,10 +325,10 @@ test('made narrower, a table gives way inside its frame; the lines it snaps to s
 	expect(await cells(table)).toEqual(whole);
 });
 
-test('a document saved before a page had blocks loads as it was, and is saved in blocks from then on', async ({
+test('a document saved before a page had blocks loads as it was, and is saved as it was from then on', async ({
 	page
 }) => {
-	// The first shape: charts in `items`, text in `texts`, a table a text with a spec and no words.
+	// As it always was saved: charts in `items`, text in `texts`, a table a text with a spec and no words.
 	const style = { font: 'serif', size: 12, bold: false, italic: false, align: 'left' };
 	const first = {
 		pages: [
@@ -352,7 +351,7 @@ test('a document saved before a page had blocks loads as it was, and is saved in
 			}
 		]
 	};
-	const editor = await seedAndOpen(page, seedFirstShape(page, first));
+	const editor = await seedAndOpen(page, first);
 
 	// Each is what it was: a text reading its chart, and a table of that chart's stars.
 	await expect(editor.getByRole('button', { name: /^Chart 1 of 1/ })).toBeVisible();
@@ -360,30 +359,30 @@ test('a document saved before a page had blocks loads as it was, and is saved in
 	const table = editor.getByRole('button', { name: 'Table 2 of 2: Stars, names, 3 rows' });
 	await expect.poll(async () => (await cells(table))[0]).toBe('Stars');
 
-	// Changed, it is saved in the shape of now, under that shape's key: one list of blocks to
-	// a page; and the copy in the first shape is gone.
+	// Changed, it is saved where it was and in the shape it was: nothing under another key,
+	// no list of blocks, and no block that says its kind. A build from before reads it.
 	await table.click();
 	await page.keyboard.press('ArrowDown');
 	await expect.poll(async () => (await savedTexts(page))[1]?.frame.y).toBe(13);
-	const saved = await savedDocuments(page);
-	expect(saved.first).toBeNull();
-	expect(saved.now!.pages[0]).not.toHaveProperty('items');
-	expect(saved.now!.pages[0]).not.toHaveProperty('texts');
-	const [now] = saved.now!.pages;
-	expect(now.blocks.map((block) => [block.kind, block.id])).toEqual([
-		['chart', 'e2e-a'],
-		['text', 'e2e-words'],
-		['table', 'e2e-table']
+	expect((await storageKeys(page)).filter((key) => key.startsWith('skycharts.document'))).toEqual([
+		STORAGE_KEY
 	]);
+	const [now] = await savedPages(page);
+	expect(now).not.toHaveProperty('blocks');
+	expect(now.items.map((item) => item.id)).toEqual(['e2e-a']);
+	expect(now.items[0]).not.toHaveProperty('kind');
 	const [words, list] = typesetOf(now);
+	expect([words.id, list.id]).toEqual(['e2e-words', 'e2e-table']);
+	expect(words).not.toHaveProperty('kind');
+	expect(list).not.toHaveProperty('kind');
 	// (Its height is its lines', and follows them.)
 	expect(words).toMatchObject({
 		text: 'Field {fov}',
 		style,
 		frame: { x: 12, y: 250, w: 186 }
 	});
-	expect(list).not.toHaveProperty('text');
 	expect(list).toMatchObject({
+		text: '',
 		table: { source: 'stars', look: 'names', rows: 3 },
 		chartId: 'e2e-a',
 		frame: { x: 12, y: 13, w: 60 }

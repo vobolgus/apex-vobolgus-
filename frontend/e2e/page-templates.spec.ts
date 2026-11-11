@@ -1,7 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
 	chartsOf,
-	documentOf,
 	savedPages,
 	seedDocument,
 	typesetOf,
@@ -45,24 +44,24 @@ const PINHOLE = {
 };
 
 /** A frame and a disc on the first page (the frame first), a lone disc on the second, an empty third. */
-const DOCUMENT = documentOf([
-	{
-		id: 'e2e-page-1',
-		orientation: 'portrait',
-		blocks: [
-			{ kind: 'chart', id: 'e2e-frame', chart: PINHOLE, frame: { x: 12, y: 12, w: 90, h: 56.25 } },
-			{ kind: 'chart', id: 'e2e-disc', chart: STEREO, frame: { x: 108, y: 12, w: 90, h: 90 } }
-		]
-	},
-	{
-		id: 'e2e-page-2',
-		orientation: 'portrait',
-		blocks: [
-			{ kind: 'chart', id: 'e2e-lone', chart: STEREO, frame: { x: 12, y: 55.5, w: 186, h: 186 } }
-		]
-	},
-	{ id: 'e2e-page-3', orientation: 'portrait', blocks: [] }
-]);
+const DOCUMENT = {
+	pages: [
+		{
+			id: 'e2e-page-1',
+			orientation: 'portrait',
+			items: [
+				{ id: 'e2e-frame', chart: PINHOLE, frame: { x: 12, y: 12, w: 90, h: 56.25 } },
+				{ id: 'e2e-disc', chart: STEREO, frame: { x: 108, y: 12, w: 90, h: 90 } }
+			]
+		},
+		{
+			id: 'e2e-page-2',
+			orientation: 'portrait',
+			items: [{ id: 'e2e-lone', chart: STEREO, frame: { x: 12, y: 55.5, w: 186, h: 186 } }]
+		},
+		{ id: 'e2e-page-3', orientation: 'portrait', items: [] }
+	]
+};
 
 async function seed(page: Page) {
 	await seedDocument(page, DOCUMENT);
