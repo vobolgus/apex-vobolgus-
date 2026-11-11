@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 /// One chart, as `POST /api/export` takes it and as a document carries it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RenderConfig {
-    /// `"stereo"` or `"pinhole"`.
+    /// `"stereo"` or `"pinhole"`. Text here, so that any other name is refused by
+    /// the chart's own check with its own message, and not by the JSON reader.
     pub(crate) projection: String,
     /// The instant the planets are placed at and the horizon chart is turned to:
     /// RFC 3339, `YYYY-MM-DD HH:MM:SS` or a bare date, read as UTC.

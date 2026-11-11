@@ -2,8 +2,21 @@
 //! document of charts and text as one multi-page PDF, and the page that asks for
 //! them (the frontend's static build, when there is one to serve).
 //!
-//! The crate is the binary's library: [`router`] is the whole app and [`AppState`]
+//! The crate is the binary's library: [`router()`] is the whole app and [`AppState`]
 //! what it runs on; `main` only reads the environment and listens.
+//!
+//! A request comes in through `router` and `middleware` to one of the `handlers`,
+//! which read it as a `request` type and answer with a file or with the one
+//! `error`. Behind them:
+//!
+//! - `chart` checks a chart request and draws it as SVG; `document` does the same
+//!   for pages of charts and text; `svg` is what both write with, and `pdf` turns
+//!   their SVG into the PDF that is sent.
+//! - `payload` builds the catalogue answers and `cached` keeps them ready;
+//!   `constellations` is the data both they and the charts read.
+//! - `limits` holds every number that bounds a request, and `budget` rations the
+//!   exports with them.
+//! - `fonts` are the faces a PDF is set in, `static_site` the page itself.
 
 mod budget;
 mod cached;
