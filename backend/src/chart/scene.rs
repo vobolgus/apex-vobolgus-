@@ -44,6 +44,10 @@ pub(super) enum Sky {
 impl Sky {
     /// The observer's camera chart `config` asks for: aimed where it says, rolled by
     /// its tilt, `CHART_SIDE_PX` high and its aspect ratio times as wide.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the width is rounded down to whole px, and a ratio below 0 gives none"
+    )]
     pub(super) fn camera(config: &RenderConfig) -> Self {
         // Настраиваем камеру для Pinhole
         let aspect = config.aspect_ratio.unwrap_or(DEFAULT_ASPECT_RATIO);

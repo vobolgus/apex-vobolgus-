@@ -29,6 +29,10 @@ impl CameraConfig {
     /// A frame `height_pix` px high and `aspect_ratio` times as wide (rounded down),
     /// whose diagonal spans `fov_deg` degrees.
     #[must_use]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the width is rounded down to whole px, and a ratio below 0 gives none"
+    )]
     pub fn from_fov_and_aspect(fov_deg: f64, aspect_ratio: f64, height_pix: u32) -> Self {
         let width_pix = (f64::from(height_pix) * aspect_ratio) as u32;
         let fov_rad = fov_deg.to_radians();

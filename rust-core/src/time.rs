@@ -39,6 +39,7 @@ impl DateTime {
 /// The Julian Date at 0h UT of a calendar date (Meeus, *Astronomical Algorithms*,
 /// chapter 7): 2000 January 1 is 2451544.5.
 #[must_use]
+#[expect(clippy::cast_possible_wrap, reason = "a month is 1 to 12")]
 pub fn julian_date(year: i32, month: u32, day: u32) -> f64 {
     let (y, m) = if month > 2 {
         (year, month as i32)
@@ -69,6 +70,10 @@ pub fn julian_date(year: i32, month: u32, day: u32) -> f64 {
 #[expect(
     unused_variables,
     reason = "the longitude is declared as the Python original declared it, and not applied"
+)]
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the formula keeps the letters of the Python original"
 )]
 pub fn sidereal_time(longitude_rad: f64, date_time: DateTime) -> f64 {
     // Параметр longitude объявлен, но пока не используется.

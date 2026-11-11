@@ -28,6 +28,10 @@ pub(crate) struct CatalogQuery {
 impl CatalogQuery {
     /// The endpoint's default slice, which is kept ready in the cache; naming the
     /// default limit outright asks for the same.
+    #[expect(
+        clippy::float_cmp,
+        reason = "naming the default limit is naming that very number"
+    )]
     fn is_default(&self, default_max_mag: f32) -> bool {
         self.min_mag.is_none() && self.max_mag.is_none_or(|max| max == default_max_mag)
     }

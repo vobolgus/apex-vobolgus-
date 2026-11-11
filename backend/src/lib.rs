@@ -22,6 +22,14 @@
 //! by `wire`, a test: `WIRE_TYPES=write cargo test -p backend wire` after a change
 //! to `request`, `payload` or `limits`.
 
+#![cfg_attr(
+    test,
+    allow(
+        clippy::float_cmp,
+        reason = "the tests compare exact values on purpose"
+    )
+)]
+
 mod budget;
 mod cached;
 mod chart;

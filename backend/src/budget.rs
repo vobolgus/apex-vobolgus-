@@ -81,6 +81,7 @@ pub(crate) struct OverBudget {
 
 impl OverBudget {
     /// The wait in whole seconds, rounded up and never zero: what `Retry-After` says.
+    #[expect(clippy::cast_sign_loss, reason = "a wait is at least 1 s here")]
     pub(crate) fn retry_after_secs(&self) -> u64 {
         self.wait.as_secs_f64().ceil().max(1.0) as u64
     }

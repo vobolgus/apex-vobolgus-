@@ -18,6 +18,14 @@
 //! kinds, and a camera of a given focal length are there for any chart drawn from
 //! this crate, and are pinned with the rest (`tests/golden.rs`).
 
+#![cfg_attr(
+    test,
+    allow(
+        clippy::float_cmp,
+        reason = "the tests compare exact values on purpose"
+    )
+)]
+
 pub mod catalog;
 pub mod coords;
 pub mod planets;

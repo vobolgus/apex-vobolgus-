@@ -130,9 +130,12 @@ pub(crate) fn from_pages(pages: impl IntoIterator<Item = PdfPage>) -> Result<Vec
     }
 
     pdf.catalog(catalog_id).pages(page_tree_id);
-    pdf.pages(page_tree_id)
-        .count(page_ids.len() as i32)
-        .kids(page_ids);
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "a document holds at most MAX_PAGES pages"
+    )]
+    let page_count = page_ids.len() as i32;
+    pdf.pages(page_tree_id).count(page_count).kids(page_ids);
     pdf.document_info(alloc.bump())
         .producer(TextStr("Skycharts"));
     Ok(pdf.finish())

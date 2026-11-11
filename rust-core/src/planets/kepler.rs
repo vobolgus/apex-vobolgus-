@@ -10,6 +10,10 @@ use super::{julian_centuries, normalize_radians};
 
 /// Heliocentric position on the mean ecliptic and equinox of J2000.0, in AU, at a
 /// Julian Date.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "the elements keep the letters of Meeus' table: a, e, i, L"
+)]
 pub(super) fn heliocentric_ecliptic(elements: &OrbitalElements, jd: f64) -> [f64; 3] {
     let t = julian_centuries(jd);
     let a = elements.a_au + elements.a_rate_au * t;

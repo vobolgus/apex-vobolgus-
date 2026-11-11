@@ -40,6 +40,7 @@ pub(super) fn circle_angles() -> impl Iterator<Item = f32> {
 pub(super) fn great_circle_points(a: Direction, b: Direction) -> impl Iterator<Item = Direction> {
     let dot = (a.x * b.x + a.y * b.y + a.z * b.z).clamp(-1.0, 1.0);
     let angle = dot.acos();
+    #[expect(clippy::cast_sign_loss, reason = "an angle from acos is 0 to 180°")]
     let steps = ((angle.to_degrees() / GREAT_CIRCLE_STEP_DEG).ceil() as u32).max(1);
     let sin_angle = angle.sin();
     (0..=steps).map(move |step| {
