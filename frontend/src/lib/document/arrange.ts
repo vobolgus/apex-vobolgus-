@@ -13,14 +13,8 @@
  * width alone on the page; a disc is packed as its square box.
  */
 
-import {
-	contentBox,
-	GUTTER_MM,
-	MIN_CHART_SIDE_MM,
-	rotatedBounds,
-	rotateLayout,
-	underMinSide
-} from './geometry';
+import { blockBounds, chartsOf, isBlank, typesetOf } from './blocks';
+import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, rotateLayout, underMinSide } from './geometry';
 import type {
 	ChartKind,
 	ChartSnapshot,
@@ -1082,14 +1076,14 @@ export function arrange(
 
 // === Plans ===
 
-/** A chart in a page's new layout: its index in the page's items (`-1`: the chart Add brings). */
+/** A chart in a page's new layout: its index among the page's charts (`-1`: the chart Add brings). */
 export interface PlacedChart {
 	index: number;
 	frame: Rect;
 }
 
 function arrangeItems(page: DocPage): ArrangeItem[] {
-	return page.items.map((it) => ({
+	return chartsOf(page).map((it) => ({
 		kind: chartKind(it.chart),
 		aspect: it.chart.aspect,
 		frame: it.frame
@@ -1122,18 +1116,13 @@ function sameRect(a: Rect, b: Rect): boolean {
 	);
 }
 
-/** Whether a page holds nothing at all: no chart and no text. */
-export function isBlank(page: Pick<DocPage, 'items' | 'texts'>): boolean {
-	return page.items.length === 0 && (page.texts?.length ?? 0) === 0;
-}
-
 /** A page laid out from scratch (a future "Re-arrange page"). */
 export function arrangePage(page: DocPage): {
 	items: PlacedChart[];
 	layout?: PageLayout;
 	belowMin: boolean;
 } {
-	if (!page.items.length) return { items: [], belowMin: false };
+	if (!chartsOf(page).length) return { items: [], belowMin: false };
 	const res = arrange(page.orientation, arrangeItems(page), { mode: 'scratch' });
 	return { ...placed(res), belowMin: res.belowMin };
 }
@@ -1192,18 +1181,11 @@ export function freeRects(box: Rect, obstacles: readonly Rect[]): Rect[] {
  * gutter clear of every chart and text; null when it would be under the smallest side.
  */
 export function freeSpot(
-	page: {
-		orientation: PageOrientation;
-		items: readonly { frame: Rect }[];
-		texts?: readonly { frame: Rect; rotation?: number }[];
-	},
+	page: Pick<DocPage, 'orientation' | 'blocks'>,
 	aspect: number
 ): Rect | null {
 	const box = contentBox(page.orientation);
-	const obstacles = [
-		...page.items.map((it) => it.frame),
-		...(page.texts ?? []).map((it) => rotatedBounds(it.frame, it.rotation))
-	];
+	const obstacles = page.blocks.map(blockBounds);
 	let best: Rect | null = null;
 	for (const f of freeRects(box, obstacles)) {
 		const w = Math.min(f.w, f.h * aspect);
@@ -1247,14 +1229,15 @@ function areaFeasible(page: DocPage, chart: ArrangeChart, tau: number, altSide: 
 	const newW = tau * altSide;
 	if (newW > aloneSize(chart.aspect, page.orientation).w + 1e-6) return false;
 	let A = newW * (newW / chart.aspect);
-	for (const it of page.items) A += tau * it.frame.w * tau * it.frame.h;
+	for (const it of chartsOf(page)) A += tau * it.frame.w * tau * it.frame.h;
 	return A <= B.w * B.h + 1e-6;
 }
 
 /** The chart on one occupied page: the first layout in the band that passes the gate, else the best. */
 function tryPage(page: DocPage, chart: ArrangeChart, tau: number, altSide: number): Trial | null {
-	const old: PlacedChart[] = page.items.map((it, index) => ({ index, frame: it.frame }));
-	if (page.manual || page.texts?.length) {
+	const charts = chartsOf(page);
+	const old: PlacedChart[] = charts.map((it, index) => ({ index, frame: it.frame }));
+	if (page.manual || typesetOf(page).length) {
 		// Nothing moves on a hand-arranged page, as one with text is: the chart takes the
 		// free spot, if any.
 		const frame = freeSpot(page, chart.aspect);
@@ -1275,7 +1258,7 @@ function tryPage(page: DocPage, chart: ArrangeChart, tau: number, altSide: numbe
 	for (const c of res.ranked) {
 		if (c.frames.some(underMinSide)) continue;
 		const qNew = Math.min(1, c.frames[n - 1].w / altSide);
-		const keep = Math.min(1, ...page.items.map((it, i) => c.frames[i].w / it.frame.w));
+		const keep = Math.min(1, ...charts.map((it, i) => c.frames[i].w / it.frame.w));
 		const q = Math.min(qNew, keep);
 		const cand = { q, pass: q >= tau - 1e-9, c };
 		if (cand.pass) {
@@ -1293,7 +1276,7 @@ function tryPage(page: DocPage, chart: ArrangeChart, tau: number, altSide: numbe
 		items: laid.items.map((p) => (p.index === n - 1 ? { index: -1, frame: p.frame } : p)),
 		layout: laid.layout,
 		manual: false,
-		relaid: page.items.some((it, i) => !sameRect(it.frame, c.frames[i]))
+		relaid: charts.some((it, i) => !sameRect(it.frame, c.frames[i]))
 	};
 }
 
@@ -1335,7 +1318,7 @@ export function planAdd(
 		const p = pages[k];
 		if (isBlank(p)) continue;
 		if (now() - t0 > ARRANGE.budgetMs) break;
-		if (p.items.length >= ARRANGE.maxAuto) continue;
+		if (chartsOf(p).length >= ARRANGE.maxAuto) continue;
 		if (!areaFeasible(p, chart, tau, altSide)) continue;
 		const r = tryPage(p, chart, tau, altSide);
 		if (!r) continue;
@@ -1388,21 +1371,22 @@ export interface TurnPlan {
  * clears `manual`.
  */
 export function turnLayout(page: DocPage, o: PageOrientation): TurnPlan {
-	const n = page.items.length;
+	const charts = chartsOf(page);
+	const n = charts.length;
 	const manual = !!page.manual;
 	const below = (items: PlacedChart[]) => items.some(({ frame }) => underMinSide(frame));
 	if (page.orientation === o) {
-		const items = page.items.map((it, index) => ({ index, frame: it.frame }));
+		const items = charts.map((it, index) => ({ index, frame: it.frame }));
 		const { layout, turnMemo } = page;
 		return { items, layout, manual, turnMemo, how: 'unchanged', belowMin: below(items) };
 	}
 	if (n === 0) return { items: [], manual, how: 'empty', belowMin: false };
 
-	const ids = page.items.map((it) => it.id);
+	const ids = charts.map((it) => it.id);
 	const memo: TurnMemo = {
 		orientation: page.orientation,
 		ids,
-		frames: page.items.map((it) => ({ ...it.frame })),
+		frames: charts.map((it) => ({ ...it.frame })),
 		manual
 	};
 	if (page.layout) memo.layout = copyLayout(page.layout);
@@ -1420,14 +1404,14 @@ export function turnLayout(page: DocPage, o: PageOrientation): TurnPlan {
 	}
 	if (n > ARRANGE.maxAuto) {
 		const frames = rotateLayout(
-			page.items.map((it) => ({ frame: it.frame, aspect: it.chart.aspect })),
+			charts.map((it) => ({ frame: it.frame, aspect: it.chart.aspect })),
 			page.orientation,
 			o
 		);
 		const items = frames.map((frame, index) => ({ index, frame }));
 		return { items, manual, turnMemo: memo, how: 'fallback', belowMin: below(items) };
 	}
-	const tree = page.layout?.tree ?? treeFromFrames(page.items.map((it) => it.frame));
+	const tree = page.layout?.tree ?? treeFromFrames(charts.map((it) => it.frame));
 	const prefer =
 		tree === null ? null : { tree: transposeTree(tree), sizing: page.layout?.sizing ?? null };
 	const res = arrange(o, arrangeItems(page), { mode: 'turn', from: page.orientation, prefer });

@@ -20,6 +20,7 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { loadMessier } from '$lib/api/catalog';
+	import { chartsOf, typesetOf } from '$lib/document/blocks';
 	import { pageSize } from '$lib/document/geometry';
 	import { plural } from '$lib/document/labels';
 	import {
@@ -36,7 +37,7 @@
 		type TemplateLanguage
 	} from '$lib/document/templates';
 	import { measuredLayout } from '$lib/document/text-fonts.svelte';
-	import type { DocItem, DocPage, PageOrientation, TextStyle } from '$lib/document/types';
+	import type { ChartBlock, DocPage, PageOrientation, TextStyle } from '$lib/document/types';
 	import { catalog, type MessierObject } from '$lib/stores.svelte';
 	import EditorOrientation from './EditorOrientation.svelte';
 	import PageThumbnail from './PageThumbnail.svelte';
@@ -84,7 +85,8 @@
 	/** True from the press on the backdrop to the click: a drag that ends there is no click. */
 	let pressedOutside = false;
 
-	const charts = $derived(page.items.length);
+	const own = $derived(chartsOf(page));
+	const charts = $derived(own.length);
 	const scale = $derived(TILE_PX / pageSize(orientation).w);
 	const height = (text: string, style: TextStyle, width: number) =>
 		measuredLayout(text, style, width).height;
@@ -92,7 +94,7 @@
 	// === A finder card's close-up ===
 
 	/** The chart a finder card would be made of, in the order the charts are taken. */
-	const sky = $derived(finderSky(swap ? [...page.items].reverse() : page.items));
+	const sky = $derived(finderSky(swap ? [...own].reverse() : own));
 	/** The Messier objects on that sky, brightest first. */
 	const objects = $derived(
 		sky
@@ -172,21 +174,22 @@
 
 	/** A laid page as a page to draw: the page's own charts in their new frames, and the text. */
 	function previewOf(laid: LaidPage): DocPage {
-		const own = (page.texts ?? []).filter((text) => text.role === undefined);
+		const kept = typesetOf(page).filter((text) => text.role === undefined);
+		const placed = laid.charts.flatMap(({ id: chartId, frame, chart, marks }): ChartBlock[] => {
+			if (chart) return [{ kind: 'chart', id: chartId, chart, frame }];
+			const item = own.find((it) => it.id === chartId);
+			if (!item) return [];
+			// Ringed where the template rings it, and nowhere else, as the page will be.
+			const shown = { ...item.chart };
+			if (marks?.length) shown.marks = marks;
+			else delete shown.marks;
+			return [{ ...item, chart: shown, frame }];
+		});
+		const texts = laid.texts.map((text, i) => ({ ...text, id: `preview-text-${i}` }));
 		return {
 			id: `${page.id}-preview`,
 			orientation: laid.orientation,
-			items: laid.charts.flatMap(({ id: chartId, frame, chart, marks }): DocItem[] => {
-				if (chart) return [{ id: chartId, chart, frame }];
-				const item = page.items.find((it) => it.id === chartId);
-				if (!item) return [];
-				// Ringed where the template rings it, and nowhere else, as the page will be.
-				const shown = { ...item.chart };
-				if (marks?.length) shown.marks = marks;
-				else delete shown.marks;
-				return [{ ...item, chart: shown, frame }];
-			}),
-			texts: [...own, ...laid.texts.map((text, i) => ({ ...text, id: `preview-text-${i}` }))]
+			blocks: [...placed, ...kept, ...texts]
 		};
 	}
 

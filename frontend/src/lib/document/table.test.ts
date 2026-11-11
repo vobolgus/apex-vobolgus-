@@ -17,7 +17,7 @@ import {
 	type TableContent
 } from './table';
 import { DEFAULT_TEXT_STYLE, FONT_METRICS, LINE_HEIGHT, MM_PER_PT } from './text';
-import type { ChartSnapshot, DocItem, DocText } from './types';
+import type { ChartBlock, ChartSnapshot, TableBlock, TableSpec } from './types';
 
 const DEG = Math.PI / 180;
 
@@ -473,40 +473,46 @@ describe('layoutTable', () => {
 
 describe('blockLayout', () => {
 	const sky: Sky = { messier: [object(45, 90, 0, 1.6, 'Pleiades')], stars: [] };
-	const items: DocItem[] = [
-		{ id: 'far', chart: chart(270, 0), frame: { x: 12, y: 12, w: 80, h: 80 } },
-		{ id: 'near', chart: chart(90, 0), frame: { x: 12, y: 150, w: 80, h: 80 } }
+	const items: ChartBlock[] = [
+		{ kind: 'chart', id: 'far', chart: chart(270, 0), frame: { x: 12, y: 12, w: 80, h: 80 } },
+		{ kind: 'chart', id: 'near', chart: chart(90, 0), frame: { x: 12, y: 150, w: 80, h: 80 } }
 	];
-	const block = (overrides: Partial<DocText>): DocText => ({
-		id: 't',
-		text: '',
-		style: DEFAULT_TEXT_STYLE,
-		frame: { x: 12, y: 236, w: 100, h: 10 },
-		...overrides
+	const at = { id: 't', style: DEFAULT_TEXT_STYLE, frame: { x: 12, y: 236, w: 100, h: 10 } };
+	const tableOf = (table: TableSpec, chartId?: string): TableBlock => ({
+		kind: 'table',
+		...at,
+		table,
+		...(chartId ? { chartId } : {})
 	});
 
 	it('lays a table out from the chart it reads: the nearest, or the one it is told', () => {
-		const table = block({ table: { source: 'messier', look: 'details', rows: 5 } });
-		const near = blockLayout({ items }, table, 100, measure, sky);
+		const table = tableOf({ source: 'messier', look: 'details', rows: 5 });
+		const near = blockLayout({ blocks: items }, table, 100, measure, sky);
 		expect(near.lines.map((line) => line.text)).toContain('Pleiades');
 		expect(near.rules).toHaveLength(3);
-		const far = blockLayout({ items }, { ...table, chartId: 'far' }, 100, measure, sky);
+		const far = blockLayout({ blocks: items }, { ...table, chartId: 'far' }, 100, measure, sky);
 		expect(far.lines.at(-1)!.text).toBe('None on this chart');
 	});
 
 	it('reads a chart on another page when it is told one there', () => {
-		const table = block({ table: { source: 'messier', rows: 5 }, chartId: 'near' });
-		const pages = [{ items: [] }, { items }];
+		const table = tableOf({ source: 'messier', rows: 5 }, 'near');
+		const pages = [{ blocks: [] }, { blocks: items }];
 		// On a page of its own, with no chart: its sky is on the other page.
-		const read = blockLayout({ items: [] }, table, 100, measure, sky, pages);
+		const read = blockLayout({ blocks: [] }, table, 100, measure, sky, pages);
 		expect(read.lines.map((line) => line.text)).toEqual(['Messier objects', 'M 45']);
 		// Without the document to look in, there is no chart to read.
-		const blind = blockLayout({ items: [] }, table, 100, measure, sky);
+		const blind = blockLayout({ blocks: [] }, table, 100, measure, sky);
 		expect(blind.lines.map((line) => line.text)).toEqual(['Messier objects', 'No chart to read']);
 	});
 
 	it('lays a text out as a text: its fields read, no rules', () => {
-		const layout = blockLayout({ items }, block({ text: 'Field {fov}' }), 100, measure, sky);
+		const layout = blockLayout(
+			{ blocks: items },
+			{ kind: 'text', ...at, text: 'Field {fov}' },
+			100,
+			measure,
+			sky
+		);
 		expect(layout.lines.map((line) => line.text)).toEqual(['Field 120°']);
 		expect(layout.rules).toBeUndefined();
 		expect(layout.lines[0].x).toBeUndefined();

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { chartsOf, savedPages, type SavedChart } from './saved-document';
 
 /**
  * The PDF document from the generator: Add to PDF fills the pages panel (laying a
@@ -7,19 +8,10 @@ import { expect, test, type Page } from '@playwright/test';
  * editor, and the export menu's "PDF document" row posts the whole document.
  */
 
-const STORAGE_KEY = 'skycharts.document.v1';
-
-interface SavedPage {
-	orientation: string;
-	items: { id: string; frame: { x: number; y: number; w: number; h: number } }[];
-}
-
-/** The saved pages (saves are debounced: poll this). */
-async function savedPages(page: Page): Promise<SavedPage[]> {
-	return page.evaluate((key) => {
-		const raw = localStorage.getItem(key);
-		return raw ? JSON.parse(raw).pages : [];
-	}, STORAGE_KEY);
+/** The charts of the saved page `at` (saves are debounced: poll this). */
+async function savedCharts(page: Page, at = 0): Promise<SavedChart[] | undefined> {
+	const saved = (await savedPages(page))[at];
+	return saved && chartsOf(saved);
 }
 
 async function gotoGenerator(page: Page) {
@@ -103,7 +95,7 @@ test('the toast’s Undo takes an Add back, and the page is laid out as before',
 	await add.click();
 	await expect(thumbnails(page)).toHaveCount(1);
 	await expect
-		.poll(async () => (await savedPages(page))[0]?.items[0]?.frame)
+		.poll(async () => (await savedCharts(page))?.[0]?.frame)
 		.toEqual({
 			x: 12,
 			y: 55.5,
@@ -114,14 +106,14 @@ test('the toast’s Undo takes an Add back, and the page is laid out as before',
 	const toast = page.locator('.toast').filter({ hasText: 'Added to page 1, layout updated' });
 	await expect(toast).toBeVisible();
 	await expect
-		.poll(async () => (await savedPages(page))[0]?.items.map((it) => it.frame.w))
+		.poll(async () => (await savedCharts(page))?.map((it) => it.frame.w))
 		.toEqual([133.5, 133.5]);
 
 	await toast.getByRole('button', { name: 'Undo' }).click();
 	await expect(toast).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Page 1, 1 chart' })).toBeVisible();
 	await expect
-		.poll(async () => (await savedPages(page))[0]?.items.map((it) => it.frame))
+		.poll(async () => (await savedCharts(page))?.map((it) => it.frame))
 		.toEqual([{ x: 12, y: 55.5, w: 186, h: 186 }]);
 });
 
@@ -133,8 +125,8 @@ test('a wide pinhole gets a landscape page of its own', async ({ page }) => {
 	await expect.poll(async () => (await savedPages(page))[0]?.orientation).toBe('landscape');
 	const [saved] = await savedPages(page);
 	// The default pinhole (1.61:1) across the full landscape width, centred.
-	expect(saved.items[0].frame.w).toBeCloseTo(273, 6);
-	expect(saved.items[0].frame.x).toBeCloseTo(12, 6);
+	expect(chartsOf(saved)[0].frame.w).toBeCloseTo(273, 6);
+	expect(chartsOf(saved)[0].frame.x).toBeCloseTo(12, 6);
 });
 
 test('a landscape page fits the width of the panel: the panel does not widen, the chart does not move', async ({

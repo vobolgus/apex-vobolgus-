@@ -1,5 +1,6 @@
 /**
- * The PDF document: A4 pages holding frozen copies of the preview's chart, and text.
+ * The PDF document: A4 pages holding blocks: frozen copies of the preview's chart,
+ * texts and tables.
  *
  * All geometry is in millimetres, origin at the page's top-left, y down.
  */
@@ -37,8 +38,19 @@ export interface ChartSnapshot {
 	marks?: SkyMark[];
 }
 
-export interface DocItem {
+/**
+ * What every block on a page has: a name of its own in the document, and its place.
+ * A block is a chart, a text or a table (`kind`); what treats them alike reads no
+ * more of one than this.
+ */
+interface BlockBase {
 	id: string;
+	frame: Rect;
+}
+
+/** A chart on a page: a frozen copy of the preview's. */
+export interface ChartBlock extends BlockBase {
+	kind: 'chart';
 	chart: ChartSnapshot;
 	/** Always keeps the chart's aspect: `frame.w / frame.h === chart.aspect`. */
 	frame: Rect;
@@ -92,50 +104,64 @@ export interface TableSpec {
 }
 
 /**
- * A block of text on a page. Its width is set by hand and its lines wrap to it; the
- * height follows the text, so `frame.h` is only the height it was last laid out at
- * (`text.ts`), kept for whoever needs the block's box without measuring type.
+ * What a text and a table share: both are set in type, read a chart, and may be
+ * turned. The width is set by hand; the height follows what is set, so `frame.h` is
+ * only the height the block was last laid out at (`text.ts`), kept for whoever needs
+ * its box without measuring type.
  */
-export interface DocText {
-	id: string;
-	/** As typed: line breaks, and `{fields}` that show the values of a chart (`text.ts`). */
-	text: string;
+interface TypesetBase extends BlockBase {
 	style: TextStyle;
-	frame: Rect;
 	/**
 	 * Degrees it is turned clockwise about the centre of its frame, in (−180, 180];
-	 * absent when upright. The frame is the text's own box, as it is before the turn.
+	 * absent when upright. The frame is the block's own box, as it is before the turn.
 	 */
 	rotation?: number;
 	/**
-	 * Set on a table (`table.ts`): its words are not typed (`text` is empty) but read
-	 * from its chart, and set in rows and columns.
-	 */
-	table?: TableSpec;
-	/**
-	 * Set on a text a template put there. Laid out again, the page keeps what was
+	 * Set on a block a template put there. Laid out again, the page keeps what was
 	 * typed in it for the same part, and drops it where the new template has none;
-	 * a text without one is the page's owner's, and no template touches it.
+	 * a block without one is the page's owner's, and no template touches it.
 	 */
 	role?: TextRole;
-	/** The chart on this page its fields read; the nearest one when absent or gone (`boundItem`). */
+	/** The chart its fields read; the nearest one on its page when absent or gone (`boundItem`). */
 	chartId?: string;
 }
 
+/** A block of text on a page: its lines wrap to its width. */
+export interface TextBlock extends TypesetBase {
+	kind: 'text';
+	/** As typed: line breaks, and `{fields}` that show the values of a chart (`text.ts`). */
+	text: string;
+}
+
 /**
- * A chart or a text as copied: what goes on the clipboard, and what `pasteBlock`
- * reads back (from anywhere, so it is parsed like saved data).
+ * A table (`table.ts`): its words are not typed but read from its chart, and set in
+ * rows and columns.
+ */
+export interface TableBlock extends TypesetBase {
+	kind: 'table';
+	table: TableSpec;
+}
+
+/** A block set in type: a text or a table. Drawn, moved, turned and sent to the PDF alike. */
+export type TypesetBlock = TextBlock | TableBlock;
+
+/** Anything on a page. */
+export type DocBlock = ChartBlock | TypesetBlock;
+
+export type BlockKind = DocBlock['kind'];
+
+/** A block yet to get its id. */
+export type NewBlock<B extends DocBlock = DocBlock> = B extends DocBlock ? Omit<B, 'id'> : never;
+
+/**
+ * A block as copied: what goes on the clipboard, and what `pasteBlock` reads back
+ * (from anywhere, so it is parsed like saved data). A copy is its owner's: it plays
+ * no part of a template, and reads the chart nearest to where it lands.
  */
 export type BlockCopy =
 	| { kind: 'chart'; chart: ChartSnapshot; frame: Rect }
-	| {
-			kind: 'text';
-			text: string;
-			style: TextStyle;
-			frame: Rect;
-			rotation?: number;
-			table?: TableSpec;
-	  };
+	| { kind: 'text'; text: string; style: TextStyle; frame: Rect; rotation?: number }
+	| { kind: 'table'; table: TableSpec; style: TextStyle; frame: Rect; rotation?: number };
 
 /** How Add to PDF and a turn lay a page out: stereo charts are discs, the rest pinholes. */
 export type ChartKind = 'stereo' | 'pinhole';
@@ -147,7 +173,7 @@ export interface LayoutNode {
 }
 
 /**
- * An ordered slicing (guillotine) layout. A leaf is an item's index; a node's kids
+ * An ordered slicing (guillotine) layout. A leaf is a chart's index; a node's kids
  * alternate direction with its own.
  */
 export type LayoutTree = number | LayoutNode;
@@ -158,7 +184,7 @@ export type LayoutTree = number | LayoutNode;
  */
 export type LayoutSizing = 'uniform' | 'blocked';
 
-/** The arranger's layout of a page; its leaves index `page.items`. */
+/** The arranger's layout of a page; its leaves index the page's charts (`chartsOf`). */
 export interface PageLayout {
 	tree: LayoutTree;
 	sizing: LayoutSizing;
@@ -167,7 +193,7 @@ export interface PageLayout {
 /** A page as it was before its last turn, so that turning it back restores it exactly. */
 export interface TurnMemo {
 	orientation: PageOrientation;
-	/** The page's item ids in their order then; `frames` and `layout` follow it. */
+	/** The ids of the page's charts in their order then; `frames` and `layout` follow it. */
 	ids: string[];
 	frames: Rect[];
 	layout?: PageLayout;
@@ -186,9 +212,11 @@ export interface PageTemplate {
 export interface DocPage {
 	id: string;
 	orientation: PageOrientation;
-	items: DocItem[];
-	/** Text, drawn over the charts. A page with text is arranged by hand (`manual`). */
-	texts?: DocText[];
+	/**
+	 * What is on the page, in the order it is drawn: the charts first, then the texts
+	 * and tables over them (`blocks.ts`). A page with text is arranged by hand (`manual`).
+	 */
+	blocks: DocBlock[];
 	/**
 	 * Set when a template lays the page out, and kept while the page is what it made:
 	 * a turn then lays it out as that template does the other way. Moving, adding or

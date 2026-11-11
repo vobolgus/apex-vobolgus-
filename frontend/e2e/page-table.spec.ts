@@ -1,4 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import {
+	documentOf,
+	savedDocument,
+	savedPages,
+	seedDocument,
+	typesetOf,
+	type SavedType
+} from './saved-document';
 
 /**
  * Tables on a page, in the page editor: added from the page's name, a table lists
@@ -9,7 +17,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
  * cell.
  */
 
-const STORAGE_KEY = 'skycharts.document.v1';
 const MM_PER_PT = 25.4 / 72;
 
 const STEREO = {
@@ -34,34 +41,17 @@ const STEREO = {
 };
 
 /** A disc in the lower part of the first page, room over it; an empty second page. */
-const DOCUMENT = {
-	pages: [
-		{
-			id: 'e2e-page-1',
-			orientation: 'portrait',
-			items: [{ id: 'e2e-a', chart: STEREO, frame: { x: 30, y: 90, w: 150, h: 150 } }]
-		},
-		{ id: 'e2e-page-2', orientation: 'portrait', items: [] }
-	]
-};
+const DOCUMENT = documentOf([
+	{
+		id: 'e2e-page-1',
+		orientation: 'portrait',
+		blocks: [{ kind: 'chart', id: 'e2e-a', chart: STEREO, frame: { x: 30, y: 90, w: 150, h: 150 } }]
+	},
+	{ id: 'e2e-page-2', orientation: 'portrait', blocks: [] }
+]);
 
-interface SavedText {
-	id: string;
-	text: string;
-	table?: { source: string; look?: string; rows: number };
-	chartId?: string;
-	frame: { x: number; y: number; w: number; h: number };
-}
-
-async function seedAndOpen(page: Page) {
-	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
-		DOCUMENT
-	] as const);
-	await page.reload();
-	await page.waitForSelector('canvas');
-	await page.waitForLoadState('networkidle').catch(() => undefined);
+async function seedAndOpen(page: Page, document: unknown = DOCUMENT) {
+	await seedDocument(page, document);
 	await page.getByRole('button', { name: /^Page 1,/ }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -69,14 +59,10 @@ async function seedAndOpen(page: Page) {
 	return editor;
 }
 
-async function savedTexts(page: Page, at = 0): Promise<SavedText[]> {
-	return page.evaluate(
-		([key, index]) => {
-			const raw = localStorage.getItem(key as string);
-			return raw ? (JSON.parse(raw).pages[index as number]?.texts ?? []) : [];
-		},
-		[STORAGE_KEY, at] as const
-	);
+/** The texts and tables of the saved page `at` (saves are debounced: poll this). */
+async function savedTexts(page: Page, at = 0): Promise<SavedType[]> {
+	const saved = (await savedPages(page))[at];
+	return saved ? typesetOf(saved) : [];
 }
 
 /** What a block shows, cell by cell. */
@@ -109,7 +95,9 @@ test('a table is a title over the names of what is on its chart, three to a row;
 	// At the top left, as wide as its names, six lines tall.
 	await expect.poll(async () => (await savedTexts(page)).length).toBe(1);
 	const [first] = await savedTexts(page);
-	expect(first.text).toBe('');
+	// A block of its own kind: a spec, and no words.
+	expect(first.kind).toBe('table');
+	expect(first).not.toHaveProperty('text');
 	expect(first.table).toEqual({ source: 'messier', look: 'names', rows: 5 });
 	expect(first.frame).toMatchObject({ x: 12, y: 12 });
 	expect(first.frame.w).toBeGreaterThan(30);
@@ -335,4 +323,77 @@ test('made narrower, a table gives way inside its frame; the lines it snaps to s
 	// Wide again, its names are whole.
 	await expect.poll(async () => (await savedTexts(page))[0].frame.w).toBeGreaterThan(liked);
 	expect(await cells(table)).toEqual(whole);
+});
+
+test('a document saved before a page had blocks loads as it was, and is saved in blocks from then on', async ({
+	page
+}) => {
+	// The first shape: charts in `items`, text in `texts`, a table a text with a spec and no words.
+	const style = { font: 'serif', size: 12, bold: false, italic: false, align: 'left' };
+	const first = {
+		pages: [
+			{
+				id: 'e2e-page-1',
+				orientation: 'portrait',
+				manual: true,
+				items: [{ id: 'e2e-a', chart: STEREO, frame: { x: 30, y: 90, w: 150, h: 150 } }],
+				texts: [
+					{ id: 'e2e-words', text: 'Field {fov}', style, frame: { x: 12, y: 250, w: 186, h: 6 } },
+					{
+						id: 'e2e-table',
+						text: '',
+						style,
+						table: { source: 'stars', rows: 3 },
+						chartId: 'e2e-a',
+						frame: { x: 12, y: 12, w: 60, h: 4 * LINE_MM }
+					}
+				]
+			}
+		]
+	};
+	const editor = await seedAndOpen(page, first);
+
+	// Each is what it was: a text reading its chart, and a table of that chart's stars.
+	await expect(editor.getByRole('button', { name: /^Chart 1 of 1/ })).toBeVisible();
+	await expect(editor.getByRole('button', { name: 'Text 1 of 2: Field 180°' })).toBeVisible();
+	const table = editor.getByRole('button', { name: 'Table 2 of 2: Stars, names, 3 rows' });
+	await expect.poll(async () => (await cells(table))[0]).toBe('Stars');
+
+	// Changed, it is saved in the shape of now: a version, and one list of blocks to a page.
+	await table.click();
+	await page.keyboard.press('ArrowDown');
+	await expect.poll(async () => (await savedTexts(page))[1]?.frame.y).toBe(13);
+	const saved = (await savedDocument(page)) as { version: number; pages: object[] };
+	expect(saved.version).toBe(2);
+	expect(saved.pages[0]).not.toHaveProperty('items');
+	expect(saved.pages[0]).not.toHaveProperty('texts');
+	const [now] = await savedPages(page);
+	expect(now.blocks.map((block) => [block.kind, block.id])).toEqual([
+		['chart', 'e2e-a'],
+		['text', 'e2e-words'],
+		['table', 'e2e-table']
+	]);
+	const [words, list] = typesetOf(now);
+	// (Its height is its lines', and follows them.)
+	expect(words).toMatchObject({
+		text: 'Field {fov}',
+		style,
+		frame: { x: 12, y: 250, w: 186 }
+	});
+	expect(list).not.toHaveProperty('text');
+	expect(list).toMatchObject({
+		table: { source: 'stars', look: 'names', rows: 3 },
+		chartId: 'e2e-a',
+		frame: { x: 12, y: 13, w: 60 }
+	});
+
+	// And read again from what it wrote, it is the same page.
+	await page.reload();
+	await page.waitForSelector('canvas');
+	await page.getByRole('button', { name: /^Page 1,/ }).click();
+	const again = page.getByRole('dialog', { name: 'PDF document' });
+	await expect(
+		again.getByRole('button', { name: 'Table 2 of 2: Stars, names, 3 rows' })
+	).toBeVisible();
+	await expect(again.getByRole('button', { name: 'Text 1 of 2: Field 180°' })).toBeVisible();
 });

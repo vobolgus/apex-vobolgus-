@@ -2,8 +2,8 @@
  * Tables on a page of the PDF document: what is on a chart, listed. Pure functions,
  * no DOM: whoever calls brings the measure and the catalogues.
  *
- * A table is a text whose words are not typed but read from the chart it is bound
- * to (`DocText.table`): the Messier objects in its field, or its brightest stars,
+ * A table is a block whose words are not typed but read from the chart it is bound
+ * to (`TableBlock`): the Messier objects in its field, or its brightest stars,
  * brightest first. It has two looks. `names`, after the worksheets of SkyGen: a
  * title in bold over the names alone, three to a row, each in the middle of its
  * column: what is to be found on the chart. `details`: a row an object under a
@@ -33,11 +33,11 @@ import {
 import type {
 	ChartSnapshot,
 	DocPage,
-	DocText,
 	TableLook,
 	TableSource,
 	TableSpec,
-	TextStyle
+	TextStyle,
+	TypesetBlock
 } from './types';
 
 export const TABLE_SOURCES: readonly TableSource[] = ['messier', 'stars'];
@@ -468,18 +468,18 @@ export function layoutTable(
  * reads a chart on another page than its own.
  */
 export function blockLayout(
-	page: Pick<DocPage, 'items'>,
-	text: DocText,
+	page: Pick<DocPage, 'blocks'>,
+	block: TypesetBlock,
 	widthMm: number,
 	measure: Measure,
 	sky: Sky,
 	pages?: Sheets
 ): TextLayout {
-	if (!text.table) {
-		return layoutText(shownText(page, text, pages), text.style, widthMm, measure);
+	if (block.kind === 'text') {
+		return layoutText(shownText(page, block, pages), block.style, widthMm, measure);
 	}
-	const content = tableContent(boundChart(page, text, pages), text.table, sky);
-	return layoutTable(content, text.style, widthMm, measure);
+	const content = tableContent(boundChart(page, block, pages), block.table, sky);
+	return layoutTable(content, block.style, widthMm, measure);
 }
 
 /** What a table is called: "Messier objects, names, 5 rows". */

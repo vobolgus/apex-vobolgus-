@@ -17,17 +17,19 @@
 
 import { viewBasis } from '$lib/math/projection';
 import { freeRects } from './arrange';
+import { blockBounds, chartsOf } from './blocks';
 import { contentBox, rotatedBounds } from './geometry';
 import type {
+	ChartBlock,
 	ChartSnapshot,
-	DocItem,
 	DocPage,
-	DocText,
 	PageOrientation,
 	Rect,
 	TextAlign,
 	TextFont,
-	TextStyle
+	TextBlock,
+	TextStyle,
+	TypesetBlock
 } from './types';
 
 export const MM_PER_PT = 25.4 / 72;
@@ -234,7 +236,10 @@ function centreDistance(a: Rect, b: Rect): number {
 }
 
 /** The pages of a document, for a text that reads a chart on another page than its own. */
-export type Sheets = readonly Pick<DocPage, 'items'>[];
+export type Sheets = readonly Pick<DocPage, 'blocks'>[];
+
+/** What of a text or a table says which chart it reads: the one it names, and where it is. */
+type Reader = Pick<TypesetBlock, 'chartId' | 'frame' | 'rotation'>;
 
 /**
  * The chart a text's fields read: the one it names, on its own page or (given the
@@ -243,21 +248,22 @@ export type Sheets = readonly Pick<DocPage, 'items'>[];
  * the earlier on the page.
  */
 export function boundItem(
-	page: Pick<DocPage, 'items'>,
-	text: DocText,
+	page: Pick<DocPage, 'blocks'>,
+	text: Reader,
 	pages?: Sheets
-): DocItem | null {
+): ChartBlock | null {
+	const charts = chartsOf(page);
 	if (text.chartId !== undefined) {
 		const named =
-			page.items.find((it) => it.id === text.chartId) ??
-			pages?.flatMap((sheet) => sheet.items).find((it) => it.id === text.chartId);
+			charts.find((it) => it.id === text.chartId) ??
+			pages?.flatMap(chartsOf).find((it) => it.id === text.chartId);
 		if (named) return named;
 	}
 	const box = textBounds(text);
-	let best: DocItem | null = null;
+	let best: ChartBlock | null = null;
 	let bestGap = Infinity;
 	let bestCentre = Infinity;
-	for (const item of page.items) {
+	for (const item of charts) {
 		const itemGap = gap(box, item.frame);
 		const itemCentre = centreDistance(box, item.frame);
 		const nearer =
@@ -273,15 +279,15 @@ export function boundItem(
 }
 
 export function boundChart(
-	page: Pick<DocPage, 'items'>,
-	text: DocText,
+	page: Pick<DocPage, 'blocks'>,
+	text: Reader,
 	pages?: Sheets
 ): ChartSnapshot | null {
 	return boundItem(page, text, pages)?.chart ?? null;
 }
 
 /** What a text shows: its fields read from its chart. */
-export function shownText(page: Pick<DocPage, 'items'>, text: DocText, pages?: Sheets): string {
+export function shownText(page: Pick<DocPage, 'blocks'>, text: TextBlock, pages?: Sheets): string {
 	return resolveFields(text.text, boundChart(page, text, pages));
 }
 
@@ -387,8 +393,8 @@ export function quarterTurn(degrees: number, direction: 1 | -1): number {
 }
 
 /** What a text takes up on its page: its frame, or the upright box around it when turned. */
-export function textBounds(text: Pick<DocText, 'frame' | 'rotation'>): Rect {
-	return rotatedBounds(text.frame, text.rotation);
+export function textBounds(text: Pick<TypesetBlock, 'frame' | 'rotation'>): Rect {
+	return blockBounds(text);
 }
 
 /**
@@ -447,12 +453,9 @@ export function fitTextFrame(frame: Rect, o: PageOrientation, rotation = 0): Rec
  * gutter clear of every chart and text; of places as high up, the widest. With none,
  * the top of the content box, over whatever is there (it is then moved by hand).
  */
-export function newTextFrame(
-	page: Pick<DocPage, 'orientation' | 'items' | 'texts'>,
-	height: number
-): Rect {
+export function newTextFrame(page: Pick<DocPage, 'orientation' | 'blocks'>, height: number): Rect {
 	const box = contentBox(page.orientation);
-	const obstacles = [...page.items.map((it) => it.frame), ...(page.texts ?? []).map(textBounds)];
+	const obstacles = page.blocks.map(blockBounds);
 	const places = freeRects(box, obstacles)
 		.filter((free) => free.w >= MIN_NEW_TEXT_WIDTH_MM - 1e-6 && free.h >= height - 1e-6)
 		.sort((a, b) => a.y - b.y || b.w - a.w || a.x - b.x);

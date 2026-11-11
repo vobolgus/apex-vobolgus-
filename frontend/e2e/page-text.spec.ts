@@ -1,5 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { contentBox } from '../src/lib/document/geometry';
+import {
+	chartsOf,
+	documentOf,
+	savedPages,
+	seedDocument,
+	typesetOf,
+	type SavedType
+} from './saved-document';
 
 /**
  * Text on a page, in the page editor: added from the page's name, typed in place,
@@ -8,7 +16,6 @@ import { contentBox } from '../src/lib/document/geometry';
  * backend line by line, as the editor broke it.
  */
 
-const STORAGE_KEY = 'skycharts.document.v1';
 const MM_PER_PT = 25.4 / 72;
 
 const STEREO = {
@@ -34,35 +41,30 @@ const STEREO = {
 
 const STYLE = { font: 'serif', size: 12, bold: false, italic: false, align: 'left' };
 
-interface SavedText {
-	id: string;
-	text: string;
-	style: typeof STYLE;
-	frame: { x: number; y: number; w: number; h: number };
-}
-
-interface SavedPage {
-	manual?: boolean;
-	items: { id: string }[];
-	texts?: SavedText[];
-}
+/** A text as it is saved, with its words. */
+type SavedText = SavedType & { kind: 'text'; text: string };
 
 /** A disc on the first page with room under it, and an empty second page. */
 function documentWith(texts: SavedText[] = []) {
-	return {
-		pages: [
-			{
-				id: 'e2e-page-1',
-				orientation: 'portrait',
-				items: [{ id: 'e2e-a', chart: STEREO, frame: { x: 42, y: 30, w: 126, h: 126 } }],
-				...(texts.length > 0 ? { texts, manual: true } : {})
-			},
-			{ id: 'e2e-page-2', orientation: 'portrait', items: [] }
-		]
+	const disc = {
+		kind: 'chart',
+		id: 'e2e-a',
+		chart: STEREO,
+		frame: { x: 42, y: 30, w: 126, h: 126 }
 	};
+	return documentOf([
+		{
+			id: 'e2e-page-1',
+			orientation: 'portrait',
+			blocks: [disc, ...texts],
+			...(texts.length > 0 ? { manual: true } : {})
+		},
+		{ id: 'e2e-page-2', orientation: 'portrait', blocks: [] }
+	]);
 }
 
 const CAPTION: SavedText = {
+	kind: 'text',
 	id: 'e2e-text',
 	text: 'Find the zenith and name the ten brightest stars of this sky.',
 	style: STYLE,
@@ -70,14 +72,7 @@ const CAPTION: SavedText = {
 };
 
 async function seedAndOpen(page: Page, texts: SavedText[] = []) {
-	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
-		documentWith(texts)
-	] as const);
-	await page.reload();
-	await page.waitForSelector('canvas');
-	await page.waitForLoadState('networkidle').catch(() => undefined);
+	await seedDocument(page, documentWith(texts));
 	await page.getByRole('button', { name: /^Page 1,/ }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -86,16 +81,10 @@ async function seedAndOpen(page: Page, texts: SavedText[] = []) {
 	return editor;
 }
 
-/** The saved pages (saves are debounced: poll this). */
-async function savedPages(page: Page): Promise<SavedPage[]> {
-	return page.evaluate((key) => {
-		const raw = localStorage.getItem(key);
-		return raw ? JSON.parse(raw).pages : [];
-	}, STORAGE_KEY);
-}
-
-async function savedTexts(page: Page, at = 0): Promise<SavedText[]> {
-	return (await savedPages(page))[at]?.texts ?? [];
+/** The texts of the saved page `at` (saves are debounced: poll this). */
+async function savedTexts(page: Page, at = 0): Promise<SavedType[]> {
+	const saved = (await savedPages(page))[at];
+	return saved ? typesetOf(saved) : [];
 }
 
 async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
@@ -325,27 +314,27 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		view: { ...STEREO.view, projection: 'pinhole', pinholeFovDeg: 40 },
 		aspect: 1.6
 	};
-	const caption = { ...CAPTION, text: 'Field {fov}', frame: { x: 112, y: 80, w: 86, h: 6 } };
-	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
-		{
-			pages: [
-				{
-					id: 'e2e-page-1',
-					orientation: 'portrait',
-					manual: true,
-					items: [
-						{ id: 'e2e-disc', chart: STEREO, frame: { x: 12, y: 12, w: 90, h: 90 } },
-						{ id: 'e2e-frame', chart: pinhole, frame: { x: 108, y: 12, w: 90, h: 56.25 } }
-					],
-					texts: [caption]
-				}
-			]
-		}
-	] as const);
-	await page.reload();
-	await page.waitForSelector('canvas');
+	// Saved in the first shape, charts in `items` and text in `texts`: the app brings it over.
+	const caption = {
+		id: CAPTION.id,
+		text: 'Field {fov}',
+		style: STYLE,
+		frame: { x: 112, y: 80, w: 86, h: 6 }
+	};
+	await seedDocument(page, {
+		pages: [
+			{
+				id: 'e2e-page-1',
+				orientation: 'portrait',
+				manual: true,
+				items: [
+					{ id: 'e2e-disc', chart: STEREO, frame: { x: 12, y: 12, w: 90, h: 90 } },
+					{ id: 'e2e-frame', chart: pinhole, frame: { x: 108, y: 12, w: 90, h: 56.25 } }
+				],
+				texts: [caption]
+			}
+		]
+	});
 	await page.getByRole('button', { name: /^Page 1,/ }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await page.evaluate(() => document.fonts.ready);
@@ -372,9 +361,7 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		'true'
 	);
 	await expect(editor.locator('.item.is-linked')).toHaveAttribute('data-item-id', 'e2e-disc');
-	await expect
-		.poll(async () => ((await savedTexts(page))[0] as SavedText & { chartId?: string }).chartId)
-		.toBe('e2e-disc');
+	await expect.poll(async () => (await savedTexts(page))[0].chartId).toBe('e2e-disc');
 
 	// And the nearest again.
 	await reads.getByRole('button', { name: /^Read the nearest chart/ }).click();
@@ -392,7 +379,7 @@ test('a text is turned by quarters from its toolbar and R, and by its knob, to a
 	const short = { ...CAPTION, text: 'Key: {lat}, {lst}', frame: { x: 60, y: 200, w: 90, h: 6 } };
 	const editor = await seedAndOpen(page, [short]);
 	const text = editor.getByRole('button', { name: /^Text 1 of 1:/ });
-	const saved = async () => (await savedTexts(page))[0] as SavedText & { rotation?: number };
+	const saved = async () => (await savedTexts(page))[0];
 	await text.click();
 
 	// A quarter clockwise: it stands on its side, taller than wide on the screen.
@@ -487,7 +474,7 @@ test('a chart and a text are copied, cut and pasted with the keys; copied words 
 }) => {
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 	const editor = await seedAndOpen(page, [CAPTION]);
-	const charts = async () => (await savedPages(page)).map((p) => p.items.map((it) => it.id));
+	const charts = async () => (await savedPages(page)).map((p) => chartsOf(p).map((it) => it.id));
 
 	// A text: copied and pasted on its own page it goes under the first.
 	const text = editor.getByRole('button', { name: /^Text 1 of/ });
@@ -519,13 +506,13 @@ test('a chart and a text are copied, cut and pasted with the keys; copied words 
 	await page.keyboard.press('ControlOrMeta+v');
 	await expect.poll(async () => (await charts())[1].length).toBe(1);
 	const [, second] = await savedPages(page);
-	expect((second.items[0] as SavedText).frame).toEqual({ x: 42, y: 30, w: 126, h: 126 });
+	expect(chartsOf(second)[0].frame).toEqual({ x: 42, y: 30, w: 126, h: 126 });
 	await expect(editor.getByRole('button', { name: /^Chart 1 of 1/ })).toBeFocused();
 	// Pasted again: a second disc of that size has no room on the page (3 mm short), and
 	// the pointer is not over it, so the copy keeps its size and stands a little off the first.
 	await page.keyboard.press('ControlOrMeta+v');
 	await expect.poll(async () => (await charts())[1].length).toBe(2);
-	const again = (await savedPages(page))[1].items[1] as unknown as SavedText;
+	const again = chartsOf((await savedPages(page))[1])[1];
 	expect(again.frame).toEqual({ x: 47, y: 35, w: 126, h: 126 });
 
 	// With the pointer over the page, the next goes over the others with its middle under it.
@@ -534,7 +521,7 @@ test('a chart and a text are copied, cut and pasted with the keys; copied words 
 	await page.mouse.move(paper.x + 105 * mm, paper.y + 100 * mm);
 	await page.keyboard.press('ControlOrMeta+v');
 	await expect.poll(async () => (await charts())[1].length).toBe(3);
-	const third = (await savedPages(page))[1].items[2] as unknown as SavedText;
+	const third = chartsOf((await savedPages(page))[1])[2];
 	expect(third.frame.w).toBe(126);
 	expect(third.frame.x).toBeCloseTo(42, 0);
 	expect(third.frame.y).toBeCloseTo(37, 0);

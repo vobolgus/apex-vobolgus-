@@ -45,11 +45,14 @@
 	 */
 	import { tick } from 'svelte';
 	import {
+		blockBounds,
+		chartsOf,
+		findBlock,
 		isBlank,
-		MAX_ITEMS_PER_PAGE,
-		MAX_PAGES,
-		type DocumentStore
-	} from '$lib/document/document.svelte';
+		isChart,
+		typesetOf
+	} from '$lib/document/blocks';
+	import { MAX_ITEMS_PER_PAGE, MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
 	import {
 		contentBox,
 		fitFrame,
@@ -76,8 +79,7 @@
 		normalizeRotation,
 		quarterTurn,
 		squareRotation,
-		stepTextSize,
-		textBounds
+		stepTextSize
 	} from '$lib/document/text';
 	import { DEFAULT_TABLE, lookOf } from '$lib/document/table';
 	import { loadMessier } from '$lib/api/catalog';
@@ -89,13 +91,14 @@
 	} from '$lib/document/text-fonts.svelte';
 	import type {
 		BlockCopy,
-		DocItem,
+		ChartBlock,
 		DocPage,
-		DocText,
+		TableBlock,
 		TableSpec,
 		PageOrientation,
 		Rect,
-		TextStyle
+		TextStyle,
+		TypesetBlock
 	} from '$lib/document/types';
 	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { isModShortcut } from '$lib/shortcuts';
@@ -439,22 +442,19 @@
 		rotation: number;
 	}
 
-	function chartBlock(item: DocItem): Block {
+	function chartBlock(item: ChartBlock): Block {
 		const { id, frame, chart } = item;
 		return { kind: 'chart', id, frame, aspect: chart.aspect, rotation: 0 };
 	}
 
-	function textBlock(text: DocText): Block {
+	function textBlock(text: TypesetBlock): Block {
 		const { id, frame, rotation = 0 } = text;
 		return { kind: 'text', id, frame, aspect: frame.w / frame.h, rotation };
 	}
 
 	/** What every chart and text takes up on `page`, but for the block `exceptId`. */
 	function framesOn(page: DocPage, exceptId?: string): Rect[] {
-		return [
-			...page.items.filter((it) => it.id !== exceptId).map((it) => it.frame),
-			...(page.texts ?? []).filter((it) => it.id !== exceptId).map(textBounds)
-		];
+		return page.blocks.filter((it) => it.id !== exceptId).map(blockBounds);
 	}
 
 	/**
@@ -575,9 +575,7 @@
 
 	/** The page a chart or a text is on: the current one, or a neighbour it is grabbed from. */
 	function pageOf(id: string): DocPage | undefined {
-		return store.pages.find(
-			(page) => page.items.some((it) => it.id === id) || page.texts?.some((it) => it.id === id)
-		);
+		return findBlock(store.pages, id)?.page;
 	}
 
 	function beginSession(
@@ -640,11 +638,11 @@
 		window.addEventListener('keyup', handleShift, { signal, capture: true });
 	}
 
-	function startMove(event: PointerEvent, item: DocItem) {
+	function startMove(event: PointerEvent, item: ChartBlock) {
 		startBlockMove(event, chartBlock(item));
 	}
 
-	function startTextMove(event: PointerEvent, text: DocText) {
+	function startTextMove(event: PointerEvent, text: TypesetBlock) {
 		startBlockMove(event, textBlock(text));
 	}
 
@@ -661,7 +659,7 @@
 	}
 
 	/** A text's side handle: that side follows the pointer, the other stays. */
-	function startTextResize(event: PointerEvent, text: DocText, side: TextSide) {
+	function startTextResize(event: PointerEvent, text: TypesetBlock, side: TextSide) {
 		if (!claimPointer(event)) return;
 		event.stopPropagation();
 		focusChart(text.id);
@@ -679,7 +677,7 @@
 	}
 
 	/** A text's knob: the text turns about its centre as the pointer goes round it. */
-	function startTextRotate(event: PointerEvent, text: DocText) {
+	function startTextRotate(event: PointerEvent, text: TypesetBlock) {
 		const element = itemElement(text.id);
 		if (!element || !claimPointer(event)) return;
 		event.stopPropagation();
@@ -692,7 +690,7 @@
 		});
 	}
 
-	function startResize(event: PointerEvent, item: DocItem, handle: ResizeAnchor) {
+	function startResize(event: PointerEvent, item: ChartBlock, handle: ResizeAnchor) {
 		if (!claimPointer(event)) return;
 		event.stopPropagation();
 		const chartEl = (event.currentTarget as HTMLElement)
@@ -767,12 +765,13 @@
 			const corner = { x: s.corner.x + dx / s.scale, y: s.corner.y + dy / s.scale };
 			const others = framesOn(page, s.itemId);
 			if (s.block === 'text') {
-				const text = page.texts?.find((it) => it.id === s.itemId);
+				const text = typesetOf(page).find((it) => it.id === s.itemId);
 				if (!text) return;
 				// Its lines wrap to the new width as it is dragged; the height is theirs.
 				const heightAt = (w: number) => shownLayout(page, text, w, store.pages).height;
 				// A table is made no narrower than holds all of it; a text, than a word or two.
-				const least = Math.max(MIN_TEXT_WIDTH_MM, leastTableWidth(page, text, store.pages));
+				const narrowest = text.kind === 'table' ? leastTableWidth(page, text, store.pages) : 0;
+				const least = Math.max(MIN_TEXT_WIDTH_MM, narrowest);
 				let frame: Rect;
 				let guides: SnapGuide[] = [];
 				if (s.rotation === 0) {
@@ -901,22 +900,16 @@
 		setTimeout(() => (swallowClick = false));
 		const text = s.block === 'text';
 		if (view.rotation !== undefined) {
-			store.updateText(s.pageId, s.itemId, { rotation: view.rotation });
+			store.updateTypeset(s.pageId, s.itemId, { rotation: view.rotation });
 			announce(`Turned to ${Math.round(view.rotation)} degrees`);
 		} else if (view.kind === 'resizing') {
-			if (text) store.updateText(s.pageId, s.itemId, { frame: view.frame });
-			else store.updateItem(s.pageId, s.itemId, view.frame);
+			store.setFrame(s.pageId, s.itemId, view.frame);
 		} else if (view.targetId === null || !view.landing) {
 			snapBack(s.itemId);
 		} else if (view.targetId === s.pageId) {
-			if (text) store.updateText(s.pageId, s.itemId, { frame: view.landing });
-			else store.updateItem(s.pageId, s.itemId, view.landing);
+			store.setFrame(s.pageId, s.itemId, view.landing);
 			settle(s.itemId, held);
-		} else if (
-			text
-				? store.moveText(s.itemId, view.targetId, view.landing)
-				: store.moveItem(s.itemId, view.targetId, view.landing)
-		) {
+		} else if (store.moveBlock(s.itemId, view.targetId, view.landing)) {
 			announce(`${text ? 'Text' : 'Chart'} moved to page ${store.pageIndex(view.targetId) + 1}`);
 			settle(s.itemId, held);
 			// Its element is gone with it: the focus goes to it on the current page, else stays here.
@@ -1026,7 +1019,7 @@
 
 	// === Keyboard on a chart ===
 
-	function handleItemKeydown(event: KeyboardEvent, item: DocItem) {
+	function handleItemKeydown(event: KeyboardEvent, item: ChartBlock) {
 		if (event.metaKey || event.ctrlKey || event.altKey) return;
 		const delta = nudgeDelta(event.key, event.shiftKey);
 		const step = sizeStep(event.key, event.code);
@@ -1043,13 +1036,13 @@
 	}
 
 	/** The toolbar's buttons and their keys: a size step, or a move to the page either side. */
-	function handleItemAction(item: DocItem, action: ChartAction) {
+	function handleItemAction(item: ChartBlock, action: ChartAction) {
 		if (session) return;
 		if (action === 'smaller' || action === 'larger') resizeStep(item, action === 'larger' ? 1 : -1);
 		else moveToPage(item, action === 'prev' ? -1 : 1);
 	}
 
-	function resizeStep(item: DocItem, direction: 1 | -1) {
+	function resizeStep(item: ChartBlock, direction: 1 | -1) {
 		const page = current;
 		if (!page) return;
 		const frame = stepSize(item.frame, item.chart.aspect, page.orientation, direction);
@@ -1057,25 +1050,26 @@
 			announce(direction > 0 ? 'Already the largest size' : 'Already the smallest size');
 			return;
 		}
-		store.updateItem(page.id, item.id, frame);
+		store.setFrame(page.id, item.id, frame);
 		announce(spokenSize(frame));
 	}
 
 	/** To the page before or after, where it fits clear of the charts there (`placeFrame`). */
-	function moveToPage(item: DocItem, by: -1 | 1) {
+	function moveToPage(item: ChartBlock, by: -1 | 1) {
 		const target = pages[index + by];
 		const number = index + by + 1;
 		if (!target) {
 			announce(by < 0 ? 'No page before this one' : 'No page after this one');
 			return;
 		}
-		if (target.items.length >= MAX_ITEMS_PER_PAGE) {
+		const there = chartsOf(target);
+		if (there.length >= MAX_ITEMS_PER_PAGE) {
 			announce(`Page ${number} is full`);
 			return;
 		}
-		const others = target.items.map((it) => it.frame);
+		const others = there.map((it) => it.frame);
 		const frame = placeFrame(item.frame, item.chart.aspect, others, target.orientation);
-		if (!store.moveItem(item.id, target.id, frame)) return;
+		if (!store.moveBlock(item.id, target.id, frame)) return;
 		setCurrent(target.id, false, true);
 		announce(`Chart moved to page ${number}`);
 		void tick().then(() => focusChart(item.id));
@@ -1093,19 +1087,18 @@
 			page.orientation,
 			0
 		);
-		if (item.kind === 'text') store.updateText(page.id, item.id, { frame });
-		else store.updateItem(page.id, item.id, frame);
+		store.setFrame(page.id, item.id, frame);
 		announce(`${Math.round(frame.x)}, ${Math.round(frame.y)} mm`);
 		clearTimeout(flashTimer);
 		flash = guides.length > 0 ? { pageId: page.id, guides } : null;
 		if (flash) flashTimer = setTimeout(() => (flash = null), FLASH_MS);
 	}
 
-	function removeChart(item: DocItem) {
+	function removeChart(item: ChartBlock) {
 		const page = current;
 		if (!page) return;
-		const at = page.items.findIndex((it) => it.id === item.id);
-		const restore = store.removeItem(page.id, item.id);
+		const at = chartsOf(page).findIndex((it) => it.id === item.id);
+		const restore = store.removeBlock(page.id, item.id);
 		notify('Chart removed', () => undoRemoval(page.id, item.id, restore));
 		// The focus goes to the chart that took its place, else the one before, else the page.
 		void tick().then(() => {
@@ -1137,7 +1130,7 @@
 	function addText(pageId: string) {
 		const page = store.page(pageId);
 		if (session || !page) return;
-		if ((page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) {
+		if (typesetOf(page).length >= MAX_TEXTS_PER_PAGE) {
 			announce('This page holds no more text');
 			return;
 		}
@@ -1145,7 +1138,7 @@
 		const width = contentBox(page.orientation).w;
 		const { height } = measuredLayout(NEW_TEXT, style, width);
 		const frame = newTextFrame(page, height);
-		const textId = store.addText(page.id, { text: NEW_TEXT, style, frame });
+		const textId = store.addBlock(page.id, { kind: 'text', text: NEW_TEXT, style, frame });
 		if (!textId) return;
 		editingId = textId;
 		announce('Text added. Type to replace it');
@@ -1162,14 +1155,14 @@
 		await loadMessier();
 		const page = store.page(pageId);
 		if (session || !page) return;
-		if ((page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) {
+		if (typesetOf(page).length >= MAX_TEXTS_PER_PAGE) {
 			announce('This page holds no more text');
 			return;
 		}
 		const style = { ...lastStyle, bold: false, italic: false };
 		const table = { ...DEFAULT_TABLE };
 		const box = contentBox(page.orientation);
-		const draft = { id: '', text: '', style, table, frame: box };
+		const draft: TableBlock = { kind: 'table', id: '', style, table, frame: box };
 		// As tall as its rows; the place found for it may be narrower, but a table's rows are its rows.
 		const height = shownLayout(page, draft, box.w, store.pages).height;
 		const place = newTextFrame(page, height);
@@ -1177,7 +1170,12 @@
 		// Beside something already there it goes to the far end of the room, as the second
 		// table of a SkyGen worksheet stands at the right margin.
 		const x = place.x > box.x + 1e-6 ? place.x + place.w - w : place.x;
-		const textId = store.addText(page.id, { text: '', style, table, frame: { ...place, x, w } });
+		const textId = store.addBlock(page.id, {
+			kind: 'table',
+			style,
+			table,
+			frame: { ...place, x, w }
+		});
 		if (!textId) return;
 		announce('Table added');
 		void tick().then(() => focusChart(textId));
@@ -1188,56 +1186,57 @@
 	 * What it lists and how it looks decide how wide it likes to be, so those two
 	 * set its width again; the rows leave the width as it was made.
 	 */
-	async function setTable(text: DocText, table: TableSpec) {
+	async function setTable(text: TypesetBlock, table: TableSpec) {
+		if (text.kind !== 'table') return;
 		if (table.source === 'messier') await loadMessier();
 		const page = pageOf(text.id);
 		if (!page || session) return;
-		const same = text.table?.source === table.source && lookOf(text.table) === lookOf(table);
+		const same = text.table.source === table.source && lookOf(text.table) === lookOf(table);
 		if (same) {
-			store.updateText(page.id, text.id, { table });
+			store.updateTypeset(page.id, text.id, { table });
 			return;
 		}
 		const liked = likedTableWidth(page, { ...text, table }, store.pages);
 		const w = Math.min(contentBox(page.orientation).w, liked);
-		store.updateText(page.id, text.id, { table, frame: { ...text.frame, w } });
+		store.updateTypeset(page.id, text.id, { table, frame: { ...text.frame, w } });
 	}
 
 	/** A table's words are read from its chart: there is nothing in it to type. */
-	function editText(text: DocText) {
-		if (!session && !text.table) editingId = text.id;
+	function editText(text: TypesetBlock) {
+		if (!session && text.kind === 'text') editingId = text.id;
 	}
 
 	/** Typing is over. A text left empty is taken off the page: there is nothing of it to keep. */
-	function commitText(text: DocText, value: string) {
+	function commitText(text: TypesetBlock, value: string) {
 		if (editingId === text.id) editingId = null;
 		const page = pageOf(text.id);
 		if (!page) return;
 		if (value.trim() === '') {
-			store.removeText(page.id, text.id);
+			store.removeBlock(page.id, text.id);
 			// If the focus was on its way to the text itself, it has nowhere to land.
 			void tick().then(() => {
 				if (!dialogEl?.contains(document.activeElement) || document.activeElement === dialogEl) {
 					focusPaper();
 				}
 			});
-		} else if (value !== text.text) {
-			store.updateText(page.id, text.id, { text: value });
+		} else if (text.kind === 'text' && value !== text.text) {
+			store.updateTypeset(page.id, text.id, { text: value });
 		}
 	}
 
-	function setTextStyle(text: DocText, style: TextStyle) {
+	function setTextStyle(text: TypesetBlock, style: TextStyle) {
 		const page = pageOf(text.id);
 		if (!page || session) return;
 		lastStyle = { ...style };
-		store.updateText(page.id, text.id, { style });
+		store.updateTypeset(page.id, text.id, { style });
 	}
 
 	/** Which chart a text's fields read: `chartId`, or the nearest again with null. */
-	function bindText(text: DocText, chartId: string | null) {
+	function bindText(text: TypesetBlock, chartId: string | null) {
 		const page = pageOf(text.id);
 		if (!page || session) return;
-		store.updateText(page.id, text.id, { chartId });
-		const at = page.items.findIndex((item) => item.id === chartId);
+		store.updateTypeset(page.id, text.id, { chartId });
+		const at = chartsOf(page).findIndex((item) => item.id === chartId);
 		announce(
 			chartId === null
 				? 'Reads the nearest chart'
@@ -1247,12 +1246,12 @@
 		);
 	}
 
-	function setTextHeight(text: DocText, height: number) {
+	function setTextHeight(text: TypesetBlock, height: number) {
 		const page = pageOf(text.id);
 		if (page) store.setTextHeight(page.id, text.id, height);
 	}
 
-	function handleTextKeydown(event: KeyboardEvent, text: DocText) {
+	function handleTextKeydown(event: KeyboardEvent, text: TypesetBlock) {
 		if (event.metaKey || event.ctrlKey || event.altKey || editingId !== null) return;
 		const delta = nudgeDelta(event.key, event.shiftKey);
 		const step = sizeStep(event.key, event.code);
@@ -1272,7 +1271,7 @@
 		action();
 	}
 
-	function stepText(text: DocText, direction: 1 | -1) {
+	function stepText(text: TypesetBlock, direction: 1 | -1) {
 		const size = stepTextSize(text.style.size, direction);
 		if (size === null) {
 			announce(direction > 0 ? 'Already the largest size' : 'Already the smallest size');
@@ -1283,23 +1282,23 @@
 	}
 
 	/** A quarter turn, to the next right angle: clockwise, or back with Shift. */
-	function turnText(text: DocText, direction: 1 | -1 = 1) {
+	function turnText(text: TypesetBlock, direction: 1 | -1 = 1) {
 		const page = pageOf(text.id);
 		if (!page || session) return;
 		const rotation = quarterTurn(text.rotation ?? 0, direction);
-		store.updateText(page.id, text.id, { rotation });
+		store.updateTypeset(page.id, text.id, { rotation });
 		announce(rotation === 0 ? 'Upright' : `Turned to ${rotation} degrees`);
 	}
 
 	/** To the page before or after, where it was on this one as far as that page allows. */
-	function moveTextToPage(text: DocText, by: -1 | 1) {
+	function moveTextToPage(text: TypesetBlock, by: -1 | 1) {
 		const target = pages[index + by];
 		const number = index + by + 1;
 		if (!target) {
 			announce(by < 0 ? 'No page before this one' : 'No page after this one');
 			return;
 		}
-		if (!store.moveText(text.id, target.id, text.frame)) {
+		if (!store.moveBlock(text.id, target.id, text.frame)) {
 			announce(`Page ${number} holds no more text`);
 			return;
 		}
@@ -1308,11 +1307,11 @@
 		void tick().then(() => focusChart(text.id));
 	}
 
-	function removeText(text: DocText) {
+	function removeText(text: TypesetBlock) {
 		const page = pageOf(text.id);
 		if (!page || session) return;
 		if (editingId === text.id) editingId = null;
-		const restore = store.removeText(page.id, text.id);
+		const restore = store.removeBlock(page.id, text.id);
 		notify('Text removed', () => {
 			if (!restore() || !open) return;
 			if (page.id !== current?.id) setCurrent(page.id, false, true);
@@ -1361,14 +1360,14 @@
 	}
 
 	/** The chart or text with the focus on the current page. */
-	function selectedBlock(): { item?: DocItem; text?: DocText } | null {
+	function selectedBlock(): { item?: ChartBlock; text?: TypesetBlock } | null {
 		const selected = (document.activeElement as Element | null)?.closest<HTMLElement>(
 			'.slot[data-role="current"] [data-item-id]'
 		);
 		const blockId = selected?.dataset.itemId;
-		const item = current?.items.find((it) => it.id === blockId);
-		const text = current?.texts?.find((it) => it.id === blockId);
-		return item || text ? { item, text } : null;
+		const block = current?.blocks.find((it) => it.id === blockId);
+		if (!block) return null;
+		return isChart(block) ? { item: block } : { text: block };
 	}
 
 	/**
@@ -1387,7 +1386,7 @@
 		copied = { json, plain };
 		event.clipboardData?.setData(CLIP_TYPE, json);
 		event.clipboardData?.setData('text/plain', plain);
-		if (event.type !== 'cut') announce(copy.kind === 'text' ? 'Text copied' : 'Chart copied');
+		if (event.type !== 'cut') announce(copy.kind === 'chart' ? 'Chart copied' : 'Text copied');
 		else if (block.item) removeChart(block.item);
 		else if (block.text) removeText(block.text);
 	}
@@ -1417,11 +1416,10 @@
 			return;
 		}
 		if (!pasted) return;
-		const what = pasted.kind === 'text' ? 'Text' : 'Chart';
+		const what = pasted.kind === 'chart' ? 'Chart' : 'Text';
 		announce(`${what} pasted`);
 		notify(`${what} pasted`, () => {
-			if (pasted.kind === 'text') store.removeText(page.id, pasted.id);
-			else store.removeItem(page.id, pasted.id);
+			store.removeBlock(page.id, pasted.id);
 			if (open) void tick().then(focusPaper);
 		});
 		void tick().then(() => focusChart(pasted.id));

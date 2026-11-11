@@ -3,7 +3,7 @@
 import { expect } from 'vitest';
 import { contentBox } from './geometry';
 import { DOCUMENT_STORAGE_KEY } from './storage';
-import type { ChartSnapshot, DocPage, Rect } from './types';
+import type { ChartSnapshot, DocPage, Rect, TableSpec, TypesetBlock } from './types';
 
 /** A disc at `aspect` 1, else a pinhole frame of that aspect. */
 export function chart(aspect = 1): ChartSnapshot {
@@ -56,4 +56,16 @@ export function expectInside(frame: Rect, page: DocPage) {
 	expect(frame.y).toBeGreaterThanOrEqual(box.y - 1e-9);
 	expect(frame.x + frame.w).toBeLessThanOrEqual(box.x + box.w + 1e-9);
 	expect(frame.y + frame.h).toBeLessThanOrEqual(box.y + box.h + 1e-9);
+}
+
+/** What a text says, for a test to compare; a table has no words of its own. */
+export function wordsOf(block: Pick<TypesetBlock, 'kind'> & { text?: string }): string | undefined {
+	return block.kind === 'text' ? block.text : undefined;
+}
+
+/** What a table lists, for a test to compare; a text has no spec. */
+export function specOf(
+	block: Pick<TypesetBlock, 'kind'> & { table?: TableSpec }
+): TableSpec | undefined {
+	return block.kind === 'table' ? block.table : undefined;
 }

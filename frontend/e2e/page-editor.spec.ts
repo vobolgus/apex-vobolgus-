@@ -1,5 +1,11 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { contentBox, gridLines } from '../src/lib/document/geometry';
+import {
+	chartsOf,
+	savedPages as savedDocumentPages,
+	seedDocument,
+	type SavedChart
+} from './saved-document';
 
 /**
  * The page editor, opened from the pages panel: a chart dragged near a grid line
@@ -7,8 +13,6 @@ import { contentBox, gridLines } from '../src/lib/document/geometry';
  * neighbouring page can be dragged onto the current one, one let go off every
  * page goes back, and Escape closes the editor.
  */
-
-const STORAGE_KEY = 'skycharts.document.v1';
 
 const STEREO = {
 	view: {
@@ -31,7 +35,11 @@ const STEREO = {
 	createdAt: '2026-10-27T12:00:00.000Z'
 };
 
-/** Two portrait pages: two discs on the first, none on the second. */
+/**
+ * Two portrait pages: two discs on the first, none on the second. In the shape the
+ * document was first saved in (`items`, no `blocks`, no version): every test here
+ * begins with the app bringing it over.
+ */
 const DOCUMENT = {
 	pages: [
 		{
@@ -46,20 +54,10 @@ const DOCUMENT = {
 	]
 };
 
-interface SavedItem {
-	id: string;
-	frame: { x: number; y: number; w: number; h: number };
-}
+type SavedItem = SavedChart;
 
 async function seedAndOpen(page: Page) {
-	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
-		DOCUMENT
-	] as const);
-	await page.reload();
-	await page.waitForSelector('canvas');
-	await page.waitForLoadState('networkidle').catch(() => undefined);
+	await seedDocument(page, DOCUMENT);
 	await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -68,11 +66,7 @@ async function seedAndOpen(page: Page) {
 
 /** The saved charts of each page (saves are debounced: poll this). */
 async function savedPages(page: Page): Promise<SavedItem[][]> {
-	return page.evaluate((key) => {
-		const raw = localStorage.getItem(key);
-		const doc = raw ? JSON.parse(raw) : { pages: [] };
-		return doc.pages.map((p: { items: SavedItem[] }) => p.items);
-	}, STORAGE_KEY);
+	return (await savedDocumentPages(page)).map(chartsOf);
 }
 
 async function savedFrame(page: Page, id: string) {
@@ -366,14 +360,7 @@ test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ doe
 	});
 	const page = await context.newPage();
 	try {
-		await page.goto('/');
-		await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-			STORAGE_KEY,
-			DOCUMENT
-		] as const);
-		await page.reload();
-		await page.waitForSelector('canvas');
-		await page.waitForLoadState('networkidle').catch(() => undefined);
+		await seedDocument(page, DOCUMENT);
 		// Collapsed on a phone: open the panel, then the page.
 		await page.getByRole('button', { name: /^PDF pages/ }).click();
 		await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();

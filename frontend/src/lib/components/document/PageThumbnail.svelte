@@ -18,6 +18,7 @@
 	 * the right shape, which is what a page seen from afar looks like.
 	 */
 	import { PINHOLE_CORNER_RADIUS } from '$lib/constants';
+	import { chartsOf, typesetOf } from '$lib/document/blocks';
 	import { pageSize, PRINT_MM_PER_PREVIEW_PX } from '$lib/document/geometry';
 	import { anchoredFrame } from '$lib/document/text';
 	import { shownLayout } from '$lib/document/text-fonts.svelte';
@@ -50,7 +51,7 @@
 	style:height="{size.h * scale}px"
 	aria-hidden="true"
 >
-	{#each page.items as item (item.id)}
+	{#each chartsOf(page) as item (item.id)}
 		{@const round = item.chart.view.projection === 'stereographic'}
 		{@const w = item.frame.w * scale}
 		{@const h = item.frame.h * scale}
@@ -79,7 +80,7 @@
 			{/if}
 		</div>
 	{/each}
-	{#each page.texts ?? [] as text (text.id)}
+	{#each typesetOf(page) as text (text.id)}
 		{@const layout = shownLayout(page, text, text.frame.w, pages)}
 		{@const box = anchoredFrame(text.frame, text.rotation ?? 0, text.frame.w, layout.height)}
 		<div

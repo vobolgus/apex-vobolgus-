@@ -54,19 +54,19 @@
 		tableName
 	} from '$lib/document/table';
 	import { measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
-	import type { DocPage, DocText, Rect, TableSpec, TextStyle } from '$lib/document/types';
+	import type { DocPage, Rect, TableSpec, TextStyle, TypesetBlock } from '$lib/document/types';
 	import type { ItemState } from './EditorItem.svelte';
 	import type { Size } from './editor-geometry';
 	import TextLines from './TextLines.svelte';
 
 	interface Props {
-		text: DocText;
+		text: TypesetBlock;
 		/** What it shows: its words with the fields read from its chart. */
 		shown: string;
 		/** Its page: a table lists what is on a chart of it. */
-		sheet: Pick<DocPage, 'items'>;
+		sheet: Pick<DocPage, 'blocks'>;
 		/** The document: a block may read a chart on another page than its own. */
-		pages?: readonly Pick<DocPage, 'items'>[];
+		pages?: readonly Pick<DocPage, 'blocks'>[];
 		/** The charts on the other pages, to read one of them: each by its id, and what to call it. */
 		others?: readonly { id: string; label: string }[];
 		/** The id of the chart on another page it reads, if it reads one there. */
@@ -103,23 +103,23 @@
 		 * Read chart `chart` of its page (0-based) whatever is nearer, the chart of
 		 * another page with that id, or with null the nearest again.
 		 */
-		onbind?: (text: DocText, chart: number | string | null) => void;
+		onbind?: (text: TypesetBlock, chart: number | string | null) => void;
 		/** A table lists something else, or in more or fewer rows. */
-		ontable?: (text: DocText, table: TableSpec) => void;
-		onmovestart?: (event: PointerEvent, text: DocText) => void;
-		onresizestart?: (event: PointerEvent, text: DocText, side: TextSide) => void;
-		onrotatestart?: (event: PointerEvent, text: DocText) => void;
+		ontable?: (text: TypesetBlock, table: TableSpec) => void;
+		onmovestart?: (event: PointerEvent, text: TypesetBlock) => void;
+		onresizestart?: (event: PointerEvent, text: TypesetBlock, side: TextSide) => void;
+		onrotatestart?: (event: PointerEvent, text: TypesetBlock) => void;
 		/** A quarter turn clockwise. */
-		onturn?: (text: DocText) => void;
-		onkeydown?: (event: KeyboardEvent, text: DocText) => void;
-		onstyle?: (text: DocText, style: TextStyle) => void;
-		onremove?: (text: DocText) => void;
+		onturn?: (text: TypesetBlock) => void;
+		onkeydown?: (event: KeyboardEvent, text: TypesetBlock) => void;
+		onstyle?: (text: TypesetBlock, style: TextStyle) => void;
+		onremove?: (text: TypesetBlock) => void;
 		/** Start typing in it. */
-		onedit?: (text: DocText) => void;
+		onedit?: (text: TypesetBlock) => void;
 		/** Typing is over: what it says now. */
-		oncommit?: (text: DocText, value: string) => void;
+		oncommit?: (text: TypesetBlock, value: string) => void;
 		/** Its lines are this tall now, mm. */
-		onheight?: (text: DocText, height: number) => void;
+		onheight?: (text: TypesetBlock, height: number) => void;
 	}
 
 	let {
@@ -180,7 +180,7 @@
 		editing ? measuredLayout(draft, text.style, frame.w) : shownLayout(sheet, text, frame.w, pages)
 	);
 	const style = $derived(text.style);
-	const table = $derived(text.table);
+	const table = $derived(text.kind === 'table' ? text.table : undefined);
 	const name = $derived.by(() => {
 		if (table) return `Table ${index + 1} of ${count}: ${tableName(table)}`;
 		const words = shown.replace(/\s+/g, ' ').trim();
@@ -192,7 +192,7 @@
 	/** Which chart it reads is a question only with fields to read and two charts to choose from. */
 	const chooses = $derived(
 		(charts >= 2 || others.length > 0) &&
-			(table !== undefined || hasFields(editing ? draft : text.text))
+			(text.kind === 'table' || hasFields(editing ? draft : text.text))
 	);
 	/** Low on the page, the toolbar goes above the text: under it, it would leave the stage. */
 	/** Typed in, it stands upright where it is. */
@@ -237,7 +237,7 @@
 		if (editing === wasEditing) return;
 		wasEditing = editing;
 		if (!editing) return;
-		draft = text.text;
+		draft = text.kind === 'text' ? text.text : '';
 		void tick().then(() => {
 			const input = inputEl;
 			if (!input) return;

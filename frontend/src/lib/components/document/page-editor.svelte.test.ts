@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { chartsOf } from '$lib/document/blocks';
 import { DocumentStore } from '$lib/document/document.svelte';
 import type { ChartSnapshot, DocPage } from '$lib/document/types';
 import { ToastStore } from '$lib/ui/toast.svelte';
@@ -56,16 +57,21 @@ function chart(projection: 'stereographic' | 'pinhole' = 'stereographic'): Chart
 
 function documentPages(): DocPage[] {
 	return [
-		{ id: 'p1', orientation: 'portrait', items: [] },
+		{ id: 'p1', orientation: 'portrait', blocks: [] },
 		{
 			id: 'p2',
 			orientation: 'portrait',
-			items: [
-				{ id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } },
-				{ id: 'b', chart: chart('pinhole'), frame: { x: 12, y: 120, w: 80, h: 50 } }
+			blocks: [
+				{ kind: 'chart', id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } },
+				{
+					kind: 'chart',
+					id: 'b',
+					chart: chart('pinhole'),
+					frame: { x: 12, y: 120, w: 80, h: 50 }
+				}
 			]
 		},
-		{ id: 'p3', orientation: 'landscape', items: [] }
+		{ id: 'p3', orientation: 'landscape', blocks: [] }
 	];
 }
 
@@ -204,7 +210,7 @@ describe('PageEditor', () => {
 		const [first] = charts(ctx.dialog);
 		first.focus();
 		key(first, 'Delete');
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['b']);
 		expect(ctx.notify).toHaveBeenCalledWith('Chart removed', expect.any(Function));
 		await tick();
 		await tick();
@@ -215,7 +221,7 @@ describe('PageEditor', () => {
 		const undo = ctx.notify.mock.calls[0][1] as () => void;
 		undo();
 		flushSync();
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a', 'b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a', 'b']);
 	});
 
 	it('removes on Backspace too, and ⌘Z puts the chart back through the toast', async () => {
@@ -223,10 +229,10 @@ describe('PageEditor', () => {
 		cleanup = ctx.cleanup;
 		const [, second] = charts(ctx.dialog);
 		key(second, 'Backspace');
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a']);
 		expect(ctx.toast.current?.message).toBe('Chart removed');
 		key(currentPaper(ctx.dialog), 'z', { metaKey: true, code: 'KeyZ' });
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a', 'b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a', 'b']);
 		// The toast goes with it, and a second ⌘Z has nothing left to take back.
 		expect(ctx.toast.current).toBeNull();
 		await settle();
@@ -240,12 +246,12 @@ describe('PageEditor', () => {
 		const ctx = setup('p2', false);
 		cleanup = ctx.cleanup;
 		key(charts(ctx.dialog)[0], 'Delete');
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['b']);
 		// ⌘ is not the modifier here.
 		key(currentPaper(ctx.dialog), 'я', { metaKey: true, code: 'KeyZ' });
-		expect(ctx.store.page('p2')!.items).toHaveLength(1);
+		expect(chartsOf(ctx.store.page('p2')!)).toHaveLength(1);
 		key(currentPaper(ctx.dialog), 'я', { ctrlKey: true, code: 'KeyZ' });
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a', 'b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a', 'b']);
 	});
 
 	it('runs any Undo the toast offers on ⌘Z, also one from the panel', () => {
@@ -276,7 +282,7 @@ describe('PageEditor', () => {
 		expect(liveRegion(ctx.dialog).textContent).toBe('Chart restored');
 		// Spent: ⌘Z neither moves nor announces anything.
 		key(charts(ctx.dialog)[1], 'z', { metaKey: true, code: 'KeyZ' });
-		expect(ctx.store.page('p2')!.items).toHaveLength(2);
+		expect(chartsOf(ctx.store.page('p2')!)).toHaveLength(2);
 	});
 
 	it('steps the focused chart through the sizes with + and −', async () => {
@@ -285,12 +291,12 @@ describe('PageEditor', () => {
 		const [first] = charts(ctx.dialog);
 		first.focus();
 		key(first, '+', { code: 'Equal', shiftKey: true });
-		expect(ctx.store.page('p2')!.items[0].frame).toEqual({ x: 12, y: 12, w: 122, h: 122 });
+		expect(chartsOf(ctx.store.page('p2')!)[0].frame).toEqual({ x: 12, y: 12, w: 122, h: 122 });
 		await settle();
 		expect(liveRegion(ctx.dialog).textContent).toBe('122 by 122 mm');
 		key(charts(ctx.dialog)[0], '-', { code: 'Minus' });
 		key(charts(ctx.dialog)[0], '-', { code: 'Minus' });
-		expect(ctx.store.page('p2')!.items[0].frame).toEqual({ x: 12, y: 12, w: 87, h: 87 });
+		expect(chartsOf(ctx.store.page('p2')!)[0].frame).toEqual({ x: 12, y: 12, w: 87, h: 87 });
 	});
 
 	it('moves the focused chart to the next page with Page Down, and back with Page Up', async () => {
@@ -299,10 +305,10 @@ describe('PageEditor', () => {
 		const [, second] = charts(ctx.dialog);
 		second.focus();
 		key(second, 'PageDown');
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a']);
-		expect(ctx.store.page('p3')!.items.map((it) => it.id)).toEqual(['b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a']);
+		expect(chartsOf(ctx.store.page('p3')!).map((it) => it.id)).toEqual(['b']);
 		// Clear of nothing on the empty landscape page: at its top-left, its size kept.
-		expect(ctx.store.page('p3')!.items[0].frame).toEqual({ x: 12, y: 12, w: 80, h: 50 });
+		expect(chartsOf(ctx.store.page('p3')!)[0].frame).toEqual({ x: 12, y: 12, w: 80, h: 50 });
 		expect(ctx.store.selectedPageId).toBe('p3');
 		await settle();
 		expect(liveRegion(ctx.dialog).textContent).toBe('Chart moved to page 3');
@@ -311,10 +317,10 @@ describe('PageEditor', () => {
 		);
 
 		key(document.activeElement!, 'PageUp');
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a', 'b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a', 'b']);
 		expect(ctx.store.selectedPageId).toBe('p2');
 		// Placed clear of the disc on page 2.
-		const [disc, moved] = ctx.store.page('p2')!.items.map((it) => it.frame);
+		const [disc, moved] = chartsOf(ctx.store.page('p2')!).map((it) => it.frame);
 		expect(moved.x >= disc.x + disc.w + 6 || moved.y >= disc.y + disc.h + 6).toBe(true);
 	});
 
@@ -330,12 +336,12 @@ describe('PageEditor', () => {
 		expect(tool('Move chart 1 to page 3')).toBeDefined();
 
 		click(tool('Make chart 1 larger')!);
-		expect(ctx.store.page('p2')!.items[0].frame.w).toBe(122);
+		expect(chartsOf(ctx.store.page('p2')!)[0].frame.w).toBe(122);
 		click(tool('Make chart 1 smaller')!);
-		expect(ctx.store.page('p2')!.items[0].frame.w).toBe(90);
+		expect(chartsOf(ctx.store.page('p2')!)[0].frame.w).toBe(90);
 
 		click(tool('Move chart 1 to page 1')!);
-		expect(ctx.store.page('p1')!.items.map((it) => it.id)).toEqual(['a']);
+		expect(chartsOf(ctx.store.page('p1')!).map((it) => it.id)).toEqual(['a']);
 		expect(ctx.store.selectedPageId).toBe('p1');
 		await settle();
 		// The first page has nothing before it.
@@ -360,19 +366,19 @@ describe('PageEditor', () => {
 		chartEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 		remove.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
 		flushSync();
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['a', 'b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['a', 'b']);
 
 		// Pressed on the ⊖ itself, it removes.
 		remove.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
 		remove.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
 		flushSync();
-		expect(ctx.store.page('p2')!.items.map((it) => it.id)).toEqual(['b']);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.id)).toEqual(['b']);
 	});
 
 	it('nudges the focused chart 1 mm with an arrow and 10 mm with Shift', () => {
 		const ctx = setup();
 		cleanup = ctx.cleanup;
-		const update = vi.spyOn(ctx.store, 'updateItem');
+		const update = vi.spyOn(ctx.store, 'setFrame');
 		const [, second] = charts(ctx.dialog);
 
 		key(second, 'ArrowRight');
@@ -453,7 +459,7 @@ describe('PageEditor', () => {
 		cleanup = ctx.cleanup;
 		const orientation = vi.spyOn(ctx.store, 'setOrientation');
 		const group = ctx.dialog.querySelector('[role="radiogroup"][aria-label="Page 2 orientation"]')!;
-		const before = ctx.store.page('p2')!.items.map((it) => ({ ...it.frame }));
+		const before = chartsOf(ctx.store.page('p2')!).map((it) => ({ ...it.frame }));
 		click(group.querySelector('[role="radio"][aria-label="Landscape"]')!);
 		// With the measure for its text, should a template have laid the page out.
 		expect(orientation).toHaveBeenCalledWith('p2', 'landscape', expect.any(Function));
@@ -462,11 +468,11 @@ describe('PageEditor', () => {
 			'Landscape'
 		);
 		// Its charts are laid out again on the turned page; turning back puts them where they were.
-		const turned = ctx.store.page('p2')!.items.map((it) => it.frame);
+		const turned = chartsOf(ctx.store.page('p2')!).map((it) => it.frame);
 		turned.forEach((frame) => expect(frame.x + frame.w).toBeLessThanOrEqual(285 + 1e-9));
 		expect(turned).not.toEqual(before);
 		click(group.querySelector('[role="radio"][aria-label="Portrait"]')!);
-		expect(ctx.store.page('p2')!.items.map((it) => it.frame)).toEqual(before);
+		expect(chartsOf(ctx.store.page('p2')!).map((it) => it.frame)).toEqual(before);
 	});
 
 	it('offers to delete a page only while it is empty, and Undo brings it back', async () => {
@@ -515,7 +521,7 @@ describe('PageEditor', () => {
 	it('closes when its only page is deleted', async () => {
 		const ctx = setup('p1');
 		cleanup = ctx.cleanup;
-		ctx.store.pages = [{ id: 'p1', orientation: 'portrait', items: [] }];
+		ctx.store.pages = [{ id: 'p1', orientation: 'portrait', blocks: [] }];
 		flushSync();
 		click(ctx.dialog.querySelector('button[aria-label="Delete page 1"]')!);
 		await settle();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { chartsOf, typesetOf } from './blocks';
 import { contentBox, GUTTER_MM, overlaps, rotatedBounds } from './geometry';
 import {
 	closeUpChart,
@@ -12,7 +13,16 @@ import {
 } from './templates';
 import { fieldValues } from './text';
 import { DEFAULT_TEXT_STYLE, LINE_HEIGHT, MM_PER_PT } from './text';
-import type { ChartSnapshot, DocItem, DocPage, DocText, PageOrientation, Rect } from './types';
+import { specOf, wordsOf } from './test-support';
+import type {
+	ChartBlock,
+	ChartSnapshot,
+	DocPage,
+	PageOrientation,
+	Rect,
+	TextBlock,
+	TypesetBlock
+} from './types';
 
 function chart(aspect = 1): ChartSnapshot {
 	return {
@@ -37,21 +47,25 @@ function chart(aspect = 1): ChartSnapshot {
 	};
 }
 
-const disc = (id: string): DocItem => ({
+const disc = (id: string): ChartBlock => ({
+	kind: 'chart',
 	id,
 	chart: chart(),
 	frame: { x: 12, y: 12, w: 90, h: 90 }
 });
-const frame = (id: string, aspect = 1.6): DocItem => ({
+const frame = (id: string, aspect = 1.6): ChartBlock => ({
+	kind: 'chart',
 	id,
 	chart: chart(aspect),
 	frame: { x: 12, y: 108, w: 90, h: 90 / aspect }
 });
 
-function page(items: DocItem[], texts?: DocText[], orientation: PageOrientation = 'portrait') {
-	const made: DocPage = { id: 'p', orientation, items };
-	if (texts) made.texts = texts;
-	return made;
+function page(
+	items: ChartBlock[],
+	texts: TypesetBlock[] = [],
+	orientation: PageOrientation = 'portrait'
+): DocPage {
+	return { id: 'p', orientation, blocks: [...items, ...texts] };
 }
 
 function inside(rect: Rect, box: Rect) {
@@ -66,7 +80,7 @@ function expectSound(laid: LaidPage, source: DocPage) {
 	const box = contentBox(laid.orientation);
 	const taken: Rect[] = [];
 	for (const placed of laid.charts) {
-		const chart = placed.chart ?? source.items.find((it) => it.id === placed.id)!.chart;
+		const chart = placed.chart ?? chartsOf(source).find((it) => it.id === placed.id)!.chart;
 		expect(placed.frame.w / placed.frame.h).toBeCloseTo(chart.aspect, 6);
 		inside(placed.frame, box);
 		taken.push(placed.frame);
@@ -128,12 +142,16 @@ describe('layTemplate', () => {
 				for (const orientation of ['portrait', 'landscape'] as const) {
 					for (const swap of [false, true]) {
 						const laid = layTemplate(id, source, { orientation, swap, closeUp: PLEIADES });
-						const where = `${id} ${orientation} ${swap} ${source.items.length}`;
-						expect(laid, where).toHaveLength(pagesOf(id, source.items.length));
+						const where = `${id} ${orientation} ${swap} ${chartsOf(source).length}`;
+						expect(laid, where).toHaveLength(pagesOf(id, chartsOf(source).length));
 						const own = laid.flatMap((part) =>
 							part.charts.filter((placed) => !placed.chart).map((placed) => placed.id)
 						);
-						expect([...own].sort(), where).toEqual(source.items.map((it) => it.id).sort());
+						expect([...own].sort(), where).toEqual(
+							chartsOf(source)
+								.map((it) => it.id)
+								.sort()
+						);
 						// Only a finder card makes a chart, and it makes one.
 						const made = laid.flatMap((part) => part.charts.filter((placed) => placed.chart));
 						expect(made, where).toHaveLength(id === 'finder' ? 1 : 0);
@@ -157,6 +175,7 @@ describe('layTemplate', () => {
 			[disc('a'), frame('b')],
 			[
 				{
+					kind: 'text',
 					id: 't',
 					role: 'title',
 					text: 'Old',
@@ -178,7 +197,7 @@ describe('layTemplate', () => {
 		const laid = layTemplate('caption', page([disc('a'), frame('b')]));
 		expect(laid).toHaveLength(2);
 		const [sky, close] = laid;
-		expect(sky.texts.map((text) => [text.role, text.text, text.chartId])).toEqual([
+		expect(sky.texts.map((text) => [text.role, wordsOf(text), text.chartId])).toEqual([
 			['title', 'Sky chart', undefined],
 			['caption', 'Latitude {lat} · sidereal time {lst}', 'a']
 		]);
@@ -248,7 +267,7 @@ describe('layTemplate', () => {
 		expect(fieldValues(made)).toMatchObject({ ra: '3h 47m', dec: '+24°', fov: '20°' });
 
 		// Each has its caption: the sky's own, and the object by name.
-		expect(card.texts.map((text) => [text.role, text.chartId, text.text])).toEqual([
+		expect(card.texts.map((text) => [text.role, text.chartId, wordsOf(text)])).toEqual([
 			['title', undefined, 'Finder card'],
 			['caption', 'sky', 'Latitude {lat} · sidereal time {lst}'],
 			['caption', close.id, 'M 45 · Pleiades · field {fov}']
@@ -287,8 +306,8 @@ describe('layTemplate', () => {
 	});
 
 	it('replaces the close-up a sky had with the new one, and never takes one for the sky', () => {
-		const old: DocItem = { ...frame('old', 1.5), closeUpOf: 'sky' };
-		const stray: DocItem = { ...frame('stray', 1.5), closeUpOf: 'elsewhere' };
+		const old: ChartBlock = { ...frame('old', 1.5), closeUpOf: 'sky' };
+		const stray: ChartBlock = { ...frame('stray', 1.5), closeUpOf: 'elsewhere' };
 		expect(finderSky([old, disc('sky')])!.id).toBe('sky');
 		// A page of nothing but close-ups still has a sky to offer.
 		expect(finderSky([old])!.id).toBe('old');
@@ -328,15 +347,17 @@ describe('layTemplate', () => {
 		const sheets = layTemplate('sheet', page([disc('a'), frame('b')]));
 		const parts = ['header', 'number', 'tasks', 'stars', 'messier', 'key'];
 		expect(sheets.map((sheet) => sheet.texts.map((text) => text.role))).toEqual([parts, parts]);
-		expect(sheets.map((sheet) => sheet.texts[1].text)).toEqual(['№ 1', '№ 2']);
+		expect(sheets.map((sheet) => wordsOf(sheet.texts[1]))).toEqual(['№ 1', '№ 2']);
 		const [header, number, tasks, stars, messier, key] = sheets[0].texts;
 		// SkyGen's tasks, and under them the names to find: the stars on the left, Messier on the right.
-		expect(tasks.text).toBe(EN_TASKS);
+		expect(wordsOf(tasks)).toBe(EN_TASKS);
 		expect(stars).toMatchObject({
-			text: '',
+			kind: 'table',
 			chartId: 'a',
 			table: { source: 'stars', look: 'names', rows: 4 }
 		});
+		// A table has no words of its own: they are read from its chart.
+		expect(stars).not.toHaveProperty('text');
 		expect(messier).toMatchObject({
 			chartId: 'a',
 			table: { source: 'messier', look: 'names', rows: 4 }
@@ -352,7 +373,7 @@ describe('layTemplate', () => {
 		expect(number.style.align).toBe('right');
 		expect(number.frame.x + number.frame.w).toBe(198);
 		expect(tasks.frame.y).toBeGreaterThan(header.frame.y + header.frame.h);
-		expect(tasks.text.split('\n')).toHaveLength(8);
+		expect(wordsOf(tasks)!.split('\n')).toHaveLength(8);
 		// The key at the foot, in the corner, upside down, reading its own chart.
 		expect(key).toMatchObject({ rotation: 180, chartId: 'a', text: '{lat} · {lst}' });
 		expect(key.frame.y + key.frame.h).toBeCloseTo(285);
@@ -368,10 +389,11 @@ describe('layTemplate', () => {
 	it('keeps what was typed in a text for the same part, and leaves stock words behind', () => {
 		const style = { ...DEFAULT_TEXT_STYLE, font: 'sans' as const, size: 20 };
 		const at = { x: 12, y: 12, w: 80, h: 6 };
-		const texts: DocText[] = [
-			{ id: 't1', role: 'title', text: 'Сборная Москвы', style, frame: at },
-			{ id: 't2', role: 'caption', chartId: 'a', text: 'Мой круг', style, frame: at },
+		const texts: TypesetBlock[] = [
+			{ kind: 'text', id: 't1', role: 'title', text: 'Сборная Москвы', style, frame: at },
+			{ kind: 'text', id: 't2', role: 'caption', chartId: 'a', text: 'Мой круг', style, frame: at },
 			{
+				kind: 'text',
 				id: 't3',
 				role: 'caption',
 				chartId: 'b',
@@ -379,7 +401,7 @@ describe('layTemplate', () => {
 				style,
 				frame: at
 			},
-			{ id: 't4', text: 'A note of my own', style, frame: at }
+			{ kind: 'text', id: 't4', text: 'A note of my own', style, frame: at }
 		];
 		const [left] = layTemplate('pair', page([disc('a'), frame('b')], texts));
 		const says = (role: string, chartId?: string) =>
@@ -388,20 +410,22 @@ describe('layTemplate', () => {
 		expect(says('title')).toMatchObject({ text: 'Сборная Москвы', style });
 		expect(says('caption', 'a')).toMatchObject({ text: 'Мой круг', style });
 		// A stock caption is not kept as typed: it is written afresh, in the template's own face.
-		expect(says('caption', 'b').text).toBe('Centre {ra}, {dec} · field {fov}');
+		expect(wordsOf(says('caption', 'b'))).toBe('Centre {ra}, {dec} · field {fov}');
 		expect(says('caption', 'b').style.font).toBe('serif');
 		// The page's own note is not the template's to place.
-		expect(left.texts.some((text) => text.text === 'A note of my own')).toBe(false);
+		expect(left.texts.some((text) => wordsOf(text) === 'A note of my own')).toBe(false);
 
 		// A sheet's number is its place in the run, whatever the last one said.
-		const numbered: DocText[] = [{ id: 'n', role: 'number', text: '№ 7', style, frame: at }];
+		const numbered: TypesetBlock[] = [
+			{ kind: 'text', id: 'n', role: 'number', text: '№ 7', style, frame: at }
+		];
 		const sheets = layTemplate('sheet', page([disc('a'), disc('b')], numbered));
-		expect(sheets.map((sheet) => sheet.texts[1].text)).toEqual(['№ 1', '№ 2']);
+		expect(sheets.map((sheet) => wordsOf(sheet.texts[1]))).toEqual(['№ 1', '№ 2']);
 	});
 
 	it('writes its words in Russian when told to, in English untold, and lays both out alike', () => {
 		const source = page([disc('a'), frame('b')]);
-		const words = (laid: LaidPage[]) => laid.map((part) => part.texts.map((text) => text.text));
+		const words = (laid: LaidPage[]) => laid.map((part) => part.texts.map((text) => wordsOf(text)));
 		const ru = (id: TemplateId) => layTemplate(id, source, { language: 'ru', closeUp: PLEIADES });
 		expect(words(ru('caption'))).toEqual([
 			['Карта неба', 'Широта {lat} · звёздное время {lst}'],
@@ -418,12 +442,12 @@ describe('layTemplate', () => {
 		// The two tables have no words of their own: they are read from the chart.
 		const name = 'Фамилия, имя ______________________   Класс ________';
 		expect(words(ru('sheet'))).toEqual([
-			[name, '№ 1', RU_TASKS, '', '', '{lat} · {lst}'],
-			[name, '№ 2', RU_TASKS, '', '', '{ra} {dec}']
+			[name, '№ 1', RU_TASKS, undefined, undefined, '{lat} · {lst}'],
+			[name, '№ 2', RU_TASKS, undefined, undefined, '{ra} {dec}']
 		]);
 		// And are set in the template's language.
-		expect(ru('sheet')[0].texts[3].table).toMatchObject({ source: 'stars', language: 'ru' });
-		expect(layTemplate('sheet', source)[0].texts[3].table).not.toHaveProperty('language');
+		expect(specOf(ru('sheet')[0].texts[3])).toMatchObject({ source: 'stars', language: 'ru' });
+		expect(specOf(layTemplate('sheet', source)[0].texts[3])).not.toHaveProperty('language');
 		expect(words(ru('charts'))).toEqual([[]]);
 
 		const fields = (text: string) => text.match(/\{[a-z]+\}/g) ?? [];
@@ -438,11 +462,16 @@ describe('layTemplate', () => {
 					...part,
 					template: part.template?.id,
 					// A table's language is its words', like a text's: apart from it, the same table.
-					texts: part.texts.map(({ text, table, ...rest }) => ({
-						...rest,
-						fields: fields(text),
-						table: table && { source: table.source, look: table.look, rows: table.rows }
-					}))
+					texts: part.texts.map((laid) => {
+						const rest: Record<string, unknown> = { ...laid };
+						delete rest.text;
+						const table = specOf(laid);
+						return {
+							...rest,
+							fields: fields(wordsOf(laid) ?? ''),
+							table: table && { source: table.source, look: table.look, rows: table.rows }
+						};
+					})
 				}));
 			expect(shape(russian), id).toEqual(shape(english));
 			// Each page says which language it was written in, for a turn to keep to.
@@ -455,25 +484,25 @@ describe('layTemplate', () => {
 			const said = (laid: LaidPage[]) =>
 				laid.flatMap((part) =>
 					// (And for the tables, whose words are read from the chart.)
-					part.texts.filter((text) => !['key', 'number'].includes(text.role) && !text.table)
+					part.texts.filter((text) => !['key', 'number'].includes(text.role) && !specOf(text))
 				);
 			for (const [i, text] of said(russian).entries()) {
-				expect(text.text, id).not.toBe(said(english)[i].text);
-				expect(text.text, id).toMatch(/[а-я]/);
-				expect(said(english)[i].text, id).not.toMatch(/[а-яё]/i);
+				expect(wordsOf(text), id).not.toBe(wordsOf(said(english)[i]));
+				expect(wordsOf(text), id).toMatch(/[а-я]/);
+				expect(wordsOf(said(english)[i]), id).not.toMatch(/[а-яё]/i);
 			}
 		}
 	});
 
 	it('writes afresh in the new language what a template wrote, and keeps what was typed', () => {
 		const style = { ...DEFAULT_TEXT_STYLE, size: 20 };
-		const onPage = (laid: LaidPage, typed: Record<number, string> = {}): DocText[] =>
+		const onPage = (laid: LaidPage, typed: Record<number, string> = {}): TypesetBlock[] =>
 			laid.texts.map((text, i) => ({
 				...text,
 				id: `t${i}`,
 				...(i in typed ? { text: typed[i], style } : {})
 			}));
-		const says = (laid: LaidPage) => laid.texts.map((text) => text.text);
+		const says = (laid: LaidPage) => laid.texts.map((text) => wordsOf(text));
 
 		// A caption page as English left it, laid out in Russian, and back.
 		const one = [disc('a')];
@@ -500,8 +529,8 @@ describe('layTemplate', () => {
 			'Name ______________________   Class ________',
 			'№ 1',
 			EN_TASKS,
-			'',
-			'',
+			undefined,
+			undefined,
 			'{lat} · {lst}'
 		]);
 		const own = onPage(sheet, { 2: '1. Найдите Полярную звезду.' });
@@ -514,24 +543,24 @@ describe('layTemplate', () => {
 	it('keeps the name in a close-up’s caption and puts the words after it in the language', () => {
 		const [card] = layTemplate('finder', page([disc('sky')]), { closeUp: PLEIADES });
 		// The card as the document holds it: the close-up a chart of the page, its caption reading it.
-		const closeUp: DocItem = { ...frame('made', 1.5), closeUpOf: 'sky' };
-		const texts: DocText[] = card.texts.map((text, i) => ({
+		const closeUp: ChartBlock = { ...frame('made', 1.5), closeUpOf: 'sky' };
+		const texts: TypesetBlock[] = card.texts.map((text, i) => ({
 			...text,
 			id: `t${i}`,
 			...(text.chartId === card.charts[1].id ? { chartId: 'made' } : {})
 		}));
 		const caption = (laid: LaidPage[]) =>
-			laid.flatMap((part) => part.texts).find((text) => text.chartId === 'made')!.text;
+			wordsOf(laid.flatMap((part) => part.texts).find((text) => text.chartId === 'made')!);
 		const source = page([disc('sky'), closeUp], texts);
 		expect(caption(layTemplate('caption', source, { language: 'ru' }))).toBe(
 			'M 45 · Pleiades · поле {fov}'
 		);
 		expect(caption(layTemplate('caption', source))).toBe('M 45 · Pleiades · field {fov}');
 		// A name that was typed over is a name still.
-		texts[2].text = 'Плеяды · field {fov}';
+		(texts[2] as TextBlock).text = 'Плеяды · field {fov}';
 		expect(caption(layTemplate('pair', source, { language: 'ru' }))).toBe('Плеяды · поле {fov}');
 		// A caption of other words altogether is left as it is.
-		texts[2].text = 'Семь сестёр, {fov}';
+		(texts[2] as TextBlock).text = 'Семь сестёр, {fov}';
 		expect(caption(layTemplate('pair', source, { language: 'en' }))).toBe('Семь сестёр, {fov}');
 	});
 
@@ -542,10 +571,11 @@ describe('layTemplate', () => {
 	 */
 	function held(laid: LaidPage, source: DocPage): DocPage {
 		const idOf = (id: string | undefined) => (id?.startsWith('close-up-of-') ? 'made' : id);
-		const items = laid.charts.map((placed): DocItem => {
-			const own = source.items.find((it) => it.id === placed.id);
-			const item: DocItem = {
+		const items = laid.charts.map((placed): ChartBlock => {
+			const own = chartsOf(source).find((it) => it.id === placed.id);
+			const item: ChartBlock = {
 				...own,
+				kind: 'chart',
 				id: idOf(placed.id)!,
 				chart: { ...(placed.chart ?? own!.chart) },
 				frame: placed.frame
@@ -555,12 +585,12 @@ describe('layTemplate', () => {
 			if (placed.closeUpOf) item.closeUpOf = placed.closeUpOf;
 			return item;
 		});
-		const texts = laid.texts.map((text, i): DocText => {
-			const made: DocText = { ...text, id: `t${i}` };
+		const texts = laid.texts.map((text, i): TypesetBlock => {
+			const made: TypesetBlock = { ...text, id: `t${i}` };
 			if (text.chartId) made.chartId = idOf(text.chartId);
 			return made;
 		});
-		const made: DocPage = { id: 'p', orientation: laid.orientation, items, texts };
+		const made: DocPage = { id: 'p', orientation: laid.orientation, blocks: [...items, ...texts] };
 		if (laid.template) made.template = laid.template;
 		return made;
 	}
@@ -620,7 +650,7 @@ describe('layTemplate', () => {
 		const source = page([disc('sky')]);
 		const [card] = layTemplate('finder', source, { closeUp: PLEIADES });
 		const made = held(card, source);
-		expect(made.items.map((item) => [item.id, item.closeUpOf])).toEqual([
+		expect(chartsOf(made).map((item) => [item.id, item.closeUpOf])).toEqual([
 			['sky', undefined],
 			['made', 'sky']
 		]);
@@ -634,13 +664,13 @@ describe('layTemplate', () => {
 		]);
 		expect(again.dropped).toBeUndefined();
 		expect(again.charts[0].marks).toEqual([{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }]);
-		expect(again.charts[0].marks).not.toBe(made.items[0].chart.marks);
+		expect(again.charts[0].marks).not.toBe(chartsOf(made)[0].chart.marks);
 		expect(again.charts[1].marks).toBeUndefined();
 		// Side by side now, the caption still naming the object and reading the close-up.
 		expect(again.charts[1].frame.x).toBeGreaterThan(
 			again.charts[0].frame.x + again.charts[0].frame.w
 		);
-		expect(again.texts.map((text) => [text.role, text.chartId, text.text])).toEqual([
+		expect(again.texts.map((text) => [text.role, text.chartId, wordsOf(text)])).toEqual([
 			['title', undefined, 'Finder card'],
 			['caption', 'sky', 'Latitude {lat} · sidereal time {lst}'],
 			['caption', 'made', 'M 45 · Pleiades · field {fov}']
@@ -664,30 +694,30 @@ describe('layTemplate', () => {
 	it('keeps every word and face of a page laid out again as it is, a sheet’s number too', () => {
 		const source = page([disc('a'), disc('b')]);
 		const second = held(layTemplate('sheet', source, { language: 'ru' })[1], source);
-		expect(second.texts!.map((text) => text.text)[1]).toBe('№ 2');
+		expect(typesetOf(second).map((text) => wordsOf(text))[1]).toBe('№ 2');
 		// The header's face changed and not its words; the tasks typed over.
-		const big = { ...second.texts![0].style, size: 20 };
-		second.texts![0].style = big;
-		second.texts![2].text = 'Найдите Вегу.';
+		const big = { ...typesetOf(second)[0].style, size: 20 };
+		typesetOf(second)[0].style = big;
+		(typesetOf(second)[2] as TextBlock).text = 'Найдите Вегу.';
 		const [again] = layTemplate('sheet', second, {
 			again: true,
 			language: 'ru',
 			orientation: 'landscape'
 		});
-		expect(again.texts.map((text) => text.text)).toEqual([
+		expect(again.texts.map((text) => wordsOf(text))).toEqual([
 			'Фамилия, имя ______________________   Класс ________',
 			'№ 2',
 			'Найдите Вегу.',
-			'',
-			'',
+			undefined,
+			undefined,
 			'{lat} · {lst}'
 		]);
 		expect(again.texts[0].style).toEqual(big);
 		// Laid out by the template afresh, the stock header is the template's and the sheet the first.
 		const [afresh] = layTemplate('sheet', second, { language: 'ru' });
 		expect(afresh.texts[0].style.size).toBe(12);
-		expect(afresh.texts[1].text).toBe('№ 1');
-		expect(afresh.texts[2].text).toBe('Найдите Вегу.');
+		expect(wordsOf(afresh.texts[1])).toBe('№ 1');
+		expect(wordsOf(afresh.texts[2])).toBe('Найдите Вегу.');
 	});
 
 	it('takes a text to be as tall as the lines it was typed in when it has no measure', () => {

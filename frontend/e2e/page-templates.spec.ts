@@ -1,4 +1,14 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import {
+	chartsOf,
+	documentOf,
+	savedPages,
+	seedDocument,
+	typesetOf,
+	type Frame,
+	type SavedChart as SavedChartBlock,
+	type SavedPage
+} from './saved-document';
 
 /**
  * Page templates: the button on a page's thumbnail (across from its ⊖) and by its
@@ -6,8 +16,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
  * that page; a click lays the page out, on more pages when its charts need them, and
  * the toast's Undo puts everything back.
  */
-
-const STORAGE_KEY = 'skycharts.document.v1';
 
 const STEREO = {
 	view: {
@@ -37,67 +45,37 @@ const PINHOLE = {
 };
 
 /** A frame and a disc on the first page (the frame first), a lone disc on the second, an empty third. */
-const DOCUMENT = {
-	pages: [
-		{
-			id: 'e2e-page-1',
-			orientation: 'portrait',
-			items: [
-				{ id: 'e2e-frame', chart: PINHOLE, frame: { x: 12, y: 12, w: 90, h: 56.25 } },
-				{ id: 'e2e-disc', chart: STEREO, frame: { x: 108, y: 12, w: 90, h: 90 } }
-			]
-		},
-		{
-			id: 'e2e-page-2',
-			orientation: 'portrait',
-			items: [{ id: 'e2e-lone', chart: STEREO, frame: { x: 12, y: 55.5, w: 186, h: 186 } }]
-		},
-		{ id: 'e2e-page-3', orientation: 'portrait', items: [] }
-	]
-};
-
-interface Frame {
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-}
-
-interface SavedPage {
-	id: string;
-	orientation: string;
-	manual?: boolean;
-	template?: { id: string; language: string };
-	items: { id: string; frame: Frame }[];
-	texts?: { role?: string; text: string; chartId?: string; rotation?: number; frame: Frame }[];
-}
+const DOCUMENT = documentOf([
+	{
+		id: 'e2e-page-1',
+		orientation: 'portrait',
+		blocks: [
+			{ kind: 'chart', id: 'e2e-frame', chart: PINHOLE, frame: { x: 12, y: 12, w: 90, h: 56.25 } },
+			{ kind: 'chart', id: 'e2e-disc', chart: STEREO, frame: { x: 108, y: 12, w: 90, h: 90 } }
+		]
+	},
+	{
+		id: 'e2e-page-2',
+		orientation: 'portrait',
+		blocks: [
+			{ kind: 'chart', id: 'e2e-lone', chart: STEREO, frame: { x: 12, y: 55.5, w: 186, h: 186 } }
+		]
+	},
+	{ id: 'e2e-page-3', orientation: 'portrait', blocks: [] }
+]);
 
 async function seed(page: Page) {
-	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
-		DOCUMENT
-	] as const);
-	await page.reload();
-	await page.waitForSelector('canvas');
-	await page.waitForLoadState('networkidle').catch(() => undefined);
+	await seedDocument(page, DOCUMENT);
 }
 
-async function savedPages(page: Page): Promise<SavedPage[]> {
-	return page.evaluate((key) => {
-		const raw = localStorage.getItem(key);
-		return raw ? JSON.parse(raw).pages : [];
-	}, STORAGE_KEY);
-}
-
-const roles = (saved: SavedPage) => (saved.texts ?? []).map((text) => text.role);
+const roles = (saved: SavedPage) => typesetOf(saved).map((text) => text.role);
 
 /** Where everything is on a saved page: its charts, and its texts by part. */
 function layoutOf(saved: SavedPage) {
 	return {
 		orientation: saved.orientation,
-		items: saved.items.map(({ id, frame }) => ({ id, frame })),
-		texts: (saved.texts ?? []).map(({ role, text, chartId, rotation, frame }) => ({
+		items: chartsOf(saved).map(({ id, frame }) => ({ id, frame })),
+		texts: typesetOf(saved).map(({ role, text, chartId, rotation, frame }) => ({
 			part: [role, text, chartId, rotation].join('|'),
 			frame
 		}))
@@ -184,10 +162,11 @@ test('a page is laid out as a template from its thumbnail, and Undo puts it back
 		.poll(async () => roles((await savedPages(page))[0]))
 		.toEqual(['title', 'caption', 'caption']);
 	const [laid] = await savedPages(page);
-	expect(laid.items.map((item) => item.id)).toEqual(['e2e-frame', 'e2e-disc']);
-	expect(laid.items[1].frame.y).toBeGreaterThan(laid.items[0].frame.y + laid.items[0].frame.h);
-	expect(laid.items[1].frame.w).toBeGreaterThan(90);
-	expect(laid.texts!.map((text) => text.chartId)).toEqual([undefined, 'e2e-frame', 'e2e-disc']);
+	const laidCharts = chartsOf(laid);
+	expect(laidCharts.map((item) => item.id)).toEqual(['e2e-frame', 'e2e-disc']);
+	expect(laidCharts[1].frame.y).toBeGreaterThan(laidCharts[0].frame.y + laidCharts[0].frame.h);
+	expect(laidCharts[1].frame.w).toBeGreaterThan(90);
+	expect(typesetOf(laid).map((text) => text.chartId)).toEqual([undefined, 'e2e-frame', 'e2e-disc']);
 	expect(laid.manual).toBe(true);
 	expect((await savedPages(page)).length).toBe(3);
 
@@ -227,7 +206,7 @@ test("charts past a template's places go on new pages; swapping and turning redr
 	await picker.getByRole('button', { name: 'Worksheet: Tasks, and a key · 2 pages' }).click();
 	await expect.poll(async () => (await savedPages(page)).length).toBe(4);
 	const pages = await savedPages(page);
-	expect(pages.map((saved) => saved.items.map((item) => item.id))).toEqual([
+	expect(pages.map((saved) => chartsOf(saved).map((item) => item.id))).toEqual([
 		['e2e-disc'],
 		['e2e-frame'],
 		['e2e-lone'],
@@ -237,9 +216,9 @@ test("charts past a template's places go on new pages; swapping and turning redr
 	expect(pages.slice(0, 2).map((saved) => saved.orientation)).toEqual(['landscape', 'landscape']);
 	for (const saved of pages.slice(0, 2)) {
 		expect(roles(saved)).toEqual(['header', 'number', 'tasks', 'stars', 'messier', 'key']);
-		expect(saved.texts![5].rotation).toBe(180);
+		expect(typesetOf(saved)[5].rotation).toBe(180);
 	}
-	expect(pages.slice(0, 2).map((saved) => saved.texts![1].text)).toEqual(['№ 1', '№ 2']);
+	expect(pages.slice(0, 2).map((saved) => typesetOf(saved)[1].text)).toEqual(['№ 1', '№ 2']);
 	await expect(panel.getByRole('button', { name: /^Page \d,/ })).toHaveCount(4);
 	await expect(
 		page.getByRole('status').filter({ hasText: 'Page 1 laid out as “Worksheet”, on 2 pages' })
@@ -289,14 +268,14 @@ test('the editor lays its page out too, keeping what was typed in a title; Escap
 	await page.keyboard.type('Orion in winter');
 	await page.keyboard.press('Escape');
 	await expect
-		.poll(async () => (await savedPages(page))[1].texts?.[0]?.text)
+		.poll(async () => typesetOf((await savedPages(page))[1])[0]?.text)
 		.toBe('Orion in winter');
 	await open.click();
 	await picker.getByRole('radio', { name: 'Landscape' }).click();
 	await picker.getByRole('button', { name: 'With a caption: One to a page' }).click();
 	await expect.poll(async () => (await savedPages(page))[1].orientation).toBe('landscape');
 	const again = (await savedPages(page))[1];
-	expect(again.texts!.map((text) => [text.role, text.text])).toEqual([
+	expect(typesetOf(again).map((text) => [text.role, text.text])).toEqual([
 		['title', 'Orion in winter'],
 		['caption', 'Latitude {lat} · sidereal time {lst}']
 	]);
@@ -404,16 +383,14 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	await search.press('Enter');
 	await expect(objects).toHaveCount(0);
 
-	await expect.poll(async () => (await savedPages(page))[1].items.length).toBe(2);
+	await expect.poll(async () => chartsOf((await savedPages(page))[1]).length).toBe(2);
 	interface SavedChart {
 		view: { projection: string; pinholeFovDeg: number };
 		marks?: { raDeg: number; decDeg: number; radiusDeg: number }[];
 		createdAt: string;
 	}
-	const card = (await savedPages(page))[1] as SavedPage & {
-		items: { id: string; closeUpOf?: string; chart: SavedChart }[];
-	};
-	const [sky, close] = card.items;
+	const card = (await savedPages(page))[1];
+	const [sky, close] = chartsOf(card) as (Omit<SavedChartBlock, 'chart'> & { chart: SavedChart })[];
 	expect(sky.id).toBe('e2e-lone');
 	expect(sky.chart.marks).toHaveLength(1);
 	expect(sky.chart.marks![0].radiusDeg).toBe(5);
@@ -423,7 +400,7 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	expect(close.chart.view).toMatchObject({ projection: 'pinhole', pinholeFovDeg: 10 });
 	expect(close.chart.createdAt).toBe(STEREO.createdAt);
 	expect(close.frame.y).toBeGreaterThan(sky.frame.y + sky.frame.h);
-	expect(card.texts!.map((text) => [text.role, text.text, text.chartId])).toEqual([
+	expect(typesetOf(card).map((text) => [text.role, text.text, text.chartId])).toEqual([
 		['title', 'Finder card', undefined],
 		['caption', 'Latitude {lat} · sidereal time {lst}', 'e2e-lone'],
 		['caption', 'M 45 · Pleiades · field {fov}', close.id]
@@ -461,11 +438,11 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	await search.fill('m 31');
 	await rows.first().click();
 	await expect
-		.poll(async () => (await savedPages(page))[1].texts?.[2]?.text)
+		.poll(async () => typesetOf((await savedPages(page))[1])[2]?.text)
 		.toBe('M 31 · Andromeda Galaxy · field {fov}');
 	const replaced = (await savedPages(page))[1];
-	expect(replaced.items).toHaveLength(2);
-	expect(replaced.items[1].id).not.toBe(close.id);
+	expect(chartsOf(replaced)).toHaveLength(2);
+	expect(chartsOf(replaced)[1].id).not.toBe(close.id);
 });
 
 test('a template writes in the language chosen under the tiles: Russian, or English', async ({
@@ -503,7 +480,7 @@ test('a template writes in the language chosen under the tiles: Russian, or Engl
 	// The page is laid out in it: the words are Russian, what the fields show is as it was.
 	await tile.click();
 	await expect
-		.poll(async () => (await savedPages(page))[1].texts?.map((text) => [text.role, text.text]))
+		.poll(async () => typesetOf((await savedPages(page))[1]).map((text) => [text.role, text.text]))
 		.toEqual([
 			['title', 'Карта неба'],
 			['caption', 'Широта {lat} · звёздное время {lst}']
@@ -537,7 +514,7 @@ test.describe('in a browser set to Russian', () => {
 		await expect(tile.locator('.text').first()).toHaveText('Sky chart');
 		await tile.click();
 		await expect
-			.poll(async () => (await savedPages(page))[1].texts?.map((text) => text.text))
+			.poll(async () => typesetOf((await savedPages(page))[1]).map((text) => text.text))
 			.toEqual(['Sky chart', 'Latitude {lat} · sidereal time {lst}']);
 	});
 });

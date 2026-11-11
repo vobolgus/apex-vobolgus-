@@ -17,13 +17,14 @@ import {
 	type ChartView,
 	type RenderConfig
 } from '$lib/api/render-config';
+import { chartsOf, typesetOf } from './blocks';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
 import { loadMessier } from '$lib/api/catalog';
 import { catalog } from '$lib/stores.svelte';
 import { blockLayout, type Sky } from './table';
 import { alignAnchor, anchoredFrame, MAX_LINE_CHARS, MAX_TEXT_LINES, type Measure } from './text';
 import { loadTextFonts, measureText } from './text-fonts.svelte';
-import type { ChartSnapshot, DocItem, DocPage, DocText, TextFont } from './types';
+import type { ChartBlock, ChartSnapshot, DocPage, TextFont, TypesetBlock } from './types';
 
 /**
  * Overrides of the preview's style for a chart on white paper. The outline is
@@ -116,7 +117,7 @@ export function snapshotChart(
 }
 
 /** The preview's config for the chart, sized in mm with stars fixed in mm, on paper. */
-export function itemRenderConfig(item: DocItem): RenderConfig {
+export function itemRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): RenderConfig {
 	const { chart, frame } = item;
 	const config = buildRenderConfig(chart.view, chart.layers, new Date(chart.createdAt));
 	const drawn: RenderConfig = {
@@ -144,7 +145,7 @@ export function itemRenderConfig(item: DocItem): RenderConfig {
  */
 export function textRequest(
 	page: DocPage,
-	text: DocText,
+	text: TypesetBlock,
 	measure: Measure,
 	sky: Sky = NO_SKY,
 	pages?: readonly DocPage[]
@@ -217,14 +218,14 @@ export function documentRequest(
 			return {
 				width_mm: w,
 				height_mm: h,
-				items: page.items.map((item) => ({
+				items: chartsOf(page).map((item) => ({
 					x_mm: item.frame.x,
 					y_mm: item.frame.y,
 					width_mm: item.frame.w,
 					height_mm: item.frame.h,
 					config: itemRenderConfig(item)
 				})),
-				texts: (page.texts ?? []).map((text) => textRequest(page, text, measure, sky, pages))
+				texts: typesetOf(page).map((text) => textRequest(page, text, measure, sky, pages))
 			};
 		})
 	};
@@ -240,10 +241,12 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<Documen
 	let message: string | null = null;
 	try {
 		// Lines broken in a fallback font would break elsewhere in the PDF.
-		const texts = pages.flatMap((page) => page.texts ?? []);
+		const texts = pages.flatMap(typesetOf);
 		await loadTextFonts(texts.map((text) => text.style));
 		// A table of Messier objects lists none without their catalogue.
-		if (texts.some((text) => text.table?.source === 'messier')) await loadMessier();
+		if (texts.some((text) => text.kind === 'table' && text.table.source === 'messier')) {
+			await loadMessier();
+		}
 		const response = await fetch('/api/export/document', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -297,7 +300,7 @@ const retired = new Set<string>();
  * config (the position on the page does not matter). Rejects when the backend
  * fails; a failure is not cached, so the next call tries again.
  */
-export function itemPreviewUrl(item: DocItem): Promise<string> {
+export function itemPreviewUrl(item: Pick<ChartBlock, 'chart' | 'frame'>): Promise<string> {
 	const body = JSON.stringify(itemRenderConfig(item));
 	const cached = previews.get(body);
 	if (cached) {

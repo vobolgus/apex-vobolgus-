@@ -19,14 +19,14 @@
 	import { untrack } from 'svelte';
 	import { stepSize, type ResizeAnchor } from '$lib/document/geometry';
 	import { itemPreviewUrl } from '$lib/document/render';
-	import type { DocItem, PageOrientation, Rect } from '$lib/document/types';
+	import type { ChartBlock, PageOrientation, Rect } from '$lib/document/types';
 	import { sizeLabel, spokenSize, type Size } from './editor-geometry';
 
 	/** What the chart is doing: dragged on a page, dragged off every page, resized, or easing back. */
 	export type ItemState = 'idle' | 'moving' | 'detached' | 'resizing' | 'returning' | 'settling';
 
 	interface Props {
-		item: DocItem;
+		item: ChartBlock;
 		/** 0-based position on its page, for the accessible name. */
 		index: number;
 		count: number;
@@ -49,11 +49,11 @@
 		linked?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
-		onmovestart?: (event: PointerEvent, item: DocItem) => void;
-		onresizestart?: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
-		onkeydown?: (event: KeyboardEvent, item: DocItem) => void;
-		onremove?: (item: DocItem) => void;
-		onaction?: (item: DocItem, action: ChartAction) => void;
+		onmovestart?: (event: PointerEvent, item: ChartBlock) => void;
+		onresizestart?: (event: PointerEvent, item: ChartBlock, handle: ResizeAnchor) => void;
+		onkeydown?: (event: KeyboardEvent, item: ChartBlock) => void;
+		onremove?: (item: ChartBlock) => void;
+		onaction?: (item: ChartBlock, action: ChartAction) => void;
 	}
 
 	let {
@@ -91,7 +91,7 @@
 	$effect(() => {
 		void sizeKey;
 		void reload;
-		const snapshot = untrack(() => $state.snapshot(item)) as DocItem;
+		const snapshot = untrack(() => $state.snapshot(item)) as ChartBlock;
 		let live = true;
 		itemPreviewUrl(snapshot)
 			.then(preload)

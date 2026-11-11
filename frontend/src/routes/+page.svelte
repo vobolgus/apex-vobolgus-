@@ -640,7 +640,7 @@
 		void landPdfFlight();
 		// And where the charts already on the pages are: this one may move them to make room.
 		const before = pagesPanel?.chartBoxes();
-		const { pageId, itemId, newPage, relaid, undo } = documentStore.addChart(chart, thumb);
+		const { pageId, blockId: itemId, newPage, relaid, undo } = documentStore.addChart(chart, thumb);
 		documentStore.selectedPageId = pageId;
 		const flying =
 			canvasBox !== null &&

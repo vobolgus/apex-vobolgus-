@@ -14,7 +14,7 @@ import {
 	textRequest
 } from './render';
 import { DEFAULT_TEXT_STYLE, FONT_METRICS, LINE_HEIGHT, MM_PER_PT, NO_VALUE } from './text';
-import type { DocItem, DocPage, DocText } from './types';
+import type { ChartBlock, DocPage, TableBlock, TextBlock } from './types';
 
 const VIEW: ChartView = {
 	projection: 'stereographic',
@@ -36,17 +36,19 @@ const LAYERS = {
 
 const CREATED = '2026-10-27T12:00:00.000Z';
 
-function stereoItem(frame = { x: 12, y: 12, w: 93, h: 93 }): DocItem {
+function stereoItem(frame = { x: 12, y: 12, w: 93, h: 93 }): ChartBlock {
 	return {
+		kind: 'chart',
 		id: 'a',
 		chart: { view: VIEW, layers: LAYERS, aspect: 1, createdAt: CREATED },
 		frame
 	};
 }
 
-function pinholeItem(): DocItem {
+function pinholeItem(): ChartBlock {
 	const aspect = 16 / 9;
 	return {
+		kind: 'chart',
 		id: 'b',
 		chart: {
 			view: { ...VIEW, projection: 'pinhole' },
@@ -168,8 +170,9 @@ describe('textRequest', () => {
 	const { ascent, descent } = FONT_METRICS.serif;
 	const first = ((LINE_HEIGHT - ascent - descent) / 2 + ascent) * size;
 
-	function text(overrides: Partial<DocText> = {}): DocText {
+	function text(overrides: Partial<TextBlock> = {}): TextBlock {
 		return {
+			kind: 'text',
 			id: 't',
 			text: 'one two three',
 			style: { ...DEFAULT_TEXT_STYLE },
@@ -179,7 +182,11 @@ describe('textRequest', () => {
 		};
 	}
 
-	const page = (items: DocItem[] = []): DocPage => ({ id: 'p', orientation: 'portrait', items });
+	const page = (blocks: ChartBlock[] = []): DocPage => ({
+		id: 'p',
+		orientation: 'portrait',
+		blocks
+	});
 
 	it("sends each line where its baseline starts, in the text's font and size", () => {
 		const request = textRequest(page(), text(), measure);
@@ -278,18 +285,18 @@ describe('a table in the request', () => {
 		stars: []
 	};
 	// A chart that takes in the whole sky but its far point: the object is on it wherever it looks.
-	const everywhere = (): DocItem => {
+	const everywhere = (): ChartBlock => {
 		const item = stereoItem();
 		return { ...item, chart: { ...item.chart, view: { ...VIEW, stereoFovDeg: 350 } } };
 	};
-	const table: DocText = {
+	const table: TableBlock = {
+		kind: 'table',
 		id: 't',
-		text: '',
 		style: { font: 'sans', size: 10, bold: false, italic: false, align: 'left' },
 		frame: { x: 20, y: 120, w: 150, h: 10 },
 		table: { source: 'messier', look: 'details', rows: 5 }
 	};
-	const page = (): DocPage => ({ id: 'p', orientation: 'portrait', items: [everywhere()] });
+	const page = (): DocPage => ({ id: 'p', orientation: 'portrait', blocks: [everywhere()] });
 
 	it('is sent a line a cell, each with its anchor and weight, and its rules', () => {
 		const sent = textRequest(page(), table, measure, sky);
@@ -351,20 +358,26 @@ describe('a table in the request', () => {
 		expect(names).not.toHaveProperty('rules');
 
 		// A text on a page with no chart reads the one it is told on another page.
-		const elsewhere: DocPage = { id: 'q', orientation: 'portrait', items: [] };
-		const told = { ...table, text: 'FOV {fov}', table: undefined, chartId: 'a' };
+		const elsewhere: DocPage = { id: 'q', orientation: 'portrait', blocks: [] };
+		const { id, style, frame } = table;
+		const told: TextBlock = { kind: 'text', id, style, frame, text: 'FOV {fov}', chartId: 'a' };
 		expect(textRequest(elsewhere, told, measure, sky).lines[0].text).toBe(`FOV ${NO_VALUE}`);
 		expect(textRequest(elsewhere, told, measure, sky, [elsewhere, page()]).lines[0].text).toBe(
 			'FOV 350°'
 		);
-		const whole = documentRequest([{ ...elsewhere, texts: [told] }, page()], measure, sky);
+		const whole = documentRequest([{ ...elsewhere, blocks: [told] }, page()], measure, sky);
 		expect(whole.pages[0].texts[0].lines[0].text).toBe('FOV 350°');
-		const words = textRequest(page(), { ...table, table: undefined, text: 'Hello' }, measure, sky);
+		const hello: TextBlock = { kind: 'text', id, style, frame, text: 'Hello' };
+		const words = textRequest(page(), hello, measure, sky);
 		expect(words).not.toHaveProperty('rules');
 		expect(words.lines).toEqual([expect.objectContaining({ text: 'Hello' })]);
 		expect(words.lines[0]).not.toHaveProperty('bold');
 		// The whole document is given the sky its tables read.
-		const [sent] = documentRequest([{ ...page(), texts: [table] }], measure, sky).pages;
+		const [sent] = documentRequest(
+			[{ id: 'p', orientation: 'portrait', blocks: [everywhere(), table] }],
+			measure,
+			sky
+		).pages;
 		expect(sent.texts[0].lines).toHaveLength(11);
 	});
 });
@@ -372,8 +385,8 @@ describe('a table in the request', () => {
 describe('documentRequest', () => {
 	it('sends every page at its A4 size in mm and every chart at its frame', () => {
 		const pages: DocPage[] = [
-			{ id: 'p1', orientation: 'portrait', items: [stereoItem(), pinholeItem()] },
-			{ id: 'p2', orientation: 'landscape', items: [] }
+			{ id: 'p1', orientation: 'portrait', blocks: [stereoItem(), pinholeItem()] },
+			{ id: 'p2', orientation: 'landscape', blocks: [] }
 		];
 		const body = documentRequest(pages);
 		expect(body.pages).toHaveLength(2);
@@ -445,7 +458,7 @@ describe('backend calls', () => {
 		it('posts the document and downloads one PDF', async () => {
 			const fetchMock = mockFetch();
 			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [stereoItem()] }];
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [stereoItem()] }];
 
 			await expect(exportDocument(pages)).resolves.toEqual({ ok: true });
 
@@ -467,7 +480,7 @@ describe('backend calls', () => {
 			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
 			await expect(exportDocument(pages)).resolves.toEqual({
 				ok: false,
 				message: 'too many pages'
@@ -482,7 +495,7 @@ describe('backend calls', () => {
 			const body = JSON.stringify({ message: 'a document needs 1 to 100 pages, got 101' });
 			mockFetch(() => ({ ok: false, status: 400, text: async () => body }));
 			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
 			await expect(exportDocument(pages)).resolves.toEqual({
 				ok: false,
 				message: 'a document needs 1 to 100 pages, got 101'
@@ -491,7 +504,7 @@ describe('backend calls', () => {
 
 		it('has no reason to give when the backend failed or is away', async () => {
 			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', items: [] }];
+			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
 			mockFetch(() => ({ ok: false, status: 500, text: async () => 'PDF conversion error' }));
 			await expect(exportDocument(pages)).resolves.toEqual({ ok: false, message: null });
 			mockFetch(() => Promise.reject(new TypeError('Failed to fetch')));

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
+import { chartsOf } from '$lib/document/blocks';
 import { DocumentStore, MAX_PAGES } from '$lib/document/document.svelte';
-import type { ChartSnapshot, DocItem } from '$lib/document/types';
+import type { ChartSnapshot, ChartBlock } from '$lib/document/types';
 import PagesPanel from './PagesPanel.svelte';
 
 const preview = vi.hoisted(() => ({
-	url: vi.fn<(item: DocItem) => Promise<string>>(() => Promise.resolve('blob:preview'))
+	url: vi.fn<(item: ChartBlock) => Promise<string>>(() => Promise.resolve('blob:preview'))
 }));
 
 vi.mock('$lib/document/render', () => ({ itemPreviewUrl: preview.url }));
@@ -134,7 +135,7 @@ describe('PagesPanel', () => {
 		expect(sheets[1].style.width).toBe('88px');
 		expect(parseFloat(sheets[1].style.height)).toBeCloseTo((210 * 88) / 297, 3);
 
-		const item = store.pages[0].items[0];
+		const item = chartsOf(store.pages[0])[0];
 		const chartEl = sheets[0].querySelector<HTMLElement>('.chart')!;
 		const scale = 88 / 210;
 		expect(parseFloat(chartEl.style.left)).toBeCloseTo(item.frame.x * scale, 6);

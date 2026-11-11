@@ -21,7 +21,7 @@ import {
 	type Sheets,
 	type TextLayout
 } from './text';
-import type { DocPage, DocText, TextFont, TextStyle } from './types';
+import type { DocPage, TableBlock, TextFont, TextStyle, TypesetBlock } from './types';
 
 type FaceKey = `${TextFont}-${'regular' | 'bold'}${'' | '-italic'}`;
 
@@ -144,39 +144,42 @@ export function measuredLayout(text: string, style: TextStyle, widthMm: number):
  * that reads a chart on another page than its own.
  */
 export function shownLayout(
-	page: Pick<DocPage, 'items'>,
-	text: DocText,
-	widthMm: number = text.frame.w,
+	page: Pick<DocPage, 'blocks'>,
+	block: TypesetBlock,
+	widthMm: number = block.frame.w,
 	pages?: Sheets
 ): TextLayout {
 	void textFonts.epoch;
-	if (text.table?.source === 'messier' && catalog.messier.length === 0) void loadMessier();
+	if (block.kind === 'table' && block.table.source === 'messier' && catalog.messier.length === 0) {
+		void loadMessier();
+	}
 	const sky = { messier: catalog.messier, stars: catalog.stars };
-	return blockLayout(page, text, widthMm, measureText, sky, pages);
+	return blockLayout(page, block, widthMm, measureText, sky, pages);
 }
+
+/** What of a table says how wide it sets: a table yet to be put on a page has no more. */
+type TableShape = Pick<TableBlock, 'table' | 'style' | 'chartId' | 'frame' | 'rotation'>;
 
 /** The width a table likes to be (`tableWidth`), with the loaded faces and catalogues, mm. */
 export function likedTableWidth(
-	page: Pick<DocPage, 'items'>,
-	text: Pick<DocText, 'table' | 'style' | 'chartId' | 'frame'>,
+	page: Pick<DocPage, 'blocks'>,
+	table: TableShape,
 	pages?: Sheets
 ): number {
 	void textFonts.epoch;
-	if (!text.table) return text.frame.w;
 	const sky = { messier: catalog.messier, stars: catalog.stars };
-	const chart = boundChart(page, { ...text, id: '', text: '' }, pages);
-	return tableWidth(tableContent(chart, text.table, sky), text.style, measureText);
+	const chart = boundChart(page, table, pages);
+	return tableWidth(tableContent(chart, table.table, sky), table.style, measureText);
 }
 
 /** The narrowest a table can be made with nothing of it outside its width (`narrowestTableWidth`), mm. */
 export function leastTableWidth(
-	page: Pick<DocPage, 'items'>,
-	text: Pick<DocText, 'table' | 'style' | 'chartId' | 'frame'>,
+	page: Pick<DocPage, 'blocks'>,
+	table: TableShape,
 	pages?: Sheets
 ): number {
 	void textFonts.epoch;
-	if (!text.table) return 0;
 	const sky = { messier: catalog.messier, stars: catalog.stars };
-	const chart = boundChart(page, { ...text, id: '', text: '' }, pages);
-	return narrowestTableWidth(tableContent(chart, text.table, sky), text.style, measureText);
+	const chart = boundChart(page, table, pages);
+	return narrowestTableWidth(tableContent(chart, table.table, sky), table.style, measureText);
 }

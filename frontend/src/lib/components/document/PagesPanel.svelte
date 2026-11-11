@@ -25,6 +25,7 @@
 	import { pageSize } from '$lib/document/geometry';
 	import { chartCountLabel } from '$lib/document/labels';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
+	import { chartsOf } from '$lib/document/blocks';
 	import type { DocPage } from '$lib/document/types';
 	import { keepFocusOnMousePress } from '$lib/ui/focus';
 	import PageThumbnail from './PageThumbnail.svelte';
@@ -538,7 +539,7 @@
 							<button
 								class="thumb"
 								type="button"
-								aria-label="Page {index + 1}, {chartCountLabel(page.items.length)}"
+								aria-label="Page {index + 1}, {chartCountLabel(chartsOf(page).length)}"
 								aria-current={selected ? 'true' : undefined}
 								aria-keyshortcuts="Delete"
 								onmousedown={keepFocusOnMousePress}
@@ -556,7 +557,7 @@
 							>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.75 8h6.5" /></svg>
 							</button>
-							{#if page.items.length > 0}
+							{#if chartsOf(page).length > 0}
 								<button
 									class="template"
 									type="button"

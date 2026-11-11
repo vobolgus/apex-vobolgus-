@@ -27,15 +27,15 @@
 	 * page is a button that makes it current, and a drop target.
 	 */
 	import { contentBox, pageSize, type ResizeAnchor } from '$lib/document/geometry';
-	import { isBlank } from '$lib/document/document.svelte';
+	import { chartsOf, isBlank, typesetOf } from '$lib/document/blocks';
 	import { boundItem, hasFields, shownText } from '$lib/document/text';
 	import type {
-		DocItem,
+		ChartBlock,
 		DocPage,
-		DocText,
 		PageOrientation,
 		TableSpec,
-		TextStyle
+		TextStyle,
+		TypesetBlock
 	} from '$lib/document/types';
 	import { chartCountLabel, plural } from '$lib/document/labels';
 	import EditorItem, { type ChartAction } from './EditorItem.svelte';
@@ -79,25 +79,25 @@
 		onaddtable?: (pageId: string) => void;
 		/** Lay this page out as a template; offered on the current one while it has charts. */
 		ontemplate?: (pageId: string, button: HTMLElement) => void;
-		onmovestart: (event: PointerEvent, item: DocItem) => void;
-		onresizestart: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
-		onitemkeydown: (event: KeyboardEvent, item: DocItem) => void;
-		onremove: (item: DocItem) => void;
-		onitemaction: (item: DocItem, action: ChartAction) => void;
-		ontextmovestart?: (event: PointerEvent, text: DocText) => void;
-		ontextresizestart?: (event: PointerEvent, text: DocText, side: TextSide) => void;
-		ontextrotatestart?: (event: PointerEvent, text: DocText) => void;
-		ontextturn?: (text: DocText) => void;
-		ontextkeydown?: (event: KeyboardEvent, text: DocText) => void;
-		ontextstyle?: (text: DocText, style: TextStyle) => void;
-		ontextremove?: (text: DocText) => void;
-		ontextedit?: (text: DocText) => void;
-		ontextcommit?: (text: DocText, value: string) => void;
-		ontextheight?: (text: DocText, height: number) => void;
+		onmovestart: (event: PointerEvent, item: ChartBlock) => void;
+		onresizestart: (event: PointerEvent, item: ChartBlock, handle: ResizeAnchor) => void;
+		onitemkeydown: (event: KeyboardEvent, item: ChartBlock) => void;
+		onremove: (item: ChartBlock) => void;
+		onitemaction: (item: ChartBlock, action: ChartAction) => void;
+		ontextmovestart?: (event: PointerEvent, text: TypesetBlock) => void;
+		ontextresizestart?: (event: PointerEvent, text: TypesetBlock, side: TextSide) => void;
+		ontextrotatestart?: (event: PointerEvent, text: TypesetBlock) => void;
+		ontextturn?: (text: TypesetBlock) => void;
+		ontextkeydown?: (event: KeyboardEvent, text: TypesetBlock) => void;
+		ontextstyle?: (text: TypesetBlock, style: TextStyle) => void;
+		ontextremove?: (text: TypesetBlock) => void;
+		ontextedit?: (text: TypesetBlock) => void;
+		ontextcommit?: (text: TypesetBlock, value: string) => void;
+		ontextheight?: (text: TypesetBlock, height: number) => void;
 		/** A text is told the chart to read, or with null to read the nearest again. */
-		ontextbind?: (text: DocText, chartId: string | null) => void;
+		ontextbind?: (text: TypesetBlock, chartId: string | null) => void;
 		/** A table lists something else, or in more or fewer rows. */
-		ontexttable?: (text: DocText, table: TableSpec) => void;
+		ontexttable?: (text: TypesetBlock, table: TableSpec) => void;
 	}
 
 	let {
@@ -145,8 +145,9 @@
 	const current = $derived(role === 'current');
 	const size = $derived(pageSize(page.orientation));
 	const margin = $derived(contentBox(page.orientation));
-	const count = $derived(page.items.length);
-	const texts = $derived(page.texts ?? []);
+	const charts = $derived(chartsOf(page));
+	const count = $derived(charts.length);
+	const texts = $derived(typesetOf(page));
 	const blank = $derived(isBlank(page));
 	/** "2 charts", and "2 charts, 1 text" once the page has text. */
 	const chartWord = $derived(
@@ -164,7 +165,7 @@
 	 * another page it would be out of sight.
 	 */
 	const lifted = $derived(
-		[...page.items, ...texts].some(
+		page.blocks.some(
 			(item) => item.id === drag?.itemId || item.id === settlingId || item.id === returningId
 		)
 	);
@@ -185,14 +186,15 @@
 	const readId = $derived.by(() => {
 		if (!current || count < 2) return null;
 		const text = texts.find((it) => it.id === selectedTextId);
-		if (!text || !(text.table || hasFields(text.text) || editingId === text.id)) return null;
+		const asked = text && (text.kind === 'table' || hasFields(text.text) || editingId === text.id);
+		if (!text || !asked) return null;
 		return boundItem(page, text, pages)?.id ?? null;
 	});
 
 	/** Where on the page the chart a text reads is, 0-based; null when it reads none here. */
-	function readIndex(text: DocText): number | null {
+	function readIndex(text: TypesetBlock): number | null {
 		const id = boundItem(page, text, pages)?.id;
-		const at = page.items.findIndex((item) => item.id === id);
+		const at = charts.findIndex((item) => item.id === id);
 		return at < 0 ? null : at;
 	}
 
@@ -201,12 +203,15 @@
 		pages.flatMap((sheet, at) =>
 			sheet.id === page.id
 				? []
-				: sheet.items.map((item, i) => ({ id: item.id, label: `Page ${at + 1} · chart ${i + 1}` }))
+				: chartsOf(sheet).map((item, i) => ({
+						id: item.id,
+						label: `Page ${at + 1} · chart ${i + 1}`
+					}))
 		)
 	);
 
 	/** The id of the chart on another page a text reads, if it reads one there. */
-	function readOther(text: DocText): string | null {
+	function readOther(text: TypesetBlock): string | null {
 		const id = boundItem(page, text, pages)?.id;
 		return id !== undefined && others.some((other) => other.id === id) ? id : null;
 	}
@@ -328,7 +333,7 @@
 		}}
 		onkeydown={handlePaperKeydown}
 	>
-		{#each page.items as item, index (item.id)}
+		{#each charts as item, index (item.id)}
 			{@const dragged = drag?.itemId === item.id && drag.frame ? drag.frame : null}
 			<EditorItem
 				{item}
@@ -358,7 +363,7 @@
 			{@const turned = drag?.itemId === text.id ? drag.rotation : null}
 			<EditorText
 				{text}
-				shown={shownText(page, text, pages)}
+				shown={text.kind === 'text' ? shownText(page, text, pages) : ''}
 				sheet={page}
 				{pages}
 				{others}
@@ -377,9 +382,9 @@
 				editing={current && editingId === text.id}
 				charts={count}
 				reads={readIndex(text)}
-				pinned={page.items.some((item) => item.id === text.chartId)}
+				pinned={charts.some((item) => item.id === text.chartId)}
 				onbind={(bound, chart) =>
-					ontextbind?.(bound, typeof chart === 'number' ? (page.items[chart]?.id ?? null) : chart)}
+					ontextbind?.(bound, typeof chart === 'number' ? (charts[chart]?.id ?? null) : chart)}
 				hintId={textHintId}
 				onmovestart={ontextmovestart}
 				onresizestart={ontextresizestart}

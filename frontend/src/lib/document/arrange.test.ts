@@ -28,10 +28,11 @@ import {
 	type PlacedChart,
 	type TurnHow
 } from './arrange';
+import { chartsOf } from './blocks';
 import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, overlaps, rotateLayout } from './geometry';
 import type {
 	ChartSnapshot,
-	DocItem,
+	ChartBlock,
 	DocPage,
 	PageLayout,
 	PageOrientation,
@@ -67,9 +68,10 @@ function snapshot(projection: 'stereographic' | 'pinhole', aspect: number): Char
 }
 
 /** A stereo chart (a disc), not placed yet. */
-function S(): DocItem {
+function S(): ChartBlock {
 	nextId += 1;
 	return {
+		kind: 'chart',
 		id: `s${nextId}`,
 		chart: snapshot('stereographic', 1),
 		frame: { x: 0, y: 0, w: 1, h: 1 }
@@ -77,16 +79,17 @@ function S(): DocItem {
 }
 
 /** A pinhole chart of `aspect`, not placed yet. */
-function P(aspect: number): DocItem {
+function P(aspect: number): ChartBlock {
 	nextId += 1;
 	return {
+		kind: 'chart',
 		id: `p${nextId}`,
 		chart: snapshot('pinhole', aspect),
 		frame: { x: 0, y: 0, w: aspect, h: 1 }
 	};
 }
 
-function item(chart: DocItem): ArrangeItem {
+function item(chart: ChartBlock): ArrangeItem {
 	return { kind: chartKind(chart.chart), aspect: chart.chart.aspect };
 }
 
@@ -108,13 +111,13 @@ function applied(
 		belowMin?: boolean;
 	},
 	orientation = page.orientation,
-	added?: DocItem
+	added?: ChartBlock
 ): Laid {
 	const next: Laid = {
 		id: page.id,
 		orientation,
-		items: plan.items.map(({ index, frame }) => ({
-			...(index < 0 ? added! : page.items[index]),
+		blocks: plan.items.map(({ index, frame }) => ({
+			...(index < 0 ? added! : chartsOf(page)[index]),
 			frame
 		}))
 	};
@@ -127,12 +130,12 @@ function applied(
 
 function empty(orientation: PageOrientation = 'portrait'): DocPage {
 	nextId += 1;
-	return { id: `page${nextId}`, orientation, items: [] };
+	return { id: `page${nextId}`, orientation, blocks: [] };
 }
 
 /** A page of `charts` laid out from scratch. */
-function laid(orientation: PageOrientation, charts: DocItem[]): Laid {
-	const page = { ...empty(orientation), items: charts };
+function laid(orientation: PageOrientation, charts: ChartBlock[]): Laid {
+	const page = { ...empty(orientation), blocks: charts };
 	return { ...applied(page, arrangePage(page)), meta: arrange(orientation, charts.map(item)) };
 }
 
@@ -151,7 +154,7 @@ interface Added {
 }
 
 /** Add to PDF on `pages`, as the store does it. */
-function add(pages: DocPage[], chart: DocItem, now?: () => number): Added {
+function add(pages: DocPage[], chart: ChartBlock, now?: () => number): Added {
 	const plan = planAdd(pages, item(chart), now);
 	const after = pages.slice();
 	const index = plan.pageIndex ?? pages.length;
@@ -165,8 +168,8 @@ function add(pages: DocPage[], chart: DocItem, now?: () => number): Added {
 const near = (a: number, b: number, tol = 0.15) => Math.abs(a - b) <= tol;
 const cx = (f: Rect) => f.x + f.w / 2;
 const cy = (f: Rect) => f.y + f.h / 2;
-const frames = (page: DocPage) => page.items.map((it) => it.frame);
-const widths = (page: DocPage) => page.items.map((it) => it.frame.w);
+const frames = (page: DocPage) => chartsOf(page).map((it) => it.frame);
+const widths = (page: DocPage) => chartsOf(page).map((it) => it.frame.w);
 
 function expectNear(actual: number, expected: number, tol = 0.15) {
 	expect(Math.abs(actual - expected), `${actual} vs ${expected}`).toBeLessThanOrEqual(tol);
@@ -176,8 +179,8 @@ function expectFrame(actual: Rect, expected: Rect, tol = 0.15) {
 	for (const k of ['x', 'y', 'w', 'h'] as const) expectNear(actual[k], expected[k], tol);
 }
 
-function byKind(page: DocPage, kind: 'S' | number): DocItem[] {
-	return page.items.filter((it) =>
+function byKind(page: DocPage, kind: 'S' | number): ChartBlock[] {
+	return chartsOf(page).filter((it) =>
 		kind === 'S'
 			? chartKind(it.chart) === 'stereo'
 			: chartKind(it.chart) === 'pinhole' && Math.abs(it.chart.aspect - kind) < 1e-6
@@ -192,7 +195,7 @@ function byKind(page: DocPage, kind: 'S' | number): DocItem[] {
 function expectInvariants(page: Laid, { centred = true } = {}) {
 	const B = contentBox(page.orientation);
 	const fr = frames(page);
-	page.items.forEach((it, i) => {
+	chartsOf(page).forEach((it, i) => {
 		const f = fr[i];
 		const inside =
 			f.x >= B.x - 1e-6 &&
@@ -221,7 +224,7 @@ function expectInvariants(page: Laid, { centred = true } = {}) {
 		expect(near(y0 - B.y, B.y + B.h - y1, 0.01), 'block not centred down').toBe(true);
 	}
 	const sizes = new Map<string, number>();
-	for (const it of page.items) {
+	for (const it of chartsOf(page)) {
 		const k = typeKey(item(it));
 		const w = sizes.get(k);
 		if (w !== undefined) expectNear(it.frame.w, w, 0.01);
@@ -231,9 +234,17 @@ function expectInvariants(page: Laid, { centred = true } = {}) {
 
 /** The same charts at the same frames, to 1e-9. */
 function expectSamePage(a: DocPage, b: DocPage) {
-	expect(b.items.map((it) => it.id).sort()).toEqual(a.items.map((it) => it.id).sort());
-	for (const it of a.items) {
-		const other = b.items.find((x) => x.id === it.id)!.frame;
+	expect(
+		chartsOf(b)
+			.map((it) => it.id)
+			.sort()
+	).toEqual(
+		chartsOf(a)
+			.map((it) => it.id)
+			.sort()
+	);
+	for (const it of chartsOf(a)) {
+		const other = chartsOf(b).find((x) => x.id === it.id)!.frame;
 		for (const k of ['x', 'y', 'w', 'h'] as const) {
 			expect(Math.abs(other[k] - it.frame[k])).toBeLessThan(1e-9);
 		}
@@ -248,7 +259,7 @@ function lcg(seed: number) {
 
 const ASPECTS = [1.61, 16 / 9, 3, 0.6, 0.4, 2.35, 1.3, 2, 1];
 
-function randomCharts(rnd: () => number, n: number): DocItem[] {
+function randomCharts(rnd: () => number, n: number): ChartBlock[] {
 	return Array.from({ length: n }, () =>
 		rnd() < 0.4 ? S() : P(ASPECTS[Math.floor(rnd() * ASPECTS.length)])
 	);
@@ -357,18 +368,18 @@ describe('the arranger: building blocks', () => {
 
 	it('finds the largest free spot, a gutter clear of every chart', () => {
 		const disc = { x: 12, y: 12, w: 120, h: 120 };
-		const spot = freeSpot({ orientation: 'portrait', items: [{ frame: disc }] }, 3)!;
+		const spot = freeSpot({ orientation: 'portrait', blocks: [{ ...S(), frame: disc }] }, 3)!;
 		expectFrame(spot, { x: 12, y: 180.5, w: 186, h: 62 }, 1e-9);
 		// Under a full-width disc only 81 mm are left: a disc of 81 fits, centred there.
 		const full = { x: 12, y: 12, w: 186, h: 186 };
-		expectFrame(freeSpot({ orientation: 'portrait', items: [{ frame: full }] }, 1)!, {
+		expectFrame(freeSpot({ orientation: 'portrait', blocks: [{ ...S(), frame: full }] }, 1)!, {
 			x: 64.5,
 			y: 204,
 			w: 81,
 			h: 81
 		});
 		const page = { x: 12, y: 12, w: 186, h: 273 };
-		expect(freeSpot({ orientation: 'portrait', items: [{ frame: page }] }, 1)).toBeNull();
+		expect(freeSpot({ orientation: 'portrait', blocks: [{ ...S(), frame: page }] }, 1)).toBeNull();
 	});
 });
 
@@ -398,8 +409,8 @@ describe('the arranger: pages from scratch', () => {
 	});
 
 	it('S1: a disc at 186, centred', () => {
-		expectFrame(pages.S1.items[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
-		expectNear(cy(pages.S1.items[0].frame), 148.5);
+		expectFrame(chartsOf(pages.S1)[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
+		expectNear(cy(chartsOf(pages.S1)[0].frame), 148.5);
 	});
 
 	it('S2: two discs stacked at 133.5', () => {
@@ -427,7 +438,7 @@ describe('the arranger: pages from scratch', () => {
 	});
 
 	it('S6, S7: pinholes at the full width', () => {
-		expectFrame(pages.S6.items[0].frame, { x: 12, y: 90.73, w: 186, h: 115.53 });
+		expectFrame(chartsOf(pages.S6)[0].frame, { x: 12, y: 90.73, w: 186, h: 115.53 });
 		widths(pages.S7).forEach((w) => expectNear(w, 186));
 	});
 
@@ -442,7 +453,7 @@ describe('the arranger: pages from scratch', () => {
 		const { metrics } = pages.S9.meta!;
 		expect(metrics.lr).toBeGreaterThan(0.99);
 		expect(metrics.tb).toBeGreaterThan(0.99);
-		expect(chartKind(pages.S9.items[1].chart)).toBe('stereo');
+		expect(chartKind(chartsOf(pages.S9)[1].chart)).toBe('stereo');
 		widths(pages.S9).forEach((w) => expectNear(w, 116.4));
 	});
 
@@ -496,9 +507,9 @@ describe('the arranger: pages from scratch', () => {
 	});
 
 	it('X3: landscape, a disc beside a 2:5, nothing shrinks', () => {
-		expectNear(pages.X3.items[0].frame.w, 186);
-		expectNear(pages.X3.items[1].frame.h, 186);
-		expectNear(pages.X3.items[1].frame.w, 74.4);
+		expectNear(chartsOf(pages.X3)[0].frame.w, 186);
+		expectNear(chartsOf(pages.X3)[1].frame.h, 186);
+		expectNear(chartsOf(pages.X3)[1].frame.w, 74.4);
 	});
 
 	it('gives identical charts one size: no hero layouts', () => {
@@ -527,8 +538,8 @@ describe('the arranger: turning a page', () => {
 	it('S14: two discs in a landscape row become a portrait column, and come back exactly', () => {
 		const [row, column, back] = turns.S14;
 		expect(column.how).toBe('transposed');
-		expectFrame(column.items[0].frame, { x: 38.25, y: 12, w: 133.5, h: 133.5 });
-		expectFrame(column.items[1].frame, { x: 38.25, y: 151.5, w: 133.5, h: 133.5 });
+		expectFrame(chartsOf(column)[0].frame, { x: 38.25, y: 12, w: 133.5, h: 133.5 });
+		expectFrame(chartsOf(column)[1].frame, { x: 38.25, y: 151.5, w: 133.5, h: 133.5 });
 		expect(back.how).toBe('restored');
 		expectSamePage(row, back);
 	});
@@ -548,9 +559,9 @@ describe('the arranger: turning a page', () => {
 	it('T3: S3 on landscape is two stacked beside one (transposed)', () => {
 		const [, landscape] = turns.T3;
 		expect(landscape.how).toBe('transposed');
-		expectFrame(landscape.items[0].frame, { x: 55.5, y: 12, w: 90, h: 90 });
-		expectFrame(landscape.items[1].frame, { x: 55.5, y: 108, w: 90, h: 90 });
-		expectFrame(landscape.items[2].frame, { x: 151.5, y: 60, w: 90, h: 90 });
+		expectFrame(chartsOf(landscape)[0].frame, { x: 55.5, y: 12, w: 90, h: 90 });
+		expectFrame(chartsOf(landscape)[1].frame, { x: 55.5, y: 108, w: 90, h: 90 });
+		expectFrame(chartsOf(landscape)[2].frame, { x: 151.5, y: 60, w: 90, h: 90 });
 	});
 
 	it('T4: a disc over a 3:1 on landscape: the disc 120.9 over the 3:1 177.4 × 59.1', () => {
@@ -564,7 +575,7 @@ describe('the arranger: turning a page', () => {
 		for (const [first, , back] of Object.values(turns)) {
 			expect(back.how).toBe('restored');
 			expectSamePage(first, back);
-			expect(back.items.map((it) => it.id)).toEqual(first.items.map((it) => it.id));
+			expect(chartsOf(back).map((it) => it.id)).toEqual(chartsOf(first).map((it) => it.id));
 			expect(back.layout).toEqual(first.layout);
 		}
 	});
@@ -572,7 +583,15 @@ describe('the arranger: turning a page', () => {
 	it('keeps the invariants and the page’s own charts', () => {
 		for (const [first, once] of Object.values(turns)) {
 			expectInvariants(once);
-			expect(once.items.map((it) => it.id).sort()).toEqual(first.items.map((it) => it.id).sort());
+			expect(
+				chartsOf(once)
+					.map((it) => it.id)
+					.sort()
+			).toEqual(
+				chartsOf(first)
+					.map((it) => it.id)
+					.sort()
+			);
 		}
 	});
 
@@ -587,7 +606,7 @@ describe('the arranger: turning a page', () => {
 		const hand: DocPage = {
 			...empty('portrait'),
 			manual: true,
-			items: [
+			blocks: [
 				{ ...S(), frame: { x: 12, y: 12, w: 120, h: 120 } },
 				{ ...P(3), frame: { x: 12, y: 180.5, w: 186, h: 62 } }
 			]
@@ -629,7 +648,7 @@ describe('the arranger: turning a page', () => {
 			...S(),
 			frame: { x: 12 + (i % 3) * 63, y: 12 + Math.floor(i / 3) * 63, w: 57, h: 57 }
 		}));
-		const page: DocPage = { ...empty('portrait'), manual: true, items: discs };
+		const page: DocPage = { ...empty('portrait'), manual: true, blocks: discs };
 		const plan = turnLayout(page, 'landscape');
 		expect(plan.how).toBe('fallback');
 		expect(plan.manual).toBe(true);
@@ -652,7 +671,7 @@ describe('the arranger: Add to PDF', () => {
 	const handPage = (): DocPage => ({
 		...empty('portrait'),
 		manual: true,
-		items: [{ ...S(), frame: { x: 12, y: 12, w: 120, h: 120 } }]
+		blocks: [{ ...S(), frame: { x: 12, y: 12, w: 120, h: 120 } }]
 	});
 	const docs: Record<string, Added> = {
 		D1: add([laid('portrait', [S()]), empty()], S()),
@@ -687,7 +706,7 @@ describe('the arranger: Add to PDF', () => {
 	it('D1: a disc takes the empty page, alone at 186', () => {
 		expect(docs.D1.index).toBe(1);
 		expect(docs.D1.newPage).toBe(false);
-		expectFrame(docs.D1.after[1].items[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
+		expectFrame(chartsOf(docs.D1.after[1])[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
 	});
 
 	it('D2: a second disc joins: two discs at 133.5 on page 1', () => {
@@ -700,19 +719,19 @@ describe('the arranger: Add to PDF', () => {
 	it('D3, D4, D13: a new page', () => {
 		for (const id of ['D3', 'D4', 'D13']) expect(docs[id].newPage, id).toBe(true);
 		expect(docs.D3.after[1].orientation).toBe('portrait');
-		expectFrame(docs.D3.after[1].items[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
+		expectFrame(chartsOf(docs.D3.after[1])[0].frame, { x: 12, y: 55.5, w: 186, h: 186 });
 		expect(docs.D4.after[1].orientation).toBe('portrait');
 	});
 
 	it('D13: the page Add opens for a 3:1 is landscape, the strip at 273 × 91', () => {
 		const page = docs.D13.after[1];
 		expect(page.orientation).toBe('landscape');
-		expectFrame(page.items[0].frame, { x: 12, y: 59.5, w: 273, h: 91 });
+		expectFrame(chartsOf(page)[0].frame, { x: 12, y: 59.5, w: 273, h: 91 });
 		expect(docs.D13.plan.q).toBeNull();
 	});
 
 	it('D5: one column at 133.5, the panorama last and lowest', () => {
-		const { items } = docs.D5.after[0];
+		const items = chartsOf(docs.D5.after[0]);
 		expect(items).toHaveLength(3);
 		items.forEach((it) => expectNear(it.frame.w, 133.5, 0.2));
 		expect(items[2].chart.aspect).toBe(3);
@@ -721,32 +740,32 @@ describe('the arranger: Add to PDF', () => {
 	});
 
 	it('D6: the disc keeps 186 and moves up, the panorama under it, page 2 stays empty', () => {
-		const before = docs.D6.before[0].items[0].frame;
+		const before = chartsOf(docs.D6.before[0])[0].frame;
 		const [d, p] = frames(docs.D6.after[0]);
 		expectFrame(d, { x: 12, y: 21.5, w: 186, h: 186 });
 		expect(d.y).toBeLessThan(before.y);
 		expectFrame(p, { x: 12, y: 213.5, w: 186, h: 62 });
-		expect(docs.D6.after[1].items).toHaveLength(0);
+		expect(chartsOf(docs.D6.after[1])).toHaveLength(0);
 		expect(docs.D6.plan).toMatchObject({ q: 1, relaid: true });
 	});
 
 	it('D7: the 1.61 takes the empty page (0.885 < 0.90)', () => {
 		expect(docs.D7.index).toBe(1);
-		expectFrame(docs.D7.after[1].items[0].frame, { x: 12, y: 90.73, w: 186, h: 115.53 });
+		expectFrame(chartsOf(docs.D7.after[1])[0].frame, { x: 12, y: 90.73, w: 186, h: 115.53 });
 	});
 
 	it('D8: a 16:9 joins the disc page at 0.919, both 170.9 wide', () => {
 		expect(docs.D8.index).toBe(0);
 		expectNear(docs.D8.plan.q!, 0.919, 0.001);
 		widths(docs.D8.after[0]).forEach((w) => expectNear(w, 170.9));
-		expect(docs.D8.after[1].items).toHaveLength(0);
+		expect(chartsOf(docs.D8.after[1])).toHaveLength(0);
 	});
 
 	it('D9: landscape, the 2:5 beside the disc, nothing shrinks', () => {
 		const [d, p] = frames(docs.D9.after[0]);
 		expectFrame(d, { x: 15.3, y: 12, w: 186, h: 186 });
 		expectFrame(p, { x: 207.3, y: 12, w: 74.4, h: 186 });
-		expect(docs.D9.after[1].items).toHaveLength(0);
+		expect(chartsOf(docs.D9.after[1])).toHaveLength(0);
 	});
 
 	it('D10: no empty page, the 1.61 joins at 0.885', () => {
@@ -762,20 +781,20 @@ describe('the arranger: Add to PDF', () => {
 
 	it('D12: a hand-arranged page: nothing moves, the 3:1 takes the free band', () => {
 		const after = docs.D12.after[0];
-		expect(after.items[0].frame).toEqual(docs.D12.before[0].items[0].frame);
+		expect(chartsOf(after)[0].frame).toEqual(chartsOf(docs.D12.before[0])[0].frame);
 		expect(after.manual).toBe(true);
 		expect(after.layout).toBeUndefined();
-		expectFrame(after.items[1].frame, { x: 12, y: 180.5, w: 186, h: 62 });
+		expectFrame(chartsOf(after)[1].frame, { x: 12, y: 180.5, w: 186, h: 62 });
 		expect(docs.D12.plan).toMatchObject({ q: 1, relaid: false });
 	});
 
 	it('opens a landscape page for a wide pinhole, a portrait one for anything else', () => {
-		const opened = (chart: DocItem) => add([], chart);
+		const opened = (chart: ChartBlock) => add([], chart);
 		for (const aspect of [1.01, 1.61, 16 / 9, 3]) {
 			const r = opened(P(aspect));
 			expect(r.newPage).toBe(true);
 			expect(r.after[0].orientation, `${aspect}`).toBe('landscape');
-			expectFrame(r.after[0].items[0].frame, aloneFrame(aspect, 'landscape'), 1e-9);
+			expectFrame(chartsOf(r.after[0])[0].frame, aloneFrame(aspect, 'landscape'), 1e-9);
 		}
 		for (const chart of [S(), P(1), P(0.6), P(0.4)]) {
 			expect(opened(chart).after[0].orientation, chart.id).toBe('portrait');
@@ -786,7 +805,7 @@ describe('the arranger: Add to PDF', () => {
 		const r = add([laid('portrait', [S(), S()]), empty('portrait')], P(3));
 		expect(r.index).toBe(1);
 		expect(r.after[1].orientation).toBe('portrait');
-		expectFrame(r.after[1].items[0].frame, { x: 12, y: 117.5, w: 186, h: 62 });
+		expectFrame(chartsOf(r.after[1])[0].frame, { x: 12, y: 117.5, w: 186, h: 62 });
 	});
 
 	it('gates against a portrait page when no empty page waits, even for a wide pinhole', () => {
@@ -800,7 +819,7 @@ describe('the arranger: Add to PDF', () => {
 	it('caps a tall chart on a page of its own by the content height', () => {
 		const r = add([], P(0.5));
 		expect(r.after[0].orientation).toBe('portrait');
-		expectFrame(r.after[0].items[0].frame, { x: 36.75, y: 12, w: 136.5, h: 273 }, 1e-9);
+		expectFrame(chartsOf(r.after[0])[0].frame, { x: 36.75, y: 12, w: 136.5, h: 273 }, 1e-9);
 	});
 
 	it('puts a second disc beside the first on a landscape page', () => {
@@ -856,7 +875,7 @@ describe('the arranger: Add to PDF', () => {
 		const six = laid('portrait', Array.from({ length: 6 }, S));
 		const tree = treeFromFrames(frames(six))!;
 		const items: ArrangeItem[] = [
-			...six.items.map((it) => ({ ...item(it), frame: it.frame })),
+			...chartsOf(six).map((it) => ({ ...item(it), frame: it.frame })),
 			item(S())
 		];
 		const res = arrange('portrait', items, { mode: 'add' });
@@ -922,7 +941,7 @@ describe('the arranger: Add to PDF', () => {
 
 	it('keeps the invariants through a session of random Adds, and is deterministic', () => {
 		const rnd = lcg(11);
-		const run = (charts: DocItem[]) => {
+		const run = (charts: ChartBlock[]) => {
 			let pages: DocPage[] = [empty('landscape')];
 			for (const chart of charts) pages = add(pages, chart, () => 0).after;
 			return pages;
@@ -950,7 +969,7 @@ describe('the arranger: random pages', () => {
 			const b = laid(o, charts);
 			const res = arrange(o, charts.map(item));
 			expectInvariants({ ...a, belowMin: res.belowMin });
-			expect(b.items.map((it) => it.frame)).toEqual(a.items.map((it) => it.frame));
+			expect(chartsOf(b).map((it) => it.frame)).toEqual(chartsOf(a).map((it) => it.frame));
 			expect(b.layout).toEqual(a.layout);
 		}
 	}, 60_000);
@@ -964,7 +983,7 @@ describe('the arranger: random pages', () => {
 			const other: PageOrientation = o === 'portrait' ? 'landscape' : 'portrait';
 			const once = turned(page, other);
 			expectInvariants(once);
-			expect(turned(page, other).items).toEqual(once.items);
+			expect(chartsOf(turned(page, other))).toEqual(chartsOf(once));
 			const back = turned(once, o);
 			expect(back.how).toBe('restored');
 			expectSamePage(page, back);

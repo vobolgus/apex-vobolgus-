@@ -9,6 +9,7 @@
 	import { MAX_PAGES } from '$lib/document/document.svelte';
 	import { pageSize } from '$lib/document/geometry';
 	import { chartCountLabel } from '$lib/document/labels';
+	import { chartsOf, typesetOf } from '$lib/document/blocks';
 	import type { DocPage } from '$lib/document/types';
 
 	interface Props {
@@ -71,7 +72,7 @@
 						class="mini"
 						type="button"
 						aria-current={page.id === currentId ? 'page' : undefined}
-						aria-label="Go to page {index + 1}, {chartCountLabel(page.items.length)}"
+						aria-label="Go to page {index + 1}, {chartCountLabel(chartsOf(page).length)}"
 						title="Page {index + 1}"
 						onclick={() => onselect(page.id)}
 					>
@@ -84,7 +85,7 @@
 								aria-hidden="true"
 							>
 								<rect class="sheet-paper" width={mini.mmW} height={mini.mmH} />
-								{#each page.items as item (item.id)}
+								{#each chartsOf(page) as item (item.id)}
 									{#if item.chart.view.projection === 'stereographic'}
 										<ellipse
 											class="sheet-chart"
@@ -104,7 +105,7 @@
 										/>
 									{/if}
 								{/each}
-								{#each page.texts ?? [] as text (text.id)}
+								{#each typesetOf(page) as text (text.id)}
 									<rect
 										class="sheet-text"
 										x={text.frame.x}

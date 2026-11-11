@@ -29,23 +29,27 @@
 import { viewBasis } from '$lib/math/projection';
 import { pointingToOrientation } from '$lib/math/pointing';
 import { arrangePage, chartKind } from './arrange';
+import { chartsOf, typesetOf } from './blocks';
 import { contentBox, GUTTER_MM } from './geometry';
 import { fullTableHeight } from './table';
 import { LINE_HEIGHT, MM_PER_PT } from './text';
 import type {
+	ChartBlock,
 	ChartKind,
 	ChartSnapshot,
-	DocItem,
 	DocPage,
-	DocText,
+	NewBlock,
 	PageLayout,
 	PageOrientation,
 	PageTemplate,
 	Rect,
 	SkyMark,
+	TableBlock,
 	TableSpec,
+	TextBlock,
 	TextRole,
-	TextStyle
+	TextStyle,
+	TypesetBlock
 } from './types';
 
 export type TemplateId = 'charts' | 'caption' | 'pair' | 'finder' | 'sheet';
@@ -85,8 +89,8 @@ export const TEXT_ROLES: readonly TextRole[] = [
 	'messier'
 ];
 
-/** A text a template puts on a page: a `DocText` yet to get its id. */
-export type LaidText = Omit<DocText, 'id'> & { role: TextRole };
+/** A text or a table a template puts on a page: a block yet to get its id, with its part. */
+export type LaidText = NewBlock<TypesetBlock> & { role: TextRole };
 
 /** A chart on a laid page: one of the page's own, by id, or one the template made. */
 export interface LaidChart {
@@ -281,7 +285,7 @@ interface Context {
 	/** The language it writes in, for a table's own words. */
 	language: TemplateLanguage;
 	/** The table of that part the page has now, if it has one: its rows and its look are kept. */
-	keptTable: (role: TextRole, chartId: string) => DocText | undefined;
+	keptTable: (role: TextRole, chartId: string) => TableBlock | undefined;
 }
 
 /** A text of `role` at (`x`, `y`), `w` wide: the page's own words for that part, else `words`. */
@@ -297,6 +301,7 @@ function textAt(
 	const text = kept?.text ?? words;
 	const set = kept?.style ?? style;
 	const laid: LaidText = {
+		kind: 'text',
 		role,
 		text,
 		style: { ...set },
@@ -397,7 +402,7 @@ function pairPage(ctx: Context, charts: Chart[]): LaidPage {
  * `target` is an object to draw the close-up of; `had` the close-up the sky has
  * already, a chart of the page, kept as it is with the ring that is on the sky.
  */
-function finderPage(ctx: Context, sky: DocItem, target?: CloseUp, had?: DocItem): LaidPage {
+function finderPage(ctx: Context, sky: ChartBlock, target?: CloseUp, had?: ChartBlock): LaidPage {
 	const { title, room } = titled(ctx, ctx.words.titles.finder);
 	const main = chartOf(sky);
 	const made = target && !had ? closeUpChart(sky.chart, target) : undefined;
@@ -490,14 +495,14 @@ function tableAt(
 	const had = ctx.keptTable(role, chartId);
 	const table: TableSpec = {
 		source: role,
-		look: had?.table?.look ?? 'names',
-		rows: had?.table?.rows ?? SHEET_TABLE_ROWS
+		look: had?.table.look ?? 'names',
+		rows: had?.table.rows ?? SHEET_TABLE_ROWS
 	};
 	if (ctx.language !== TEMPLATE_LANGUAGES[0]) table.language = ctx.language;
 	const style = { ...(had?.style ?? TABLE) };
 	return {
+		kind: 'table',
 		role,
-		text: '',
 		style,
 		table,
 		chartId,
@@ -514,7 +519,7 @@ function runs<T>(list: readonly T[], size: number): T[][] {
 	return out;
 }
 
-function chartOf(item: DocItem): Chart {
+function chartOf(item: ChartBlock): Chart {
 	return { id: item.id, kind: chartKind(item.chart), aspect: item.chart.aspect };
 }
 
@@ -528,7 +533,7 @@ function closeUpId(skyId: string): string {
  * is most often one, else the first chart; never a close-up an earlier card made
  * while there is anything else.
  */
-export function finderSky(items: readonly DocItem[]): DocItem | undefined {
+export function finderSky(items: readonly ChartBlock[]): ChartBlock | undefined {
 	const own = items.filter((item) => item.closeUpOf === undefined);
 	const from = own.length > 0 ? own : items;
 	return from.find((item) => chartKind(item.chart) === 'stereo') ?? from[0];
@@ -587,12 +592,12 @@ export function layTemplate(
 	options: TemplateOptions = {}
 ): LaidPage[] {
 	const orientation = options.orientation ?? source.orientation;
-	const items = source.items;
+	const items = chartsOf(source);
 	if (items.length === 0) return [];
 	if (template === 'charts') {
 		// The arranger's own layout of the charts, as Add to PDF would have left them.
 		const order = options.swap ? [...items].reverse() : items;
-		const laid = arrangePage({ id: source.id, orientation, items: order });
+		const laid = arrangePage({ id: source.id, orientation, blocks: order });
 		return [
 			{
 				orientation,
@@ -611,13 +616,16 @@ export function layTemplate(
 		words: WORDS[language],
 		language,
 		keptTable: (role, chartId) =>
-			(source.texts ?? []).find(
-				(it) => it.role === role && it.chartId === chartId && it.table !== undefined
+			typesetOf(source).find(
+				(it): it is TableBlock => it.kind === 'table' && it.role === role && it.chartId === chartId
 			),
 		height: options.height ?? typedLines,
 		kept(role, chartId) {
-			const text = (source.texts ?? []).find(
-				(it) => it.role === role && (chartId === undefined || it.chartId === chartId)
+			const text = typesetOf(source).find(
+				(it): it is TextBlock =>
+					it.kind === 'text' &&
+					it.role === role &&
+					(chartId === undefined || it.chartId === chartId)
 			);
 			if (!text) return null;
 			if (again) return { text: text.text, style: text.style };

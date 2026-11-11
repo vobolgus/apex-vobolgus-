@@ -28,7 +28,7 @@ import {
 	TEXT_SIZES,
 	wrapLines
 } from './text';
-import type { ChartSnapshot, DocItem, DocText } from './types';
+import type { ChartBlock, ChartSnapshot, TextBlock } from './types';
 
 /** Every character one unit wide: a line of width 10 holds 10 of them. */
 const mono = (text: string) => Array.from(text).length;
@@ -57,8 +57,9 @@ function chart(overrides: Partial<ChartSnapshot['view']> = {}): ChartSnapshot {
 	};
 }
 
-function text(overrides: Partial<DocText> = {}): DocText {
+function text(overrides: Partial<TextBlock> = {}): TextBlock {
 	return {
+		kind: 'text',
 		id: 't',
 		text: 'Text',
 		style: { ...DEFAULT_TEXT_STYLE },
@@ -339,36 +340,39 @@ describe('fields', () => {
 	it('reads the chart a text names, else the nearest on its page', () => {
 		const first = chart({ orientation: looking(0, 10) });
 		const second = chart({ orientation: looking(0, 70) });
-		const items: DocItem[] = [
-			{ id: 'a', chart: first, frame: { x: 12, y: 12, w: 80, h: 80 } },
-			{ id: 'b', chart: second, frame: { x: 118, y: 12, w: 80, h: 80 } }
+		const items: ChartBlock[] = [
+			{ kind: 'chart' as const, id: 'a', chart: first, frame: { x: 12, y: 12, w: 80, h: 80 } },
+			{ kind: 'chart' as const, id: 'b', chart: second, frame: { x: 118, y: 12, w: 80, h: 80 } }
 		];
 		const under = (x: number, w = 60) => text({ text: '{lat}', frame: { x, y: 98, w, h: 6 } });
 		// A caption reads the chart it is put under.
-		expect(boundItem({ items }, under(20))?.id).toBe('a');
-		expect(boundItem({ items }, under(130))?.id).toBe('b');
-		expect(shownText({ items }, under(130))).toBe('70° N');
+		expect(boundItem({ blocks: items }, under(20))?.id).toBe('a');
+		expect(boundItem({ blocks: items }, under(130))?.id).toBe('b');
+		expect(shownText({ blocks: items }, under(130))).toBe('70° N');
 		// Under both, as near to each: the one whose centre is nearer, then the earlier.
-		expect(boundItem({ items }, under(100, 98))?.id).toBe('b');
-		expect(boundItem({ items }, under(12, 186))?.id).toBe('a');
+		expect(boundItem({ blocks: items }, under(100, 98))?.id).toBe('b');
+		expect(boundItem({ blocks: items }, under(12, 186))?.id).toBe('a');
 		// Under a short chart, 12 mm below it and 10 mm from the tall one beside: the short one's.
-		const mixed: DocItem[] = [
-			{ id: 'disc', chart: first, frame: { x: 12, y: 12, w: 90, h: 90 } },
-			{ id: 'frame', chart: second, frame: { x: 108, y: 12, w: 90, h: 56 } }
+		const mixed: ChartBlock[] = [
+			{ kind: 'chart' as const, id: 'disc', chart: first, frame: { x: 12, y: 12, w: 90, h: 90 } },
+			{ kind: 'chart' as const, id: 'frame', chart: second, frame: { x: 108, y: 12, w: 90, h: 56 } }
 		];
 		const caption = text({ frame: { x: 112, y: 80, w: 86, h: 6 } });
-		expect(boundItem({ items: mixed }, caption)?.id).toBe('frame');
+		expect(boundItem({ blocks: mixed }, caption)?.id).toBe('frame');
 		// Beside a chart, with the other far below, it is the one beside.
 		const beside = text({ frame: { x: 108, y: 30, w: 60, h: 6 } });
-		const stacked: DocItem[] = [mixed[0], { ...mixed[1], frame: { x: 108, y: 200, w: 90, h: 56 } }];
-		expect(boundItem({ items: stacked }, beside)?.id).toBe('disc');
+		const stacked: ChartBlock[] = [
+			mixed[0],
+			{ ...mixed[1], frame: { x: 108, y: 200, w: 90, h: 56 } }
+		];
+		expect(boundItem({ blocks: stacked }, beside)?.id).toBe('disc');
 		// Told a chart, it reads that one wherever it is, while the chart is on the page.
-		expect(boundItem({ items }, { ...under(20), chartId: 'b' })?.id).toBe('b');
-		expect(boundChart({ items }, { ...under(20), chartId: 'b' })).toBe(second);
-		expect(boundItem({ items }, { ...under(20), chartId: 'gone' })?.id).toBe('a');
-		expect(boundItem({ items: [] }, under(20))).toBeNull();
-		expect(boundChart({ items: [] }, under(20))).toBeNull();
-		expect(shownText({ items: [] }, under(20))).toBe(NO_VALUE);
+		expect(boundItem({ blocks: items }, { ...under(20), chartId: 'b' })?.id).toBe('b');
+		expect(boundChart({ blocks: items }, { ...under(20), chartId: 'b' })).toBe(second);
+		expect(boundItem({ blocks: items }, { ...under(20), chartId: 'gone' })?.id).toBe('a');
+		expect(boundItem({ blocks: [] }, under(20))).toBeNull();
+		expect(boundChart({ blocks: [] }, under(20))).toBeNull();
+		expect(shownText({ blocks: [] }, under(20))).toBe(NO_VALUE);
 	});
 });
 
@@ -376,21 +380,32 @@ describe('a chart on another page', () => {
 	it('is read by a text told its id, when it is given the document to look in', () => {
 		const mine = chart({ orientation: { x: 0, y: 0, z: 0, w: 1 }, stereoFovDeg: 120 });
 		const theirs = chart({ orientation: { x: 0, y: 0, z: 0, w: 1 }, stereoFovDeg: 60 });
-		const own: DocItem[] = [{ id: 'mine', chart: mine, frame: { x: 12, y: 12, w: 80, h: 80 } }];
+		const own: ChartBlock[] = [
+			{ kind: 'chart' as const, id: 'mine', chart: mine, frame: { x: 12, y: 12, w: 80, h: 80 } }
+		];
 		const pages = [
-			{ items: own },
-			{ items: [{ id: 'theirs', chart: theirs, frame: { x: 12, y: 12, w: 80, h: 80 } }] }
+			{ blocks: own },
+			{
+				blocks: [
+					{
+						kind: 'chart' as const,
+						id: 'theirs',
+						chart: theirs,
+						frame: { x: 12, y: 12, w: 80, h: 80 }
+					}
+				]
+			}
 		];
 		const told = text({ text: '{fov}', chartId: 'theirs' });
-		expect(boundItem({ items: own }, told, pages)?.id).toBe('theirs');
-		expect(shownText({ items: own }, told, pages)).toBe('60°');
+		expect(boundItem({ blocks: own }, told, pages)?.id).toBe('theirs');
+		expect(shownText({ blocks: own }, told, pages)).toBe('60°');
 		// Without the document, or told a chart that is nowhere, it reads the nearest on its page.
-		expect(boundItem({ items: own }, told)?.id).toBe('mine');
-		expect(boundItem({ items: own }, text({ chartId: 'gone' }), pages)?.id).toBe('mine');
+		expect(boundItem({ blocks: own }, told)?.id).toBe('mine');
+		expect(boundItem({ blocks: own }, text({ chartId: 'gone' }), pages)?.id).toBe('mine');
 		// One on its own page comes before one of the same id elsewhere, and none is read unasked.
-		expect(boundItem({ items: own }, text({ chartId: 'mine' }), pages)?.id).toBe('mine');
-		expect(boundItem({ items: [] }, text(), pages)).toBeNull();
-		expect(shownText({ items: [] }, told, pages)).toBe('60°');
+		expect(boundItem({ blocks: own }, text({ chartId: 'mine' }), pages)?.id).toBe('mine');
+		expect(boundItem({ blocks: [] }, text(), pages)).toBeNull();
+		expect(shownText({ blocks: [] }, told, pages)).toBe('60°');
 	});
 });
 
@@ -428,7 +443,7 @@ describe('newTextFrame', () => {
 	const box = contentBox('portrait');
 
 	it('goes at the top of an empty page, the width of the content box', () => {
-		expect(newTextFrame({ orientation: 'portrait', items: [] }, 6)).toEqual({
+		expect(newTextFrame({ orientation: 'portrait', blocks: [] }, 6)).toEqual({
 			x: box.x,
 			y: box.y,
 			w: box.w,
@@ -437,8 +452,10 @@ describe('newTextFrame', () => {
 	});
 
 	it('takes the topmost free place: over a chart with room above it', () => {
-		const items = [{ id: 'a', chart: chart(), frame: { x: 42, y: 40, w: 126, h: 126 } }];
-		expect(newTextFrame({ orientation: 'portrait', items }, 6)).toEqual({
+		const items = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 42, y: 40, w: 126, h: 126 } }
+		];
+		expect(newTextFrame({ orientation: 'portrait', blocks: items }, 6)).toEqual({
 			x: box.x,
 			y: box.y,
 			w: box.w,
@@ -446,7 +463,7 @@ describe('newTextFrame', () => {
 		});
 		// With a text there already, the next goes under it: a gutter clear, still over the chart.
 		const texts = [text({ frame: { x: 12, y: 12, w: 186, h: 6 } })];
-		expect(newTextFrame({ orientation: 'portrait', items, texts }, 6)).toEqual({
+		expect(newTextFrame({ orientation: 'portrait', blocks: [...items, ...texts] }, 6)).toEqual({
 			x: box.x,
 			y: 24,
 			w: box.w,
@@ -455,8 +472,10 @@ describe('newTextFrame', () => {
 	});
 
 	it('goes beside a chart that holds the top, as wide as the room there', () => {
-		const items = [{ id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } }];
-		expect(newTextFrame({ orientation: 'portrait', items }, 6)).toEqual({
+		const items = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } }
+		];
+		expect(newTextFrame({ orientation: 'portrait', blocks: items }, 6)).toEqual({
 			x: 108,
 			y: box.y,
 			w: 90,
@@ -465,32 +484,38 @@ describe('newTextFrame', () => {
 	});
 
 	it('goes under a chart across the top, and passes by a place too narrow or too low', () => {
-		const across = [{ id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 186, h: 186 } }];
-		expect(newTextFrame({ orientation: 'portrait', items: across }, 6)).toEqual({
+		const across = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 186, h: 186 } }
+		];
+		expect(newTextFrame({ orientation: 'portrait', blocks: across }, 6)).toEqual({
 			x: box.x,
 			y: 204,
 			w: box.w,
 			h: 6
 		});
 		// 30 mm beside the chart is no place for a text; 4 mm over it is not 6.
-		const narrow = [{ id: 'a', chart: chart(), frame: { x: 12, y: 22, w: 150, h: 150 } }];
-		expect(newTextFrame({ orientation: 'portrait', items: narrow }, 6).y).toBe(178);
-		expect(newTextFrame({ orientation: 'portrait', items: narrow }, 3).y).toBe(box.y);
+		const narrow = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 12, y: 22, w: 150, h: 150 } }
+		];
+		expect(newTextFrame({ orientation: 'portrait', blocks: narrow }, 6).y).toBe(178);
+		expect(newTextFrame({ orientation: 'portrait', blocks: narrow }, 3).y).toBe(box.y);
 	});
 
 	it('keeps clear of what a turned text takes up', () => {
 		// A line down the left margin: 6 mm wide on the page, the height of the box.
 		const texts = [text({ frame: { x: 12 - 133.5, y: 145.5, w: 273, h: 6 }, rotation: -90 })];
 		expect(textBounds(texts[0])).toMatchObject({ x: 12, y: 12, w: 6, h: 273 });
-		const frame = newTextFrame({ orientation: 'portrait', items: [], texts }, 6);
+		const frame = newTextFrame({ orientation: 'portrait', blocks: texts }, 6);
 		expect(frame.x).toBeCloseTo(24);
 		expect(frame.y).toBe(box.y);
 		expect(frame.w).toBeCloseTo(box.w - 12);
 	});
 
 	it('goes at the top, over what is there, on a page with no room', () => {
-		const items = [{ id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 186, h: 273 } }];
-		expect(newTextFrame({ orientation: 'portrait', items }, 6)).toEqual({
+		const items = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 186, h: 273 } }
+		];
+		expect(newTextFrame({ orientation: 'portrait', blocks: items }, 6)).toEqual({
 			x: box.x,
 			y: box.y,
 			w: box.w,
@@ -589,16 +614,16 @@ describe('turning a text', () => {
 	});
 
 	it('reads the chart nearest to what it takes up', () => {
-		const items: DocItem[] = [
-			{ id: 'a', chart: chart(), frame: { x: 30, y: 12, w: 80, h: 80 } },
-			{ id: 'b', chart: chart(), frame: { x: 30, y: 200, w: 80, h: 80 } }
+		const items: ChartBlock[] = [
+			{ kind: 'chart' as const, id: 'a', chart: chart(), frame: { x: 30, y: 12, w: 80, h: 80 } },
+			{ kind: 'chart' as const, id: 'b', chart: chart(), frame: { x: 30, y: 200, w: 80, h: 80 } }
 		];
 		// Its frame is level with the first chart; turned, it stands beside the second.
 		const upright = text({ frame: { x: 114, y: 150, w: 180, h: 6 } });
 		expect(textBounds({ ...upright, rotation: 90 })).toMatchObject({ y: 63, h: 180 });
 		const low = text({ frame: { x: 30, y: 237, w: 180, h: 6 }, rotation: 90 });
 		expect(textBounds(low).y).toBeCloseTo(150);
-		expect(boundItem({ items }, low)?.id).toBe('b');
+		expect(boundItem({ blocks: items }, low)?.id).toBe('b');
 	});
 });
 
