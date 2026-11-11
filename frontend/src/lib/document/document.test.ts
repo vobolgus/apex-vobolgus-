@@ -13,6 +13,7 @@ import {
 	THUMB_BUDGET_CHARS,
 	type DocumentStorage
 } from './document.svelte';
+import { layTemplate } from './templates';
 import { DEFAULT_TEXT_STYLE, MAX_TEXT_CHARS, MAX_TEXTS_PER_PAGE, MIN_TEXT_WIDTH_MM } from './text';
 import type { ChartSnapshot, DocItem, DocPage, DocText, Rect } from './types';
 
@@ -1219,6 +1220,259 @@ describe('DocumentStore: copy and paste', () => {
 		}
 		expect(doc.pasteBlock('nowhere', text)).toBeNull();
 		expect(doc.copyBlock('gone')).toBeNull();
+	});
+});
+
+describe('DocumentStore: templates', () => {
+	/** A plain copy, to compare with later. */
+	const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+	const style = { ...DEFAULT_TEXT_STYLE };
+
+	/** A page with a disc and a frame, a text of its owner's and a title an earlier template left. */
+	function mixed() {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const page = doc.pages[0];
+		page.items.push(
+			{
+				id: 'disc',
+				chart: chart(),
+				frame: { x: 12, y: 12, w: 90, h: 90 },
+				thumb: 'data:image/png;base64,AA'
+			},
+			{ id: 'frame', chart: chart(1.6), frame: { x: 108, y: 12, w: 90, h: 56.25 } }
+		);
+		const own = doc.addText(pageId, {
+			text: 'Mine',
+			style,
+			frame: { x: 12, y: 250, w: 80, h: 6 }
+		})!;
+		doc.addText(pageId, {
+			text: 'Сборная Москвы',
+			style,
+			frame: { x: 12, y: 270, w: 80, h: 6 },
+			role: 'title'
+		});
+		doc.addPage('landscape');
+		return { doc, pageId, own };
+	}
+
+	it('lays a page out as a template says: its charts placed, its text put there', () => {
+		const { doc, pageId, own } = mixed();
+		const laid = layTemplate('pair', doc.pages[0]);
+		const undo = doc.layPage(pageId, laid);
+		expect(undo).not.toBeNull();
+		expect(doc.pageCount).toBe(2);
+		const [page] = doc.pages;
+		expect(page.id).toBe(pageId);
+		expect(page.items.map((it) => [it.id, it.frame])).toEqual(
+			laid[0].charts.map((placed) => [placed.id, placed.frame])
+		);
+		// The charts are the same charts: nothing of them is lost on the way.
+		expect(page.items[0]).toMatchObject({ id: 'disc', thumb: 'data:image/png;base64,AA' });
+		// The owner's text stays where it was; the old title goes, its words kept by the new one.
+		expect(page.texts!.map((text) => [text.role, text.text])).toEqual([
+			[undefined, 'Mine'],
+			['title', 'Сборная Москвы'],
+			['caption', 'Latitude {lat} · sidereal time {lst}'],
+			['caption', 'Centre {ra}, {dec} · field {fov}']
+		]);
+		expect(page.texts![0]).toMatchObject({ id: own, frame: { x: 12, y: 250, w: 80, h: 6 } });
+		expect(new Set(page.texts!.map((text) => text.id)).size).toBe(4);
+		expect(page.texts![2].chartId).toBe('disc');
+		expect(page.manual).toBe(true);
+		expect(page.layout).toBeUndefined();
+	});
+
+	it("puts the charts past a page's places on new pages after it, and Undo takes them back", () => {
+		const { doc, pageId } = mixed();
+		const before = plain(doc.pages[0]);
+		const undo = doc.layPage(
+			pageId,
+			layTemplate('caption', doc.pages[0], { orientation: 'landscape' })
+		)!;
+		expect(doc.pageCount).toBe(3);
+		expect(doc.pages.map((page) => page.items.map((it) => it.id))).toEqual([
+			['disc'],
+			['frame'],
+			[]
+		]);
+		expect(doc.pages.map((page) => page.orientation)).toEqual([
+			'landscape',
+			'landscape',
+			'landscape'
+		]);
+		// The owner's text is on the first only; each has its title and caption.
+		expect(doc.pages[0].texts!.map((text) => text.role)).toEqual([undefined, 'title', 'caption']);
+		expect(doc.pages[1].texts!.map((text) => text.role)).toEqual(['title', 'caption']);
+		expect(doc.chartCount).toBe(2);
+		for (const page of doc.pages.slice(0, 2)) {
+			for (const item of page.items) expectInside(item.frame, page);
+		}
+
+		expect(undo()).toBe(true);
+		expect(doc.pageCount).toBe(2);
+		expect(plain(doc.pages[0])).toEqual(before);
+		expect(undo()).toBe(false);
+	});
+
+	it('leaves a page of charts alone to the arranger again', () => {
+		const { doc, pageId, own } = mixed();
+		doc.removeText(pageId, own);
+		doc.layPage(pageId, layTemplate('charts', doc.pages[0]));
+		const [page] = doc.pages;
+		expect(page.texts).toBeUndefined();
+		expect(page.manual).toBeUndefined();
+		expect(page.layout).toBeDefined();
+		// With the owner's text still on it, the page stays hand-arranged.
+		const kept = mixed();
+		kept.doc.layPage(kept.pageId, layTemplate('charts', kept.doc.pages[0]));
+		expect(kept.doc.pages[0].texts!.map((text) => text.text)).toEqual(['Mine']);
+		expect(kept.doc.pages[0].manual).toBe(true);
+	});
+
+	it('does nothing with a layout that is not of this page, or past the page limit', () => {
+		const { doc, pageId } = mixed();
+		const laid = layTemplate('caption', doc.pages[0]);
+		const before = plain(doc.pages);
+		expect(doc.layPage('nowhere', laid)).toBeNull();
+		expect(doc.layPage(pageId, [])).toBeNull();
+		expect(doc.layPage(pageId, [laid[0]])).toBeNull();
+		expect(doc.layPage(pageId, [laid[0], laid[0]])).toBeNull();
+		const stranger = { ...laid[1], charts: [{ id: 'other', frame: laid[1].charts[0].frame }] };
+		expect(doc.layPage(pageId, [laid[0], stranger])).toBeNull();
+		while (doc.canAddPage) doc.addPage();
+		expect(doc.layPage(pageId, laid)).toBeNull();
+		expect(plain(doc.pages.slice(0, 2))).toEqual(before);
+		// One page for one page needs no room.
+		expect(doc.layPage(pageId, layTemplate('pair', doc.pages[0]))).not.toBeNull();
+	});
+
+	it('adds the close-up a finder card makes, rings the sky, and replaces it the next time', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const [page] = doc.pages;
+		page.items.push({ id: 'sky', chart: chart(), frame: { x: 12, y: 55.5, w: 186, h: 186 } });
+		const pleiades = { name: 'M 45 · Pleiades', raDeg: 56.85, decDeg: 24.12, fovDeg: 20 };
+		const undo = doc.layPage(pageId, layTemplate('finder', page, { closeUp: pleiades }))!;
+		expect(doc.pageCount).toBe(1);
+		expect(doc.chartCount).toBe(2);
+		const card = doc.pages[0];
+		const [sky, close] = card.items;
+		expect(sky.id).toBe('sky');
+		expect(sky.chart.marks).toEqual([{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }]);
+		// The close-up is a chart like any other, with an id of its own, known as this sky's.
+		expect(close.id).not.toBe('close-up-of-sky');
+		expect(close).toMatchObject({ closeUpOf: 'sky', chart: { aspect: 1.5 } });
+		expect(close.chart.view).toMatchObject({ projection: 'pinhole', pinholeFovDeg: 20 });
+		expect(close.chart.marks).toBeUndefined();
+		expectInside(close.frame, card);
+		// Its caption reads it, by the id it was given.
+		expect(card.texts!.map((text) => [text.text, text.chartId])).toEqual([
+			['Finder card', undefined],
+			['Latitude {lat} · sidereal time {lst}', 'sky'],
+			['M 45 · Pleiades · field {fov}', close.id]
+		]);
+
+		// Another object: the old close-up goes, the ring moves, nothing piles up.
+		const andromeda = { name: 'M 31 · Andromeda Galaxy', raDeg: 10.68, decDeg: 41.27, fovDeg: 40 };
+		const laid = layTemplate('finder', doc.pages[0], { closeUp: andromeda });
+		expect(laid[0].dropped).toEqual([close.id]);
+		expect(doc.layPage(pageId, laid)).not.toBeNull();
+		expect(doc.chartCount).toBe(2);
+		expect(doc.pages[0].items[0].chart.marks).toEqual([
+			{ raDeg: 10.68, decDeg: 41.27, radiusDeg: 20 }
+		]);
+		expect(doc.pages[0].items[1].chart.view.pinholeFovDeg).toBe(40);
+		expect(doc.pages[0].items[1].id).not.toBe(close.id);
+		expect(doc.pages[0].texts!.map((text) => text.role)).toEqual(['title', 'caption', 'caption']);
+
+		// Laid out as anything else, the ring goes; the close-up stays, a chart of the page.
+		doc.layPage(pageId, layTemplate('charts', doc.pages[0]));
+		expect(doc.pages[0].items.every((item) => item.chart.marks === undefined)).toBe(true);
+		expect(doc.pages[0].items).toHaveLength(2);
+
+		// The first Undo is of the first card: it no longer applies to what the page is now...
+		// but it does put the page back as it was before it, which is what it promises.
+		expect(undo()).toBe(true);
+		expect(doc.pages[0].items.map((item) => item.id)).toEqual(['sky']);
+		expect(doc.pages[0].items[0].chart.marks).toBeUndefined();
+	});
+
+	it('makes no close-up past the chart limit, and reads marks and close-ups back from a save', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const pageId = doc.addPage();
+		doc.pages[0].items.push({ id: 'sky', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } });
+		const closeUp = { name: 'M 45', raDeg: 56.85, decDeg: 24.12, fovDeg: 20 };
+		doc.layPage(pageId, layTemplate('finder', doc.pages[0], { closeUp }));
+		doc.flush();
+		const again = new DocumentStore(storage);
+		again.load();
+		expect(again.pages[0].items[0].chart.marks).toEqual([
+			{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }
+		]);
+		expect(again.pages[0].items[1].closeUpOf).toBe('sky');
+		// A mark that is no place on the sky is not read.
+		const raw = saved(storage);
+		(raw.pages[0].items[0].chart as { marks: unknown }).marks = [
+			{ raDeg: 1, decDeg: 2, radiusDeg: 3 },
+			{ raDeg: 'east', decDeg: 2, radiusDeg: 3 },
+			{ raDeg: 1, decDeg: 95, radiusDeg: 3 },
+			{ raDeg: 1, decDeg: 2, radiusDeg: 0 },
+			null
+		];
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		const odd = new DocumentStore(storage);
+		odd.load();
+		expect(odd.pages[0].items[0].chart.marks).toEqual([{ raDeg: 1, decDeg: 2, radiusDeg: 3 }]);
+
+		// A document full of charts takes no close-up.
+		const full = new DocumentStore(null);
+		const first = full.addPage();
+		full.pages[0].items.push({ id: 'sky', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } });
+		for (let p = 0; full.chartCount < MAX_CHARTS; p++) {
+			full.addPage();
+			const filler = full.pages[full.pages.length - 1];
+			while (filler.items.length < MAX_ITEMS_PER_PAGE && full.chartCount < MAX_CHARTS) {
+				filler.items.push({
+					id: `f-${p}-${filler.items.length}`,
+					chart: chart(),
+					frame: { x: 12, y: 12, w: 40, h: 40 }
+				});
+			}
+		}
+		expect(full.layPage(first, layTemplate('finder', full.pages[0], { closeUp }))).toBeNull();
+		expect(full.layPage(first, layTemplate('finder', full.pages[0]))).not.toBeNull();
+	});
+
+	it('does not undo once a page it made is gone', () => {
+		const { doc, pageId } = mixed();
+		const undo = doc.layPage(pageId, layTemplate('caption', doc.pages[0]))!;
+		doc.removePage(doc.pages[1].id);
+		expect(undo()).toBe(false);
+	});
+
+	it('saves the part a text plays, and reads back only the parts there are', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const pageId = doc.addPage();
+		doc.addText(pageId, { text: 'T', style, frame: { x: 12, y: 12, w: 80, h: 6 }, role: 'title' });
+		doc.flush();
+		const raw = saved(storage);
+		expect(raw.pages[0].texts![0].role).toBe('title');
+		raw.pages[0].texts!.push({
+			...raw.pages[0].texts![0],
+			id: 'odd',
+			role: 'footnote' as never
+		});
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		const again = new DocumentStore(storage);
+		again.load();
+		expect(again.pages[0].texts!.map((text) => text.role)).toEqual(['title', undefined]);
+		// A copy is its owner's: it plays no part.
+		expect(again.copyBlock(again.pages[0].texts![0].id)).not.toHaveProperty('role');
 	});
 });
 

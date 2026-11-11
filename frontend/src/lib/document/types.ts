@@ -16,6 +16,13 @@ export interface Rect {
 	h: number;
 }
 
+/** A ring on the sky: every point `radiusDeg` from (`raDeg`, `decDeg`). */
+export interface SkyMark {
+	raDeg: number;
+	decDeg: number;
+	radiusDeg: number;
+}
+
 /** Everything needed to draw one chart again: a frozen copy of the preview state. */
 export interface ChartSnapshot {
 	/** Projection, orientation quaternion, fovs, pinhole aspect/height. */
@@ -25,6 +32,8 @@ export interface ChartSnapshot {
 	aspect: number;
 	/** ISO, also the planets' time. */
 	createdAt: string;
+	/** Places ringed on it: where a close-up of this sky looks (a finder card). */
+	marks?: SkyMark[];
 }
 
 export interface DocItem {
@@ -34,6 +43,11 @@ export interface DocItem {
 	frame: Rect;
 	/** PNG data URL of the preview at add time, shown until the vector preview loads. */
 	thumb?: string;
+	/**
+	 * Set on a close-up a finder card made: the chart whose sky it is a part of. Laid
+	 * out as a finder card again, that sky gets a new close-up in place of this one.
+	 */
+	closeUpOf?: string;
 }
 
 export type TextFont = 'serif' | 'sans';
@@ -47,6 +61,12 @@ export interface TextStyle {
 	italic: boolean;
 	align: TextAlign;
 }
+
+/**
+ * The part a text plays on a page a template laid out (`templates.ts`). A caption
+ * and a key belong to a chart (`chartId`).
+ */
+export type TextRole = 'title' | 'caption' | 'header' | 'number' | 'tasks' | 'key';
 
 /**
  * A block of text on a page. Its width is set by hand and its lines wrap to it; the
@@ -64,6 +84,12 @@ export interface DocText {
 	 * absent when upright. The frame is the text's own box, as it is before the turn.
 	 */
 	rotation?: number;
+	/**
+	 * Set on a text a template put there. Laid out again, the page keeps what was
+	 * typed in it for the same part, and drops it where the new template has none;
+	 * a text without one is the page's owner's, and no template touches it.
+	 */
+	role?: TextRole;
 	/** The chart on this page its fields read; the nearest one when absent or gone (`boundItem`). */
 	chartId?: string;
 }

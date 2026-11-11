@@ -8,7 +8,12 @@
  */
 
 import { raDecToUnitVector } from '$lib/math/astronomy';
-import { catalog, type CatalogStar, type ConstellationData } from '$lib/stores.svelte';
+import {
+	catalog,
+	type CatalogStar,
+	type ConstellationData,
+	type MessierObject
+} from '$lib/stores.svelte';
 
 /**
  * Faintest star the preview draws: the backend's default for `/api/catalog/full`,
@@ -87,4 +92,24 @@ export async function loadConstellationBoundaries(): Promise<boolean> {
 	if (!boundaries) return false;
 	catalog.constellationBoundaries = boundaries;
 	return true;
+}
+
+let messierLoad: Promise<boolean> | null = null;
+
+/**
+ * Load the Messier catalogue, once: whoever asks while it is on its way, or after
+ * it came, gets the same answer. A failure is not kept, so the next call tries again.
+ */
+export function loadMessier(): Promise<boolean> {
+	messierLoad ??= fetchJson<MessierObject[]>('/api/catalog/messier', 'Messier catalogue').then(
+		(objects) => {
+			if (!objects) {
+				messierLoad = null;
+				return false;
+			}
+			catalog.messier = objects;
+			return true;
+		}
+	);
+	return messierLoad;
 }

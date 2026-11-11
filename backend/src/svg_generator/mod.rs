@@ -16,7 +16,7 @@ mod grids;
 use self::constellation_renderer::{
     draw_constellation_boundaries, draw_constellation_lines, draw_constellation_names,
 };
-use self::grids::draw_coordinate_grids;
+use self::grids::{draw_coordinate_grids, draw_marks};
 
 #[derive(Debug, Deserialize)]
 pub struct ConstellationJson {
@@ -522,6 +522,9 @@ impl SvgGenerator {
             &project_point,
         );
 
+        // 7. Marked places, over everything else on the sky.
+        draw_marks(&mut svg, &config.marks, px, &project_point);
+
         svg.push_str("</g>");
 
         // 6.1 The sky's edge, 1 preview px wide and inset by half of that, so the
@@ -694,6 +697,7 @@ mod tests {
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
+            marks: vec![],
             print_info: Some(false),
             footer_text: None,
         }
@@ -925,6 +929,50 @@ mod tests {
         assert!(!render(&cfg).contains(boundary));
         cfg.layers.constellation_boundaries = true;
         assert!(render(&cfg).contains(boundary));
+    }
+
+    #[test]
+    fn a_mark_is_a_ring_round_its_place_and_none_when_off_the_chart() {
+        use crate::models::SkyMark;
+        let ring = r##"stroke="#d34b4b""##;
+        let mut cfg = view_config("stereo");
+        assert!(!render(&cfg).contains(ring));
+
+        // The view looks at RA 5.6h on the equator (its `forward`): a ring there is whole.
+        cfg.marks = vec![SkyMark {
+            ra_deg: 5.6 * 15.0,
+            dec_deg: 0.0,
+            radius_deg: 10.0,
+        }];
+        let svg = render(&cfg);
+        let path = elements(&svg)
+            .into_iter()
+            .find(|element| element.contains(ring))
+            .expect("the ring is drawn");
+        let d = attr_text(path, "d").unwrap();
+        assert_eq!(d.matches(" L ").count(), 360, "one unbroken turn");
+        assert_eq!(d.matches('M').count(), 1);
+        // Round the middle of the chart: its points average out there.
+        let numbers: Vec<f32> = d
+            .split_whitespace()
+            .filter_map(|word| word.parse().ok())
+            .collect();
+        let (xs, ys): (Vec<f32>, Vec<f32>) = numbers.chunks(2).map(|p| (p[0], p[1])).unzip();
+        let mean = |values: &[f32]| values.iter().sum::<f32>() / values.len() as f32;
+        let (width, height) = match &cfg.view {
+            Some(view) => (view.width as f32, view.height as f32),
+            None => unreachable!(),
+        };
+        assert!((mean(&xs) - width / 2.0).abs() < 1.0, "{}", mean(&xs));
+        assert!((mean(&ys) - height / 2.0).abs() < 1.0, "{}", mean(&ys));
+        // In the sky's own group, so the chart's edge clips it.
+        assert!(svg.find(ring).unwrap() < svg.rfind("</g>").unwrap());
+
+        // Behind the view there is nothing of it to draw.
+        cfg.projection = "pinhole".to_string();
+        cfg.fov_deg = Some(40.0);
+        cfg.marks[0].ra_deg = 5.6 * 15.0 + 180.0;
+        assert!(!render(&cfg).contains(ring));
     }
 
     /// The elements of an SVG, each without its leading `<`.

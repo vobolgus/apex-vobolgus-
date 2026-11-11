@@ -25,6 +25,9 @@ static CHART_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_CHARTS);
 /// Largest chart side a `view` may ask for; the preview's is about 1100 px.
 const MAX_VIEW_SIZE_PX: f64 = 20_000.0;
 
+/// Rings on one chart: a finder card needs one.
+const MAX_MARKS: usize = 16;
+
 /// Largest `view.px`: far beyond any real chart, it only keeps the numbers sane.
 const MAX_VIEW_PX: f64 = 1000.0;
 
@@ -67,6 +70,21 @@ pub(crate) fn validate_config(config: &RenderConfig) -> Result<(), String> {
             return Err(
                 "view needs non-zero right, up and forward vectors, a positive size and a fov_deg \
                  the projection can show"
+                    .to_string(),
+            );
+        }
+    }
+    if config.marks.len() > MAX_MARKS {
+        return Err(format!("at most {MAX_MARKS} marks"));
+    }
+    for mark in &config.marks {
+        let sound = mark.ra_deg.is_finite()
+            && (-90.0..=90.0).contains(&mark.dec_deg)
+            && mark.radius_deg > 0.0
+            && mark.radius_deg <= 90.0;
+        if !sound {
+            return Err(
+                "a mark needs a finite ra_deg, dec_deg in -90..=90 and radius_deg in (0, 90]"
                     .to_string(),
             );
         }
@@ -229,6 +247,58 @@ mod tests {
     use crate::models::{LayersConfig, RenderConfig, StyleConfig};
     use std::sync::Arc;
 
+    #[test]
+    fn marks_are_checked() {
+        use crate::models::SkyMark;
+        let base: RenderConfig = serde_json::from_value(serde_json::json!({
+            "projection": "stereo", "latitude": 55.0, "longitude": 37.0,
+            "layers": {
+                "ecliptic": false, "equator": false, "galactic_equator": false, "planets": false,
+                "horizontal_grid": false, "equatorial_grid": false, "constellations": false,
+                "constellation_names": false, "zenith": false, "poles": false
+            },
+            "style": {
+                "star_color": "#000", "constellation_line_color": "#000", "grid_color": "#000",
+                "background_color": "none", "font_family": "Inter", "magnitude_scale": 1.0
+            }
+        }))
+        .unwrap();
+        // A config from before marks were has none.
+        assert!(base.marks.is_empty());
+        let with = |ra_deg: f64, dec_deg: f64, radius_deg: f64| {
+            let mut config = base.clone();
+            config.marks = vec![SkyMark {
+                ra_deg,
+                dec_deg,
+                radius_deg,
+            }];
+            validate_config(&config)
+        };
+        assert_eq!(with(83.8, -5.4, 10.0), Ok(()));
+        for (ra, dec, radius) in [
+            (f64::NAN, 0.0, 10.0),
+            (0.0, 91.0, 10.0),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 90.5),
+        ] {
+            assert!(
+                with(ra, dec, radius)
+                    .unwrap_err()
+                    .starts_with("a mark needs")
+            );
+        }
+        let mut many = base.clone();
+        many.marks = vec![
+            SkyMark {
+                ra_deg: 0.0,
+                dec_deg: 0.0,
+                radius_deg: 1.0
+            };
+            MAX_MARKS + 1
+        ];
+        assert_eq!(validate_config(&many).unwrap_err(), "at most 16 marks");
+    }
+
     #[tokio::test]
     async fn test_export_pdf_stereo() {
         let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
@@ -268,6 +338,7 @@ mod tests {
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
+            marks: vec![],
             print_info: Some(true),
             footer_text: Some("Test Sky Map".to_string()),
         };
@@ -321,6 +392,7 @@ mod tests {
                 font_family: "sans-serif".to_string(),
                 magnitude_scale: 1.0,
             },
+            marks: vec![],
             print_info: Some(false),
             footer_text: None,
         };

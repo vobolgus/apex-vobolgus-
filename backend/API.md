@@ -87,6 +87,14 @@ Star object:
   `(cos dec · cos ra, cos dec · sin ra, sin dec)`, which the client works out; the
   HIP number is not sent. Arrays are sorted from the brightest star down.
 
+### Messier
+
+- `GET /api/catalog/messier` - the 110 Messier objects, by number
+  - Response: `[{ "m": 42, "name": "Orion Nebula", "kind": "Nebula", "constellation": "Ori",
+    "mag": 4.0, "ra_deg": 83.82, "dec_deg": -5.39 }, ...]`; `name` is empty for an object
+    with no common name, `ra_deg`/`dec_deg` are J2000 degrees
+  - Cached and compressed like the star catalogs (see Caching)
+
 ## Constellations
 
 Both routes return a JSON array sorted by `abbr`, no query params:
@@ -134,6 +142,7 @@ Each segment is a polyline of unit vectors (equatorial frame).
 | `tilt_angle?` | number | pinhole camera roll without a `view`, degrees, default `0` |
 | `layers` | `LayersConfig` | all fields required |
 | `style` | `StyleConfig` | all fields required |
+| `marks?` | `{ ra_deg, dec_deg, radius_deg }[]` | places ringed on the chart, in the app's accent, clipped by the sky's edge: every point `radius_deg` from the centre. At most 16; `dec_deg` in `-90..=90`, `radius_deg` in `(0, 90]` |
 | `print_info?` | bool | prints Lat/Lon and Time in the bottom-left corner |
 | `footer_text?` | string | centered footer line |
 

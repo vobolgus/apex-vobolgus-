@@ -143,6 +143,23 @@ describe('itemRenderConfig', () => {
 	});
 });
 
+describe('marks', () => {
+	it('sends the places ringed on a chart, and no marks at all for a chart with none', () => {
+		expect(itemRenderConfig(stereoItem())).not.toHaveProperty('marks');
+		const item = stereoItem();
+		item.chart = { ...item.chart, marks: [{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }] };
+		expect(itemRenderConfig(item).marks).toEqual([
+			{ ra_deg: 56.85, dec_deg: 24.12, radius_deg: 10 }
+		]);
+		// The rest of the config is what it is without them: the mark is all that differs.
+		const { marks: _marks, ...rest } = itemRenderConfig(item);
+		expect(rest).toEqual(itemRenderConfig(stereoItem()));
+		expect(itemRenderConfig({ ...item, chart: { ...item.chart, marks: [] } })).not.toHaveProperty(
+			'marks'
+		);
+	});
+});
+
 describe('textRequest', () => {
 	/** Half a font size a character. */
 	const measure = (line: string) => Array.from(line).length / 2;

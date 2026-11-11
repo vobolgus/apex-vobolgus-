@@ -6,7 +6,9 @@
 	 * with the page count at the window's edge.
 	 *
 	 * A thumbnail opens the page editor; hovering it lifts it a little and shows a
-	 * red ⊖ that deletes the page (with an Undo through `notify`). Keyboard: Tab
+	 * red ⊖ that deletes the page (with an Undo through `notify`) and, across from it
+	 * on a page with charts, a button that lays the page out as a template
+	 * (`TemplatePicker`). Keyboard: Tab
 	 * reaches every thumbnail and its ⊖, ↑/↓ (Home/End) move between thumbnails,
 	 * Delete or Backspace deletes the focused page. Keys handled here stop
 	 * propagating, so the window-level sky rotation does not act on them too.
@@ -22,9 +24,11 @@
 	} from '$lib/document/flight';
 	import { pageSize } from '$lib/document/geometry';
 	import { chartCountLabel } from '$lib/document/labels';
+	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 	import type { DocPage } from '$lib/document/types';
 	import { keepFocusOnMousePress } from '$lib/ui/focus';
 	import PageThumbnail from './PageThumbnail.svelte';
+	import TemplatePicker from './TemplatePicker.svelte';
 
 	interface Props {
 		store: DocumentStore;
@@ -86,6 +90,33 @@
 
 	const count = $derived(store.pages.length);
 	const open = $derived(store.panelOpen);
+
+	/** The page being laid out as a template, and where its picker stands. */
+	let picking = $state<{
+		pageId: string;
+		anchor: { left: number; top: number; right: number; bottom: number };
+	} | null>(null);
+	const pickedPage = $derived(picking ? store.page(picking.pageId) : undefined);
+
+	/** Open the template picker for a page, beside the panel at the height of its thumbnail. */
+	function pickTemplate(event: MouseEvent, pageId: string) {
+		const cell = (event.currentTarget as HTMLElement).closest('.thumb-wrap');
+		const dock = (event.currentTarget as HTMLElement).closest('.dock');
+		if (!cell || !dock) return;
+		const { top, bottom, left } = cell.getBoundingClientRect();
+		picking = { pageId, anchor: { left, top, bottom, right: dock.getBoundingClientRect().right } };
+	}
+
+	function applyTemplate(pageId: string, template: TemplateInfo, laid: LaidPage[]) {
+		const number = store.pageIndex(pageId) + 1;
+		const undo = store.layPage(pageId, laid);
+		if (!undo) return;
+		store.selectedPageId = pageId;
+		const pages = laid.length > 1 ? `, on ${laid.length} pages` : '';
+		notify(`Page ${number} laid out as “${template.name}”${pages}`, () => {
+			if (undo()) announcement = `Page ${number} as it was`;
+		});
+	}
 
 	$effect(() => {
 		const next = count === 0 ? 0 : open ? INSET_PX + panelWidth + TAB_WIDTH_PX : TAB_WIDTH_PX;
@@ -525,6 +556,20 @@
 							>
 								<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.75 8h6.5" /></svg>
 							</button>
+							{#if page.items.length > 0}
+								<button
+									class="template"
+									type="button"
+									aria-label="Lay page {index + 1} out as a template"
+									aria-haspopup="dialog"
+									title="Lay out as a template"
+									onclick={(event) => pickTemplate(event, page.id)}
+								>
+									<svg viewBox="0 0 16 16" aria-hidden="true">
+										<path d="M3.5 3.5h9v9h-9zM3.5 6.5h9M8 6.5v6" />
+									</svg>
+								</button>
+							{/if}
 							<span class="flash" aria-hidden="true"></span>
 						</div>
 						<span class="number" aria-hidden="true">{index + 1}</span>
@@ -565,6 +610,18 @@
 		</button>
 		<p class="sr-only" role="status">{announcement}</p>
 	</div>
+{/if}
+
+{#if picking && pickedPage}
+	{@const pageId = picking.pageId}
+	<TemplatePicker
+		page={pickedPage}
+		number={store.pageIndex(pageId) + 1}
+		room={MAX_PAGES - store.pageCount}
+		anchor={picking.anchor}
+		onapply={(template, laid) => applyTemplate(pageId, template, laid)}
+		onclose={() => (picking = null)}
+	/>
 {/if}
 
 <style>
@@ -721,6 +778,48 @@
 			background var(--ease-ui);
 	}
 
+	/* Across from the ⊖: lay the page out as a template. Shown and hidden with it. */
+	.template {
+		position: absolute;
+		top: -8px;
+		right: -8px;
+		z-index: 1;
+		display: grid;
+		place-items: center;
+		width: 20px;
+		height: 20px;
+		padding: 0;
+		border: 0;
+		border-radius: 50%;
+		background: var(--fg-1);
+		color: var(--dock-solid);
+		box-shadow:
+			0 0 0 2px var(--dock-solid),
+			0 1px 4px rgba(0, 0, 0, 0.45);
+		cursor: pointer;
+		opacity: 0;
+		transform: scale(0.6);
+		transition:
+			opacity var(--ease-ui),
+			transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.template::before {
+		content: '';
+		position: absolute;
+		inset: -4px;
+		border-radius: 50%;
+	}
+
+	.template svg {
+		width: 14px;
+		height: 14px;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.5;
+		stroke-linejoin: round;
+	}
+
 	/* A 28 px target around the 20 px badge. */
 	.remove::before {
 		content: '';
@@ -743,7 +842,8 @@
 			transform: scale(1.06);
 		}
 
-		.cell:hover .remove {
+		.cell:hover .remove,
+		.cell:hover .template {
 			opacity: 1;
 			transform: none;
 		}
@@ -753,7 +853,8 @@
 			transform: none;
 		}
 
-		.cell.is-quiet:hover .remove {
+		.cell.is-quiet:hover .remove,
+		.cell.is-quiet:hover .template {
 			opacity: 0;
 			transform: scale(0.6);
 			pointer-events: none;
@@ -764,20 +865,23 @@
 		}
 	}
 
-	.cell:focus-within .remove {
+	.cell:focus-within .remove,
+	.cell:focus-within .template {
 		opacity: 1;
 		transform: none;
 	}
 
 	/* No hover to reveal it on touch screens: the ⊖ is always there. */
 	@media (hover: none) {
-		.remove {
+		.remove,
+		.template {
 			opacity: 1;
 			transform: none;
 		}
 	}
 
-	.remove:focus-visible {
+	.remove:focus-visible,
+	.template:focus-visible {
 		outline: 2px solid transparent;
 		outline-offset: 2px;
 		box-shadow:

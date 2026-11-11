@@ -40,6 +40,7 @@ import {
 	TEXT_FONTS,
 	TEXT_SIZES
 } from './text';
+import { TEXT_ROLES, type LaidPage } from './templates';
 import type {
 	ChartSnapshot,
 	DocItem,
@@ -49,6 +50,8 @@ import type {
 	PageLayout,
 	PageOrientation,
 	Rect,
+	SkyMark,
+	TextRole,
 	TextStyle,
 	TurnMemo
 } from './types';
@@ -77,6 +80,8 @@ export type BlockCopy =
 
 /** How far a copy pasted with no room and no pointer stands off what is in its place, mm down and right. */
 const PASTE_OFFSET_MM = 5;
+/** Rings on one chart, as the backend takes them (backend/src/handlers/export.rs). */
+const MAX_MARKS = 16;
 
 export interface AddChartResult {
 	pageId: string;
@@ -444,6 +449,90 @@ export class DocumentStore {
 			texts.splice(Math.min(index, texts.length), 0, { ...removed, frame });
 			target.texts = texts;
 			setLayout(target, { manual: true });
+			this.#scheduleSave();
+			return true;
+		});
+	}
+
+	// === Templates ===
+
+	/**
+	 * Lay a page out as a template says (`layTemplate`): the first of `laid` takes
+	 * the page's place, the rest follow it as new pages, each with the charts named
+	 * for it. A chart the template made (a finder card's close-up) is added; one it
+	 * drops (the close-up before it) goes. Text a template put on the page before
+	 * goes; the text its owner added stays on the first. Nothing happens, and null
+	 * comes back, when `laid` does not account for the page's charts each once, or the
+	 * document has no room for the pages or the charts. The returned function puts the
+	 * page back as it was and takes the new ones away (once, while they are all still
+	 * there) and says whether it did.
+	 */
+	layPage(pageId: string, laid: readonly LaidPage[]): (() => boolean) | null {
+		const index = this.pageIndex(pageId);
+		const page = this.pages[index];
+		if (!page || laid.length === 0) return null;
+		const placed = laid.flatMap((part) => part.charts);
+		const made = placed.filter((chart) => chart.chart !== undefined);
+		const kept = placed.filter((chart) => chart.chart === undefined).map((chart) => chart.id);
+		const dropped = laid.flatMap((part) => part.dropped ?? []);
+		// Each of the page's charts once, kept or dropped: as many names, and every chart among them.
+		const whole =
+			kept.length + dropped.length === page.items.length &&
+			page.items.every((item) => kept.includes(item.id) !== dropped.includes(item.id));
+		if (!whole || this.pages.length + laid.length - 1 > MAX_PAGES) return null;
+		if (this.chartCount - dropped.length + made.length > MAX_CHARTS) return null;
+		if (laid.some((part) => part.charts.length > MAX_ITEMS_PER_PAGE)) return null;
+
+		const before = $state.snapshot(page);
+		// A made chart gets its id here; the text that points at it by name follows.
+		const ids = made.map((chart) => ({ name: chart.id, id: createId() }));
+		const idOf = (name: string | undefined) => ids.find((it) => it.name === name)?.id ?? name;
+		const own = (page.texts ?? []).filter((text) => text.role === undefined);
+		const pages = laid.map((part, at): DocPage => {
+			const next: DocPage = {
+				id: at === 0 ? page.id : createId(),
+				orientation: part.orientation,
+				items: part.charts.map((entry): DocItem => {
+					const source = before.items.find((it) => it.id === entry.id);
+					const chart = { ...(entry.chart ?? source!.chart) };
+					if (entry.marks?.length) chart.marks = entry.marks.map((mark) => ({ ...mark }));
+					else delete chart.marks;
+					const item: DocItem = {
+						...source,
+						id: idOf(entry.id)!,
+						chart,
+						frame: fitFrame(entry.frame, chart.aspect, part.orientation)
+					};
+					if (entry.closeUpOf !== undefined) item.closeUpOf = entry.closeUpOf;
+					return item;
+				})
+			};
+			const texts = [
+				...(at === 0 ? $state.snapshot(own) : []),
+				...part.texts.map((text) => {
+					const added: DocText = { ...text, id: createId() };
+					if (text.chartId !== undefined) added.chartId = idOf(text.chartId);
+					return added;
+				})
+			]
+				.slice(0, MAX_TEXTS_PER_PAGE)
+				.map((text) => ({
+					...text,
+					frame: fitTextFrame(text.frame, part.orientation, text.rotation)
+				}));
+			if (texts.length > 0) next.texts = texts;
+			// Arranged by the arranger while it holds charts alone; by hand with text among them.
+			setLayout(next, texts.length > 0 ? { manual: true } : { layout: part.layout });
+			return next;
+		});
+		this.pages.splice(index, 1, ...pages);
+		this.#scheduleSave();
+		const added = pages.slice(1).map((next) => next.id);
+		return once(() => {
+			const at = this.pageIndex(pageId);
+			if (at < 0 || added.some((id) => this.pageIndex(id) < 0)) return false;
+			for (const id of added) this.#dropPage(this.pageIndex(id));
+			this.pages[this.pageIndex(pageId)] = before;
 			this.#scheduleSave();
 			return true;
 		});
@@ -854,7 +943,27 @@ function parseItem(value: unknown, ids: Set<string>, orientation: PageOrientatio
 	ids.add(id);
 	const item: DocItem = { id, chart, frame: keptFrame(frame, chart.aspect, orientation) };
 	if (typeof thumb === 'string' && thumb.startsWith('data:image/')) item.thumb = thumb;
+	if (typeof value.closeUpOf === 'string' && value.closeUpOf !== '') {
+		item.closeUpOf = value.closeUpOf;
+	}
 	return item;
+}
+
+/** The places ringed on a chart: those that read as places, sixteen at the most. */
+function parseMarks(value: unknown): SkyMark[] {
+	if (!Array.isArray(value)) return [];
+	return value
+		.filter(
+			(mark): mark is SkyMark =>
+				isRecord(mark) &&
+				isFiniteNumber(mark.raDeg) &&
+				isFiniteNumber(mark.decDeg) &&
+				Math.abs(mark.decDeg) <= 90 &&
+				isPositive(mark.radiusDeg) &&
+				mark.radiusDeg <= 90
+		)
+		.slice(0, MAX_MARKS)
+		.map(({ raDeg, decDeg, radiusDeg }) => ({ raDeg, decDeg, radiusDeg }));
 }
 
 function parseText(value: unknown, ids: Set<string>, orientation: PageOrientation): DocText | null {
@@ -873,6 +982,7 @@ function parseText(value: unknown, ids: Set<string>, orientation: PageOrientatio
 		frame: fitTextFrame(frame, orientation, rotation)
 	};
 	if (rotation !== 0) parsed.rotation = rotation;
+	if (TEXT_ROLES.includes(value.role as TextRole)) parsed.role = value.role as TextRole;
 	if (typeof chartId === 'string' && chartId !== '') parsed.chartId = chartId;
 	return parsed;
 }
@@ -917,7 +1027,9 @@ function parseChart(value: unknown): ChartSnapshot | null {
 	if (!sizes.every(isPositive) || !isPositive(aspect)) return null;
 	if (!LAYER_KEYS.every((key) => typeof layers[key] === 'boolean')) return null;
 	if (typeof createdAt !== 'string' || Number.isNaN(Date.parse(createdAt))) return null;
+	const marks = parseMarks(value.marks);
 	return {
+		...(marks.length > 0 ? { marks } : {}),
 		view: {
 			projection: view.projection as ProjectionMode,
 			orientation: { x: q.x as number, y: q.y as number, z: q.z as number, w: q.w as number },

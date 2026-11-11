@@ -1,5 +1,5 @@
 use super::preview_px;
-use crate::models::RenderConfig;
+use crate::models::{RenderConfig, SkyMark};
 use rust_core::coords::ra_dec_to_unit_vector;
 use std::fmt::Write;
 
@@ -12,6 +12,9 @@ const CIRCLE_STEP_DEG: f32 = 1.0;
 /// Longest piece of a great-circle arc drawn as one straight segment, as in the
 /// preview (`GREAT_CIRCLE_SUBDIV_DEG`).
 const GREAT_CIRCLE_STEP_DEG: f32 = 3.0;
+
+/// The ring round a marked place: the app's accent (`--accent` in tokens.css).
+const MARK_COLOR: &str = "#d34b4b";
 
 /// Mean obliquity of the ecliptic at J2000, in degrees.
 pub(crate) const OBLIQUITY_DEG: f32 = 23.439_291;
@@ -79,6 +82,49 @@ pub(crate) fn galactic_equator_point(l_rad: f32) -> (f32, f32, f32) {
 /// Angles, in radians, of the `CIRCLE_STEPS + 1` samples of a full circle.
 fn circle_angles() -> impl Iterator<Item = f32> {
     (0..=CIRCLE_STEPS).map(|i| ((i as f32) * CIRCLE_STEP_DEG).to_radians())
+}
+
+/// The ring of points `radius_deg` from (`ra_deg`, `dec_deg`), closed.
+pub(super) fn ring_points(
+    ra_deg: f64,
+    dec_deg: f64,
+    radius_deg: f64,
+) -> impl Iterator<Item = (f32, f32, f32)> {
+    let (ra, dec, radius) = (
+        ra_deg.to_radians(),
+        dec_deg.to_radians(),
+        radius_deg.to_radians(),
+    );
+    // The centre, and two directions square to it and to each other: east and north.
+    let centre = [dec.cos() * ra.cos(), dec.cos() * ra.sin(), dec.sin()];
+    let east = [-ra.sin(), ra.cos(), 0.0];
+    let north = [-dec.sin() * ra.cos(), -dec.sin() * ra.sin(), dec.cos()];
+    circle_angles().map(move |angle| {
+        let (sin, cos) = (angle as f64).sin_cos();
+        let at =
+            |i: usize| radius.cos() * centre[i] + radius.sin() * (cos * east[i] + sin * north[i]);
+        (at(0) as f32, at(1) as f32, at(2) as f32)
+    })
+}
+
+/// A ring round each marked place, in the app's accent: where a close-up looks.
+pub(super) fn draw_marks<F>(svg: &mut String, marks: &[SkyMark], px: f32, project_point: &F)
+where
+    F: Fn(f32, f32, f32) -> Option<(f32, f32)>,
+{
+    let style = PolylineStyle {
+        stroke: MARK_COLOR,
+        width: 1.5 * px,
+        opacity: "1",
+    };
+    for mark in marks {
+        draw_polyline(
+            svg,
+            ring_points(mark.ra_deg, mark.dec_deg, mark.radius_deg),
+            project_point,
+            &style,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

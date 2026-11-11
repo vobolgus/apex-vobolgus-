@@ -26,6 +26,10 @@
 	 * fields read the chart nearest to it; on a page with several, the toolbar tells it
 	 * another by number.
 	 *
+	 * The button by a page's name beside it lays the page out as a template
+	 * (`TemplatePicker`): its charts placed again with a title and captions around
+	 * them, on as many pages as that takes.
+	 *
 	 * ⌘C / Ctrl+C copies the selected chart or text, ⌘X cuts it, and ⌘V puts a copy
 	 * on the page being shown, at its own size: where it was copied from if that is
 	 * free, else in the nearest free place, and on a page with no room for it over
@@ -39,6 +43,7 @@
 	import {
 		isBlank,
 		MAX_ITEMS_PER_PAGE,
+		MAX_PAGES,
 		type BlockCopy,
 		type DocumentStore
 	} from '$lib/document/document.svelte';
@@ -87,6 +92,8 @@
 	import EditorPage, { type PageDrag } from './EditorPage.svelte';
 	import EditorStrip from './EditorStrip.svelte';
 	import type { TextSide } from './EditorText.svelte';
+	import TemplatePicker from './TemplatePicker.svelte';
+	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 	import {
 		anchorOf,
 		containsPoint,
@@ -256,6 +263,8 @@
 	$effect(() => {
 		if (!open) return;
 		const onKeydown = (event: KeyboardEvent) => {
+			// Not while the template picker is over the editor: its keys are its own.
+			if (picking) return;
 			if (event.target === document.body || event.target === document.documentElement) {
 				handleKeydown(event);
 			}
@@ -1213,6 +1222,37 @@
 		void tick().then(focusPaper);
 	}
 
+	// === Templates ===
+
+	/** The page being laid out as a template, and the button its picker stands under. */
+	let picking = $state<{
+		pageId: string;
+		anchor: { left: number; top: number; right: number; bottom: number };
+	} | null>(null);
+	const pickedPage = $derived(picking ? store.page(picking.pageId) : undefined);
+
+	function pickTemplate(pageId: string, button: HTMLElement) {
+		if (session) return;
+		editingId = null;
+		const { left, top, right, bottom } = button.getBoundingClientRect();
+		picking = { pageId, anchor: { left, top, right, bottom } };
+	}
+
+	function applyTemplate(pageId: string, template: TemplateInfo, laid: LaidPage[]) {
+		const number = store.pageIndex(pageId) + 1;
+		const restore = store.layPage(pageId, laid);
+		if (!restore) return;
+		const pages = laid.length > 1 ? `, on ${laid.length} pages` : '';
+		const message = `Page ${number} laid out as “${template.name}”${pages}`;
+		announce(message);
+		notify(message, () => {
+			if (!restore() || !open) return;
+			announce(`Page ${number} as it was`);
+			void tick().then(focusPaper);
+		});
+		void tick().then(focusPaper);
+	}
+
 	// === Copy and paste ===
 
 	/** Whether a clipboard event is a field's own: typing in a text copies and pastes words. */
@@ -1390,6 +1430,7 @@
 						onorientation={setOrientation}
 						ondelete={deletePage}
 						onaddtext={addText}
+						ontemplate={pickTemplate}
 						onmovestart={startMove}
 						onresizestart={startResize}
 						onitemkeydown={handleItemKeydown}
@@ -1435,6 +1476,19 @@
 		</div>
 	{/if}
 </dialog>
+
+{#if picking && pickedPage}
+	{@const pageId = picking.pageId}
+	<TemplatePicker
+		page={pickedPage}
+		number={store.pageIndex(pageId) + 1}
+		room={MAX_PAGES - store.pageCount}
+		anchor={picking.anchor}
+		placement="under"
+		onapply={(template, laid) => applyTemplate(pageId, template, laid)}
+		onclose={() => (picking = null)}
+	/>
+{/if}
 
 <style>
 	/* The paper and ink tokens are the app's (tokens.css), shared with the pages panel. */

@@ -80,6 +80,8 @@ export interface RenderConfig {
 		font_family: string;
 		magnitude_scale: number;
 	};
+	/** Places ringed on the chart; left out when there are none. */
+	marks?: { ra_deg: number; dec_deg: number; radius_deg: number }[];
 	print_info: boolean;
 }
 

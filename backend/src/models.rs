@@ -22,8 +22,19 @@ pub struct RenderConfig {
     pub view: Option<ViewConfig>,
     pub layers: LayersConfig,
     pub style: StyleConfig,
+    /// Places ringed on the chart: where a close-up chart looks, on the wide one.
+    #[serde(default)]
+    pub marks: Vec<SkyMark>,
     pub print_info: Option<bool>,
     pub footer_text: Option<String>,
+}
+
+/// A ring on the sky: every point `radius_deg` from (`ra_deg`, `dec_deg`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkyMark {
+    pub ra_deg: f64,
+    pub dec_deg: f64,
+    pub radius_deg: f64,
 }
 
 /// Camera basis in the equatorial frame (x → RA 0h, z → north pole), and the

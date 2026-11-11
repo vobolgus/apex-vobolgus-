@@ -29,6 +29,22 @@ export interface ConstellationData {
 	segments: ConstellationSegmentPoint[][];
 }
 
+/** A Messier object, as `/api/catalog/messier` sends it. */
+export interface MessierObject {
+	/** Its number: 42 for M 42. */
+	m: number;
+	/** Its common name; empty when it has none. */
+	name: string;
+	/** "Galaxy", "Open Cluster", ... */
+	kind: string;
+	/** The constellation it is in, abbreviated: "Ori". */
+	constellation: string;
+	mag: number;
+	/** Degrees, J2000. */
+	ra_deg: number;
+	dec_deg: number;
+}
+
 class ViewState {
 	orientation = $state<Quaternion>({ x: 0, y: 0, z: 0, w: 1 });
 	stereoFovDeg = $state(180);
@@ -42,6 +58,8 @@ class CatalogState {
 	starVectors = $state.raw<StarVector[]>([]);
 	constellations = $state.raw<ConstellationData[]>([]);
 	constellationBoundaries = $state.raw<ConstellationData[]>([]);
+	/** Loaded when something first asks for it (`loadMessier`): the chart does not draw it yet. */
+	messier = $state.raw<MessierObject[]>([]);
 }
 
 export const view = new ViewState();

@@ -69,6 +69,7 @@ fn build_app(state: AppState, static_dir: Option<&Path>) -> Router {
             get(handlers::catalog::get_bright_stars),
         )
         .route("/api/catalog/full", get(handlers::catalog::get_full_stars))
+        .route("/api/catalog/messier", get(handlers::catalog::get_messier))
         .route(
             "/api/constellations",
             get(handlers::catalog::get_constellations),
@@ -248,6 +249,7 @@ mod tests {
             "/api/catalog/full?max_mag=6.5",
             "/api/constellations",
             "/api/constellation-boundaries",
+            "/api/catalog/messier",
         ] {
             let (status, headers, plain) = get(&app, uri, &[]).await;
             assert_eq!(status, StatusCode::OK, "{uri}");

@@ -64,6 +64,8 @@
 		ondelete?: (pageId: string) => void;
 		/** Put a new text on this page; offered on the current one. */
 		onaddtext?: (pageId: string) => void;
+		/** Lay this page out as a template; offered on the current one while it has charts. */
+		ontemplate?: (pageId: string, button: HTMLElement) => void;
 		onmovestart: (event: PointerEvent, item: DocItem) => void;
 		onresizestart: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
 		onitemkeydown: (event: KeyboardEvent, item: DocItem) => void;
@@ -103,6 +105,7 @@
 		onorientation,
 		ondelete,
 		onaddtext,
+		ontemplate,
 		onmovestart,
 		onresizestart,
 		onitemkeydown,
@@ -210,6 +213,20 @@
 	<div class="label">
 		<span class="name">Page {number} <span class="format">· A4</span></span>
 		<div class="actions">
+			{#if current && ontemplate && count > 0}
+				<button
+					class="action"
+					type="button"
+					aria-label="Lay page {number} out as a template"
+					aria-haspopup="dialog"
+					title="Lay out as a template"
+					onclick={(event) => ontemplate(page.id, event.currentTarget)}
+				>
+					<svg viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M3.5 3.5h9v9h-9zM3.5 6.5h9M8 6.5v6" />
+					</svg>
+				</button>
+			{/if}
 			{#if current && onaddtext}
 				<button
 					class="action"

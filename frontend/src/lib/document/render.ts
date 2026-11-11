@@ -115,11 +115,19 @@ export function snapshotChart(
 export function itemRenderConfig(item: DocItem): RenderConfig {
 	const { chart, frame } = item;
 	const config = buildRenderConfig(chart.view, chart.layers, new Date(chart.createdAt));
-	return {
+	const drawn: RenderConfig = {
 		...config,
 		view: { ...config.view, width: frame.w, height: frame.h, px: PRINT_MM_PER_PREVIEW_PX },
 		style: { ...config.style, ...PAPER_STYLE }
 	};
+	if (chart.marks?.length) {
+		drawn.marks = chart.marks.map((mark) => ({
+			ra_deg: mark.raDeg,
+			dec_deg: mark.decDeg,
+			radius_deg: mark.radiusDeg
+		}));
+	}
+	return drawn;
 }
 
 /**

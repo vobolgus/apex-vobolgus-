@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use crate::handlers::catalog::{
     BRIGHT_MAX_MAG, FULL_MAX_MAG, constellation_boundaries_payload, constellations_payload,
-    stars_payload,
+    messier_payload, stars_payload,
 };
 
 /// Fresh for a day, and for a week after that the stale copy is shown while a new
@@ -129,6 +129,7 @@ pub struct CatalogCache {
     full: OnceLock<CachedJson>,
     constellations: OnceLock<CachedJson>,
     constellation_boundaries: OnceLock<CachedJson>,
+    messier: OnceLock<CachedJson>,
 }
 
 impl CatalogCache {
@@ -152,11 +153,17 @@ impl CatalogCache {
             .get_or_init(|| CachedJson::new(&constellation_boundaries_payload()))
     }
 
+    pub fn messier(&self) -> &CachedJson {
+        self.messier
+            .get_or_init(|| CachedJson::new(&messier_payload()))
+    }
+
     pub fn warm(&self, catalog: &HipCatalog) {
         self.bright(catalog);
         self.full(catalog);
         self.constellations(catalog);
         self.constellation_boundaries();
+        self.messier();
     }
 }
 

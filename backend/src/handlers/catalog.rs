@@ -6,7 +6,7 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use rust_core::catalog::{HipCatalog, Star};
+use rust_core::catalog::{HipCatalog, MessierCatalog, Star};
 use rust_core::coords::ra_dec_to_unit_vector;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -83,6 +83,72 @@ pub async fn get_full_stars(
     }
     let max_mag = query.max_mag.unwrap_or(FULL_MAX_MAG);
     Json(stars_payload(&state.hip_catalog, max_mag, query.min_mag)).into_response()
+}
+
+/// A Messier object as `/api/catalog/messier` sends it: what to call it and where it is.
+#[derive(Debug, Serialize)]
+pub struct MessierEntry {
+    /// Its number: 42 for M 42.
+    pub m: i32,
+    /// Its common name; empty when it has none.
+    pub name: String,
+    /// "Galaxy", "Open Cluster", ...
+    pub kind: &'static str,
+    /// The constellation it is in, abbreviated: "Ori".
+    pub constellation: String,
+    pub mag: f32,
+    /// Degrees, J2000.
+    pub ra_deg: f32,
+    pub dec_deg: f32,
+}
+
+/// The whole Messier catalogue, by number.
+pub fn messier_payload() -> Vec<MessierEntry> {
+    let mut objects: Vec<MessierEntry> = MessierCatalog::new()
+        .iter_all_objects()
+        .map(|object| MessierEntry {
+            m: object.m_number,
+            name: object.name.clone(),
+            kind: object.type_name(),
+            constellation: object.constellation.clone(),
+            mag: object.v_mag,
+            // From the unit vector, which is what the charts are drawn from.
+            ra_deg: object.y.atan2(object.x).to_degrees().rem_euclid(360.0),
+            dec_deg: object.z.clamp(-1.0, 1.0).asin().to_degrees(),
+        })
+        .collect();
+    objects.sort_by_key(|object| object.m);
+    objects
+}
+
+pub async fn get_messier(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    state.catalog_cache.messier().response(&headers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_messier_catalogue_is_sent_whole_by_number_with_its_places_in_degrees() {
+        let objects = messier_payload();
+        assert_eq!(objects.len(), 110);
+        assert!(objects.windows(2).all(|pair| pair[0].m < pair[1].m));
+        let m31 = objects.iter().find(|object| object.m == 31).unwrap();
+        assert_eq!(m31.name, "Andromeda Galaxy");
+        assert_eq!(m31.kind, "Galaxy");
+        assert_eq!(m31.constellation, "And");
+        // 0h 42.7m, +41° 16′.
+        assert!((m31.ra_deg - 10.68).abs() < 0.1, "{}", m31.ra_deg);
+        assert!((m31.dec_deg - 41.27).abs() < 0.1, "{}", m31.dec_deg);
+        let m42 = objects.iter().find(|object| object.m == 42).unwrap();
+        assert!((m42.ra_deg - 83.82).abs() < 0.1, "{}", m42.ra_deg);
+        assert!((m42.dec_deg + 5.39).abs() < 0.1, "{}", m42.dec_deg);
+        for object in &objects {
+            assert!((0.0..360.0).contains(&object.ra_deg), "M {}", object.m);
+            assert!((-90.0..=90.0).contains(&object.dec_deg), "M {}", object.m);
+        }
+    }
 }
 
 #[derive(Serialize)]
