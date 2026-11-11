@@ -7,13 +7,13 @@
  * and the copy is taken away. Since the two are the same drawing at the same
  * size, nothing changes under the eye at that moment.
  *
- * Geometry and timing only; the page owns the element and runs the animation, and
- * the pages panel says where the copy lands (`reveal`).
+ * Geometry and timing only; the flight itself (`PdfFlight`) owns the copy and
+ * runs the animation, and the pages panel says where the copy lands (`reveal`).
  */
 
 import type { ChartView } from '$lib/api/render-config';
-import { thumbnailCrop } from '$lib/components/document/chart-thumbnail';
 import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
+import { thumbnailCrop } from '$lib/renderer/chart-thumbnail';
 
 export interface Box {
 	x: number;

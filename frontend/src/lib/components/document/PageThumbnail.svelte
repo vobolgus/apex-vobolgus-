@@ -23,8 +23,8 @@
 	import { anchoredFrame } from '$lib/document/text';
 	import { shownLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage } from '$lib/document/types';
+	import { drawChartThumbnail } from '$lib/renderer/chart-thumbnail';
 	import { catalog } from '$lib/state/catalog.svelte';
-	import { drawChartThumbnail } from './chart-thumbnail';
 	import TextLines from './TextLines.svelte';
 
 	interface Props {
