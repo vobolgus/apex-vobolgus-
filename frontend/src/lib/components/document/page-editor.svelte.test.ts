@@ -3,8 +3,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { chartsOf } from '$lib/document/blocks';
 import { DocumentStore } from '$lib/document/document.svelte';
+import { pageSize } from '$lib/document/geometry';
 import type { ChartSnapshot, DocPage } from '$lib/document/types';
 import { ToastStore } from '$lib/ui/toast.svelte';
+import { editorLayout } from './editor-geometry';
 import PageEditor from './PageEditor.svelte';
 
 // No backend here: every preview is one made-up URL.
@@ -537,5 +539,123 @@ describe('PageEditor', () => {
 		flushSync();
 		expect(ctx.onclose).toHaveBeenCalled();
 		expect(ctx.dialog.open).toBe(false);
+	});
+
+	describe('a pointer drag', () => {
+		/** The stage has no layout here: it is the fallback's size, at the window's corner. */
+		const { scale, slots } = editorLayout(
+			{ w: 1200, h: 640 },
+			{ prev: pageSize('portrait'), current: pageSize('portrait'), next: pageSize('landscape') }
+		);
+
+		/** Where a point of the current page, mm, is on screen. */
+		function onPage(x: number, y: number) {
+			const paper = slots.current!;
+			return { clientX: paper.left + x * scale, clientY: paper.top + y * scale };
+		}
+
+		function pointer(element: Element, type: string, at: { clientX: number; clientY: number }) {
+			const event = new PointerEvent(type, {
+				bubbles: true,
+				cancelable: true,
+				pointerId: 1,
+				...at
+			});
+			element.dispatchEvent(event);
+			flushSync();
+			return event;
+		}
+
+		/** Let the move the pointer made be applied: once a frame. */
+		async function frame() {
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			flushSync();
+		}
+
+		function itemOf(dialog: HTMLDialogElement, id: string) {
+			return dialog.querySelector<HTMLElement>(`[data-item-id="${id}"]`)!;
+		}
+
+		it('carries a chart with the pointer and writes the document once, on the release', async () => {
+			const ctx = setup();
+			cleanup = ctx.cleanup;
+			const update = vi.spyOn(ctx.store, 'setFrame');
+			const [, second] = charts(ctx.dialog);
+			pointer(second, 'pointerdown', onPage(40, 140));
+			expect(document.activeElement).toBe(second);
+			pointer(second, 'pointermove', onPage(70, 150));
+			await frame();
+			expect(itemOf(ctx.dialog, 'b').dataset.state).toBe('moving');
+			expect(ctx.dialog.querySelector('.stage')!.classList.contains('is-carrying')).toBe(true);
+			expect(update).not.toHaveBeenCalled();
+
+			pointer(second, 'pointerup', onPage(70, 150));
+			expect(update).toHaveBeenCalledTimes(1);
+			const [pageId, blockId, landed] = update.mock.calls[0];
+			expect([pageId, blockId]).toEqual(['p2', 'b']);
+			// Thirty millimetres right and ten down, give or take the snap.
+			expect(Math.abs(landed.x - 42)).toBeLessThanOrEqual(8 / scale);
+			expect(Math.abs(landed.y - 130)).toBeLessThanOrEqual(8 / scale);
+			expect(landed.w).toBe(80);
+			expect(itemOf(ctx.dialog, 'b').dataset.state).not.toBe('moving');
+		});
+
+		it('takes a press that does not travel for a click: nothing is moved', () => {
+			const ctx = setup();
+			cleanup = ctx.cleanup;
+			const update = vi.spyOn(ctx.store, 'setFrame');
+			const [first] = charts(ctx.dialog);
+			pointer(first, 'pointerdown', onPage(50, 50));
+			pointer(first, 'pointerup', {
+				clientX: onPage(50, 50).clientX + 2,
+				clientY: onPage(50, 50).clientY
+			});
+			expect(update).not.toHaveBeenCalled();
+			expect(itemOf(ctx.dialog, 'a').dataset.state).toBe('idle');
+			// And the keys are the chart's again: no drag is left going.
+			key(first, 'ArrowRight');
+			expect(update).toHaveBeenCalledTimes(1);
+		});
+
+		it('drops the drag on Escape, not the editor: the chart goes back', async () => {
+			const ctx = setup();
+			cleanup = ctx.cleanup;
+			const update = vi.spyOn(ctx.store, 'setFrame');
+			const [first] = charts(ctx.dialog);
+			pointer(first, 'pointerdown', onPage(50, 50));
+			pointer(first, 'pointermove', onPage(90, 90));
+			await frame();
+			expect(itemOf(ctx.dialog, 'a').dataset.state).toBe('moving');
+
+			const event = key(first, 'Escape');
+			expect(event.defaultPrevented).toBe(true);
+			expect(ctx.dialog.open).toBe(true);
+			expect(itemOf(ctx.dialog, 'a').dataset.state).toBe('returning');
+			// The pointer let go afterwards ends nothing.
+			pointer(first, 'pointerup', onPage(90, 90));
+			expect(update).not.toHaveBeenCalled();
+			expect(chartsOf(ctx.store.page('p2')!)[0].frame).toEqual({ x: 12, y: 12, w: 90, h: 90 });
+		});
+
+		it('resizes a chart by a corner, its aspect kept, and leaves the keys alone meanwhile', async () => {
+			const ctx = setup();
+			cleanup = ctx.cleanup;
+			const handle = itemOf(ctx.dialog, 'a').querySelector('[data-handle="se"]')!;
+			pointer(handle, 'pointerdown', onPage(102, 102));
+			pointer(handle, 'pointermove', onPage(122, 122));
+			await frame();
+			expect(itemOf(ctx.dialog, 'a').dataset.state).toBe('resizing');
+			// A drag is going on: a key on the chart moves nothing.
+			const update = vi.spyOn(ctx.store, 'setFrame');
+			key(charts(ctx.dialog)[0], 'ArrowRight');
+			expect(update).not.toHaveBeenCalled();
+
+			pointer(handle, 'pointerup', onPage(122, 122));
+			const frameNow = chartsOf(ctx.store.page('p2')!)[0].frame;
+			expect(frameNow.x).toBe(12);
+			expect(frameNow.y).toBe(12);
+			expect(frameNow.w).toBeCloseTo(frameNow.h);
+			expect(Math.abs(frameNow.w - 110)).toBeLessThanOrEqual(8 / scale);
+		});
 	});
 });
