@@ -5,7 +5,7 @@
  */
 
 import type { BlockKind } from '$lib/document/types';
-import { nudgeDelta, sizeStep, type Point } from '../editor-geometry';
+import { nudgeDelta, sizeStep, type Point } from './screen-geometry';
 
 /** What a key asks of the selected block. */
 export type BlockCommand =

@@ -60,8 +60,8 @@
 	import { DragController } from './editor/drag.svelte';
 	import { EditorFocus } from './editor/focus';
 	import { PageOperations } from './editor/page-operations.svelte';
+	import { EDITOR_LAYOUT } from './editor/screen-geometry';
 	import { EditorStage } from './editor/stage.svelte';
-	import { EDITOR_LAYOUT } from './editor-geometry';
 	import EditorPage from './EditorPage.svelte';
 	import EditorStrip from './EditorStrip.svelte';
 	import TemplatePicker from './templates/TemplatePicker.svelte';

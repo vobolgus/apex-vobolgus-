@@ -10,11 +10,11 @@
  */
 
 import { tick } from 'svelte';
-import type { Point } from '../editor-geometry';
 import type { BlockOperations } from './block-operations.svelte';
 import type { EditorContext } from './context.svelte';
 import type { DragController } from './drag.svelte';
 import { wordsAsText } from './new-blocks';
+import type { Point } from './screen-geometry';
 
 /** The clipboard type a copied chart or text travels under. */
 const CLIP_TYPE = 'application/x-skycharts-block';

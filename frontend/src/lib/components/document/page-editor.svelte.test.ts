@@ -6,7 +6,7 @@ import { DocumentStore } from '$lib/document/document.svelte';
 import { pageSize } from '$lib/document/geometry';
 import type { ChartSnapshot, DocPage } from '$lib/document/types';
 import { ToastStore } from '$lib/ui/toast.svelte';
-import { editorLayout } from './editor-geometry';
+import { editorLayout } from './editor/screen-geometry';
 import PageEditor from './PageEditor.svelte';
 
 // No backend here: every preview is one made-up URL.

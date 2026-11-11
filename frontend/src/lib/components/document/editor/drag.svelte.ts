@@ -18,7 +18,6 @@ import { findBlock, isChart } from '$lib/document/blocks';
 import type { ResizeAnchor, SnapGuide } from '$lib/document/geometry';
 import type { DocBlock, DocPage, TypesetBlock } from '$lib/document/types';
 import { prefersReducedMotion } from '$lib/ui/motion';
-import type { Point } from '../editor-geometry';
 import type { PointerActions, TextSide } from './actions';
 import { holdBlock } from './block-geometry';
 import type { EditorContext } from './context.svelte';
@@ -31,6 +30,7 @@ import {
 	type Press
 } from './drag-sessions';
 import { pageDrag, type DragView, type GuideFlash, type PageDrag } from './drag-view';
+import type { Point } from './screen-geometry';
 
 /** A press must travel this far, px, before it drags: a click selects without snapping. */
 const DRAG_SLOP_PX = 3;

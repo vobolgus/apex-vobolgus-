@@ -13,6 +13,7 @@ import { tick } from 'svelte';
 import type { DocumentStore } from '$lib/document/document.svelte';
 import { pageSize } from '$lib/document/geometry';
 import type { DocPage } from '$lib/document/types';
+import type { EditorFocus } from './focus';
 import {
 	containsPoint,
 	editorLayout,
@@ -24,8 +25,7 @@ import {
 	type Point,
 	type Size,
 	type SlotRole
-} from '../editor-geometry';
-import type { EditorFocus } from './focus';
+} from './screen-geometry';
 
 /** Stage size before the first measurement (and in tests, which have no layout). */
 const FALLBACK_STAGE: Size = { w: 1200, h: 640 };

@@ -23,7 +23,7 @@
 	import type { DocPage, Rect, TypesetBlock } from '$lib/document/types';
 	import type { EditorActions } from '../editor/actions';
 	import type { BlockState } from '../editor/drag-view';
-	import type { Size } from '../editor-geometry';
+	import type { Size } from '../editor/screen-geometry';
 	import TextLines from '../TextLines.svelte';
 	import { measuredLayout, shownLayout } from '../typeset.svelte';
 	import BlockFrame from './BlockFrame.svelte';

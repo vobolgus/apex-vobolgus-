@@ -30,6 +30,10 @@ import {
 	squareRotation
 } from '$lib/document/text';
 import type { DocPage, Rect } from '$lib/document/types';
+import { leastTableWidth, shownLayout } from '../typeset.svelte';
+import type { TextSide } from './actions';
+import { bearingFrom, framesOn, snapBlock, type HeldBlock } from './block-geometry';
+import type { DragView } from './drag-view';
 import {
 	anchorOf,
 	cornerOf,
@@ -40,11 +44,7 @@ import {
 	screenToMm,
 	type PageBox,
 	type Point
-} from '../editor-geometry';
-import { leastTableWidth, shownLayout } from '../typeset.svelte';
-import type { TextSide } from './actions';
-import { bearingFrom, framesOn, snapBlock, type HeldBlock } from './block-geometry';
-import type { DragView } from './drag-view';
+} from './screen-geometry';
 
 /**
  * The catch zone around every page, px: a block let go with its centre within

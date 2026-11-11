@@ -8,7 +8,7 @@
 	import type { ChartBlock, PageOrientation, Rect } from '$lib/document/types';
 	import type { EditorActions } from '../editor/actions';
 	import type { BlockState } from '../editor/drag-view';
-	import { sizeLabel, spokenSize, type Size } from '../editor-geometry';
+	import { sizeLabel, spokenSize, type Size } from '../editor/screen-geometry';
 	import BlockFrame from './BlockFrame.svelte';
 	import BlockToolbar from './BlockToolbar.svelte';
 	import { ChartPreview } from './chart-preview.svelte';

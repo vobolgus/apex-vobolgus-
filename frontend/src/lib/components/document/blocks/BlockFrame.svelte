@@ -18,7 +18,7 @@
 	import type { DocBlock, Rect } from '$lib/document/types';
 	import type { EditorActions } from '../editor/actions';
 	import type { BlockState } from '../editor/drag-view';
-	import type { Size } from '../editor-geometry';
+	import type { Size } from '../editor/screen-geometry';
 	import BlockHandles from './BlockHandles.svelte';
 	import { providePressGuard } from './press';
 

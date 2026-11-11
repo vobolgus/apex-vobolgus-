@@ -7,7 +7,7 @@
 	import { contentBox } from '$lib/document/geometry';
 	import type { PageOrientation } from '$lib/document/types';
 	import type { PageDrag } from './editor/drag-view';
-	import type { Size } from './editor-geometry';
+	import type { Size } from './editor/screen-geometry';
 
 	interface Props {
 		drag: PageDrag;

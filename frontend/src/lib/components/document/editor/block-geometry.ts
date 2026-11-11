@@ -6,7 +6,7 @@
 import { blockBounds, chartsOf, isChart } from '$lib/document/blocks';
 import { placeFrame, rotatedBounds, snapMove, type SnapGuide } from '$lib/document/geometry';
 import type { BlockKind, DocBlock, DocPage, PageOrientation, Rect } from '$lib/document/types';
-import type { Point } from '../editor-geometry';
+import type { Point } from './screen-geometry';
 
 /** A block as a drag holds it: what it was at the press, by what the kinds share. */
 export interface HeldBlock {

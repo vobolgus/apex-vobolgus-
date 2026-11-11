@@ -12,7 +12,7 @@
 import { rotatedBounds } from '$lib/document/geometry';
 import { anchoredFrame } from '$lib/document/text';
 import type { Rect } from '$lib/document/types';
-import type { Size } from '../editor-geometry';
+import type { Size } from '../editor/screen-geometry';
 
 /** The knob that turns the text: its size, and how far its far edge stands off the text, px (as in the CSS). */
 const KNOB_PX = 16;

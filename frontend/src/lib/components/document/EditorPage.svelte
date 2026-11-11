@@ -16,9 +16,9 @@
 	import { linkedChartId } from './blocks/reads';
 	import type { EditorActions } from './editor/actions';
 	import { blockState, type PageDrag } from './editor/drag-view';
+	import type { Box, SlotRole } from './editor/screen-geometry';
 	import PageGuides from './PageGuides.svelte';
 	import PageLabel from './PageLabel.svelte';
-	import type { Box, SlotRole } from './editor-geometry';
 
 	interface Props {
 		page: DocPage;

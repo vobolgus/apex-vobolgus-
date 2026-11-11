@@ -19,7 +19,6 @@ import { hasRoom } from '$lib/document/page';
 import { lookOf } from '$lib/document/table';
 import { DEFAULT_TEXT_STYLE, quarterTurn, stepTextSize } from '$lib/document/text';
 import type { DocBlock, DocPage, TableSpec, TextStyle, TypesetBlock } from '$lib/document/types';
-import { spokenSize, type Point } from '../editor-geometry';
 import { likedTableWidth } from '../typeset.svelte';
 import type { BlockActions } from './actions';
 import { frameOnPage, nudgedFrame } from './block-geometry';
@@ -27,6 +26,7 @@ import { blockCommand, repeatsWhenHeld, type BlockCommand } from './block-keys';
 import type { EditorContext } from './context.svelte';
 import type { DragController } from './drag.svelte';
 import { newTable, newText } from './new-blocks';
+import { spokenSize, type Point } from './screen-geometry';
 
 export class BlockOperations implements BlockActions {
 	readonly #editor: EditorContext;

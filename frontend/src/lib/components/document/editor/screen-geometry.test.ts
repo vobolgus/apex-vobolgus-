@@ -18,7 +18,7 @@ import {
 	sizeStep,
 	spokenSize,
 	type Box
-} from './editor-geometry';
+} from './screen-geometry';
 
 const PORTRAIT = pageSize('portrait');
 const LANDSCAPE = pageSize('landscape');
