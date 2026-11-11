@@ -1,10 +1,10 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
-import { DocumentStore, MAX_CHARTS } from './document.svelte';
+import { DocumentStore, MAX_CHARTS } from '$lib/document/document.svelte';
+import { memoryStorage } from '$lib/document/test-support';
 import { chartBoxOnScreen, PDF_FLIGHT_MS, type Box, type LandingTarget } from './flight';
 import { PdfFlight, type FlightPanel, type PdfFlightHost } from './pdf-flight.svelte';
-import { memoryStorage } from './test-support';
 
 const VIEW: ChartView = {
 	projection: 'stereographic',

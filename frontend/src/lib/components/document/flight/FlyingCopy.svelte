@@ -5,7 +5,7 @@
 	 * the flight on its place on that thumbnail and played there from over the
 	 * preview; above the page and its panels, under the toast. It takes no pointer.
 	 */
-	import type { PdfFlight } from '$lib/document/pdf-flight.svelte';
+	import type { PdfFlight } from './pdf-flight.svelte';
 
 	let { flight }: { flight: PdfFlight } = $props();
 </script>

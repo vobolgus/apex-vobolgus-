@@ -12,7 +12,7 @@
 	 */
 	import { untrack } from 'svelte';
 	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
-	import type { Box, Landing, LandingTarget } from '$lib/document/flight';
+	import type { Box, Landing, LandingTarget } from '../flight/flight';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 	import type { TemplatePick } from '../templates/pick';
 	import TemplatePicker from '../templates/TemplatePicker.svelte';

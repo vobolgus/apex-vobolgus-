@@ -12,7 +12,7 @@
 
 import { tick } from 'svelte';
 import type { DocumentStore } from '$lib/document/document.svelte';
-import type { Box, Landing, LandingTarget } from '$lib/document/flight';
+import type { Box, Landing, LandingTarget } from '../flight/flight';
 import { flash, growIn, makeRoom, reducedMotion, shrinkOut } from './list-motion';
 
 /** What a page in the list asks of the panel. */

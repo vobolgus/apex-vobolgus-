@@ -13,10 +13,12 @@
 
 import { tick } from 'svelte';
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import { MAX_CHARTS, MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
+import { snapshotChart } from '$lib/document/render';
+import type { ChartSnapshot } from '$lib/document/types';
 import { chartThumbnail, drawChartThumbnail } from '$lib/renderer/chart-thumbnail';
 import { catalog } from '$lib/state/catalog.svelte';
 import { prefersReducedMotion } from '$lib/ui/motion';
-import { MAX_CHARTS, MAX_PAGES, type DocumentStore } from './document.svelte';
 import {
 	chartBoxOnScreen,
 	FLIGHT_FADE,
@@ -31,8 +33,6 @@ import {
 	type Landing,
 	type LandingTarget
 } from './flight';
-import { snapshotChart } from './render';
-import type { ChartSnapshot } from './types';
 
 /** What the flight asks of the pages panel (`PagesPanel`'s exports). */
 export interface FlightPanel {

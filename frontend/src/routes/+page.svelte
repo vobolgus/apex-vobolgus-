@@ -13,7 +13,8 @@
 	import { LayersDock } from '$lib/components/dock/layers-dock.svelte';
 	import LayersPanel from '$lib/components/dock/LayersPanel.svelte';
 	import { LAYERS_PANEL_FOOTPRINT_PX } from '$lib/components/dock/options';
-	import FlyingCopy from '$lib/components/document/FlyingCopy.svelte';
+	import FlyingCopy from '$lib/components/document/flight/FlyingCopy.svelte';
+	import { PdfFlight } from '$lib/components/document/flight/pdf-flight.svelte';
 	import PageEditor from '$lib/components/document/PageEditor.svelte';
 	import PagesPanel from '$lib/components/document/panel/PagesPanel.svelte';
 	import AppHeader from '$lib/components/header/AppHeader.svelte';
@@ -22,7 +23,6 @@
 	import { StageController } from '$lib/components/stage/stage.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import { DocumentStore } from '$lib/document/document.svelte';
-	import { PdfFlight } from '$lib/document/pdf-flight.svelte';
 	import { isApplePlatform, pageCommand } from '$lib/shortcuts';
 	import { LayerState } from '$lib/state/layers.svelte';
 	import { ProjectionTransition } from '$lib/state/projection-transition.svelte';

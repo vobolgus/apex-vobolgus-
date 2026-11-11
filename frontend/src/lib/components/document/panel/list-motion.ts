@@ -9,7 +9,7 @@
  * less motion is asked for, or where there are no animations (jsdom).
  */
 
-import { PDF_FLIGHT_EASING, settleKeyframes, type Landing } from '$lib/document/flight';
+import { PDF_FLIGHT_EASING, settleKeyframes, type Landing } from '../flight/flight';
 
 /** The list's gap between pages, px, as in the CSS. */
 const LIST_GAP_PX = 12;
