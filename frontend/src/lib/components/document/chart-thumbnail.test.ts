@@ -9,7 +9,7 @@ import {
 } from '$lib/constants';
 import type { ChartSnapshot, SkyMark } from '$lib/document/types';
 import { pointingToOrientation } from '$lib/math/pointing';
-import type { StarVector } from '$lib/stores.svelte';
+import type { StarVector } from '$lib/math/projection';
 import { CHART_THUMB_PX, drawChartThumbnail, ringPoints, thumbnailCrop } from './chart-thumbnail';
 
 const VIEW: ChartView = {

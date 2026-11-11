@@ -17,7 +17,7 @@ import {
 	type Quaternion,
 	type Vec3
 } from '$lib/math/quaternion';
-import { view } from '$lib/stores.svelte';
+import { view } from '$lib/state/view.svelte';
 import { prefersReducedMotion } from '$lib/ui/motion';
 
 export type ProjectionMode = 'stereographic' | 'pinhole';

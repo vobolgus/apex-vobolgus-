@@ -7,7 +7,7 @@
 import type { CloseUp } from '$lib/document/templates';
 import { isOnChart } from '$lib/document/templates';
 import type { ChartSnapshot } from '$lib/document/types';
-import type { MessierObject } from '$lib/stores.svelte';
+import type { MessierObject } from '$lib/api/catalog-types';
 
 /** "M 42 · Orion Nebula", or "M 40" for one with no name. */
 export function objectName(object: MessierObject): string {

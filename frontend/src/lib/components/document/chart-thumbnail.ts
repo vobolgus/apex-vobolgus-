@@ -12,8 +12,12 @@ import {
 	STAR_COLOR
 } from '$lib/constants';
 import type { ChartSnapshot, SkyMark } from '$lib/document/types';
-import { getProjectionFrameParams, sampleStarMorphFrame, toViewSpace } from '$lib/math/projection';
-import type { StarVector } from '$lib/stores.svelte';
+import {
+	getProjectionFrameParams,
+	sampleStarMorphFrame,
+	toViewSpace,
+	type StarVector
+} from '$lib/math/projection';
 
 /** Long side of the thumbnail, px: sharp in the pages panel, small in storage. */
 export const CHART_THUMB_PX = 320;

@@ -14,7 +14,7 @@ import {
 import { pinholeFovToStereoFov, stereoFovToPinholeFov } from '$lib/math/projection';
 import { getProjectionBlend } from '$lib/renderer/canvas-renderer';
 import type { ProjectionAnimationState } from '$lib/renderer/types';
-import { view } from '$lib/stores.svelte';
+import { view } from '$lib/state/view.svelte';
 
 export const PROJECTION_OPTIONS = ['stereographic', 'pinhole'] as const;
 export type ProjectionMode = (typeof PROJECTION_OPTIONS)[number];

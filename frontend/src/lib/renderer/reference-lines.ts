@@ -4,7 +4,7 @@ import { clamp } from '../math/easing';
 import { sampleStarMorphFrame } from '../math/projection';
 import type { UnitVec3 } from '../math/astronomy';
 import type { ProjectionFrameParams } from '../math/projection';
-import type { ConstellationData, ConstellationSegmentPoint } from '../stores.svelte';
+import type { ConstellationData, ConstellationSegmentPoint } from '../api/catalog-types';
 
 // Astronomical constants and frame conversions live in ../math/astronomy.ts — this module is
 // drawing only. Re-exported here for existing consumers.

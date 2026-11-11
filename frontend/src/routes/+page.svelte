@@ -48,7 +48,8 @@
 		type ProjectionMode
 	} from '$lib/state/projection-transition.svelte';
 	import { applySharedView, decodeViewHash, encodeViewHash } from '$lib/state/view-url';
-	import { catalog, view } from '$lib/stores.svelte';
+	import { catalog } from '$lib/state/catalog.svelte';
+	import { view } from '$lib/state/view.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
 	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { toast, type ToastItem } from '$lib/ui/toast.svelte';

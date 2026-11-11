@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MAX_FOV_DEG_STEREO, PINHOLE_FOV_DEG_DEFAULT } from '$lib/constants';
 import { pinholeFovToStereoFov, stereoFovToPinholeFov } from '$lib/math/projection';
-import { view } from '$lib/stores.svelte';
+import { view } from '$lib/state/view.svelte';
 import { ProjectionTransition } from './projection-transition.svelte';
 
 describe('ProjectionTransition field of view carry', () => {

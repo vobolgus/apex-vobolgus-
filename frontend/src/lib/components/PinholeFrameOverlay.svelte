@@ -57,7 +57,7 @@
 		type PinholeLimits,
 		type PinholeShape
 	} from '$lib/math/pinhole-frame';
-	import { view } from '$lib/stores.svelte';
+	import { view } from '$lib/state/view.svelte';
 
 	interface Props {
 		/** Side of the square chart surface, CSS px. */

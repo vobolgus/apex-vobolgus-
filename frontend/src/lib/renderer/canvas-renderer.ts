@@ -29,7 +29,7 @@ import {
 } from './reference-lines';
 
 import type { Quaternion } from '../math/quaternion';
-import type { ConstellationData } from '../stores.svelte';
+import type { ConstellationData } from '../api/catalog-types';
 import { prefersReducedMotion } from '../ui/motion';
 import type {
 	MorphInterpolator,

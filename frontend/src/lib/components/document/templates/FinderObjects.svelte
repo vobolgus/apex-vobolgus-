@@ -8,7 +8,7 @@
 	 */
 	import { pageSize } from '$lib/document/geometry';
 	import type { DocPage, PageOrientation } from '$lib/document/types';
-	import type { MessierObject } from '$lib/stores.svelte';
+	import type { MessierObject } from '$lib/api/catalog-types';
 	import PageThumbnail from '../PageThumbnail.svelte';
 	import { objectName, type FinderChoice } from './finder.svelte';
 

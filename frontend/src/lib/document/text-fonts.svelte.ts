@@ -11,7 +11,7 @@
 
 import { base } from '$app/paths';
 import { loadMessier } from '$lib/api/catalog';
-import { catalog } from '$lib/stores.svelte';
+import { catalog } from '$lib/state/catalog.svelte';
 import { blockLayout, narrowestTableWidth, tableContent, tableWidth } from './table';
 import {
 	boundChart,

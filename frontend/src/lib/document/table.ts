@@ -15,7 +15,7 @@
  */
 
 import { toViewSpace } from '$lib/math/projection';
-import type { CatalogStar, MessierObject } from '$lib/stores.svelte';
+import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
 import { constellationName, kindName, starName } from './sky-names';
 import {
 	boundChart,

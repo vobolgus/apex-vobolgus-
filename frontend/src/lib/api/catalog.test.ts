@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { catalog } from '$lib/stores.svelte';
+import { catalog } from '$lib/state/catalog.svelte';
 import { loadConstellations, loadStars } from './catalog';
 
 const BRIGHT = [{ ra: 1.7, dec: -0.29, v_mag: -1.44 }];

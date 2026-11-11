@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FOV_DEG_STEREO, MIN_FOV_DEG_STEREO } from '$lib/constants';
 import { quaternionFromAxisAngle, type Quaternion } from '$lib/math/quaternion';
-import { view } from '$lib/stores.svelte';
+import { view } from '$lib/state/view.svelte';
 import { InputController } from './input-handlers';
 
 const IDENTITY: Quaternion = { x: 0, y: 0, z: 0, w: 1 };

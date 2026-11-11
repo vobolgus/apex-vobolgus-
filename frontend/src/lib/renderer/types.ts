@@ -1,6 +1,6 @@
 import type { Quaternion } from '../math/quaternion';
 import type { StarVector } from '../math/projection';
-import type { ConstellationData } from '../stores.svelte';
+import type { ConstellationData } from '../api/catalog-types';
 
 export type MorphInterpolator = (t: number) => string;
 

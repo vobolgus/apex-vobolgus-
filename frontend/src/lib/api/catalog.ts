@@ -8,12 +8,8 @@
  */
 
 import { raDecToUnitVector } from '$lib/math/astronomy';
-import {
-	catalog,
-	type CatalogStar,
-	type ConstellationData,
-	type MessierObject
-} from '$lib/stores.svelte';
+import { catalog } from '$lib/state/catalog.svelte';
+import type { CatalogStar, ConstellationData, MessierObject } from './catalog-types';
 
 /**
  * Faintest star the preview draws: the backend's default for `/api/catalog/full`,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pointingToOrientation } from '$lib/math/pointing';
-import type { CatalogStar, MessierObject } from '$lib/stores.svelte';
+import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
 import { constellationName, starName } from './sky-names';
 import {
 	blockLayout,

@@ -20,7 +20,7 @@ import {
 import { chartsOf, typesetOf } from './blocks';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
 import { loadMessier } from '$lib/api/catalog';
-import { catalog } from '$lib/stores.svelte';
+import { catalog } from '$lib/state/catalog.svelte';
 import { blockLayout, type Sky } from './table';
 import { alignAnchor, anchoredFrame, MAX_LINE_CHARS, MAX_TEXT_LINES, type Measure } from './text';
 import { loadTextFonts, measureText } from './text-fonts.svelte';

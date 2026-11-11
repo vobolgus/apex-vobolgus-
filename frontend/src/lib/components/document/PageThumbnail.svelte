@@ -23,7 +23,7 @@
 	import { anchoredFrame } from '$lib/document/text';
 	import { shownLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage } from '$lib/document/types';
-	import { catalog } from '$lib/stores.svelte';
+	import { catalog } from '$lib/state/catalog.svelte';
 	import { drawChartThumbnail } from './chart-thumbnail';
 	import TextLines from './TextLines.svelte';
 

@@ -21,6 +21,7 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { loadMessier } from '$lib/api/catalog';
+	import type { MessierObject } from '$lib/api/catalog-types';
 	import { chartsOf } from '$lib/document/blocks';
 	import { LANGUAGE_NAMES } from '$lib/document/labels';
 	import {
@@ -35,7 +36,7 @@
 	} from '$lib/document/templates';
 	import { measuredLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage, PageOrientation, TextStyle } from '$lib/document/types';
-	import { catalog, type MessierObject } from '$lib/stores.svelte';
+	import { catalog } from '$lib/state/catalog.svelte';
 	import EditorOrientation from '../EditorOrientation.svelte';
 	import FinderObjects from './FinderObjects.svelte';
 	import { closeUpOf, FinderChoice } from './finder.svelte';

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isOnChart } from '$lib/document/templates';
 import { chart } from '$lib/document/test-support';
 import { orientationToPointing } from '$lib/math/pointing';
-import type { MessierObject } from '$lib/stores.svelte';
+import type { MessierObject } from '$lib/api/catalog-types';
 import { closeUpOf, FinderChoice, matching, objectName, objectsOn } from './finder.svelte';
 
 function object(m: number, over: Partial<MessierObject> = {}): MessierObject {
