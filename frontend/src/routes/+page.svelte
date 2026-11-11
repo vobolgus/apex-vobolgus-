@@ -1,20 +1,19 @@
 <script lang="ts">
-	import { onMount, tick, untrack } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { replaceState } from '$app/navigation';
-	import { loadConstellationBoundaries, loadConstellations, loadStars } from '$lib/api/catalog';
 	import { exportChart, type ExportFormat } from '$lib/api/export';
-	import { buildRenderConfig, type ChartView } from '$lib/api/render-config';
+	import { buildRenderConfig } from '$lib/api/render-config';
 	import AboutDialog from '$lib/components/AboutDialog.svelte';
 	import { chartThumbnail, drawChartThumbnail } from '$lib/components/document/chart-thumbnail';
 	import PageEditor from '$lib/components/document/PageEditor.svelte';
 	import PagesPanel from '$lib/components/document/panel/PagesPanel.svelte';
-	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import LayersPanel from '$lib/components/dock/LayersPanel.svelte';
 	import LayersPopover from '$lib/components/dock/LayersPopover.svelte';
 	import { LAYERS_PANEL_FOOTPRINT_PX, PROJECTION_SEGMENTS } from '$lib/components/dock/options';
 	import SegmentedControl from '$lib/components/dock/SegmentedControl.svelte';
-	import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
+	import ChartStage from '$lib/components/stage/ChartStage.svelte';
+	import { StageController } from '$lib/components/stage/stage.svelte';
 	import { DocumentStore, MAX_CHARTS, MAX_PAGES } from '$lib/document/document.svelte';
 	import { plural } from '$lib/document/labels';
 	import {
@@ -31,10 +30,6 @@
 	} from '$lib/document/flight';
 	import type { ChartSnapshot } from '$lib/document/types';
 	import { exportDocument, snapshotChart } from '$lib/document/render';
-	import { loadFlubberInterpolator } from '$lib/flubber';
-	import { clearWidthAroundChart } from '$lib/math/chart-area';
-	import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
-	import { InputController } from '$lib/renderer/input-handlers';
 	import {
 		ariaKeys,
 		isApplePlatform,
@@ -43,13 +38,9 @@
 		keyLabel
 	} from '$lib/shortcuts';
 	import { LayerState } from '$lib/state/layers.svelte';
-	import {
-		ProjectionTransition,
-		type ProjectionMode
-	} from '$lib/state/projection-transition.svelte';
+	import { ProjectionTransition } from '$lib/state/projection-transition.svelte';
 	import { applySharedView, decodeViewHash, encodeViewHash } from '$lib/state/view-url';
 	import { catalog } from '$lib/state/catalog.svelte';
-	import { view } from '$lib/state/view.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
 	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { toast, type ToastItem } from '$lib/ui/toast.svelte';
@@ -69,8 +60,6 @@
 	const NARROW_QUERY = '(max-width: 743px)';
 	/** An export slower than this says it is working on it. */
 	const EXPORT_PROGRESS_DELAY_MS = 600;
-	/** The chart area's padding, px, as in the CSS: the panels' reserves are measured inside it. */
-	const CHART_AREA_PADDING_PX = 12;
 	const LAYERS_PANEL_ID = 'layers-panel';
 	/** Whether the layers panel was left open, kept for the next visit. */
 	const LAYERS_PANEL_STORAGE_KEY = 'skycharts.layers.panel';
@@ -81,39 +70,12 @@
 	 * well before (an SVG in tens of ms), and a ring that flashes for a frame is noise.
 	 */
 	const EXPORT_BUSY_DELAY_MS = 350;
-	/** How long the chart takes to move to its new place when a panel opens or closes. */
-	const CHART_MOVE_MS = 260;
-	/** The catalogue says it is loading only when it takes longer than this. */
-	const CATALOG_SLOW_MS = 500;
 	/** The address bar follows the view once it has been still for this long. */
 	const URL_SYNC_DELAY_MS = 300;
 
-	/** What the chart is drawn from, each fetched on its own. */
-	const CATALOG_LOADERS = {
-		// Stars are drawn twice: the bright ones first, then all of them.
-		stars: () => loadStars(markRenderDirty),
-		constellations: loadConstellations,
-		boundaries: loadConstellationBoundaries
-	} as const;
-	type CatalogPart = keyof typeof CATALOG_LOADERS;
-	const CATALOG_PARTS = Object.keys(CATALOG_LOADERS) as CatalogPart[];
-
-	let canvasEl: HTMLCanvasElement | null = null;
-	let chartAreaEl: HTMLElement | null = null;
-	let chartSurfaceEl: HTMLDivElement | null = null;
-	let surfaceSizePx = $state(1);
-	// The chart area clips the surface; the frame overlay keeps its handles inside it.
-	let chartClipWidthPx = $state(1);
-	let chartClipHeightPx = $state(1);
-	let pinholeOverlay = $state<ReturnType<typeof PinholeFrameOverlay>>();
-	let input: InputController | null = null;
-	let renderer: CanvasRenderer | null = null;
-	let rafId = 0;
-	let renderDirty = false;
-	let lastFrameTimeMs = 0;
-
 	const layers = new LayerState();
 	const projection = new ProjectionTransition();
+	const stage = new StageController(layers, projection);
 	const exportMenu = new Dropdown();
 	const layersMenu = new Dropdown();
 	const menus = new DropdownGroup(exportMenu, layersMenu);
@@ -164,20 +126,6 @@
 	let documentExporting = $state(false);
 	/** An SVG or PDF of the chart is on its way; a second one waits for it. */
 	let chartExporting = false;
-	/** The catalogue parts that did not arrive; the notice over the chart offers to try again. */
-	let catalogFailed = $state<CatalogPart[]>([]);
-	let catalogLoading = $state(true);
-	/** The load is slow, or a retry: worth saying so. */
-	let catalogSlow = $state(false);
-	const catalogFailure = $derived(
-		catalogFailed.includes('stars')
-			? 'Couldn’t load the star catalogue.'
-			: catalogFailed.length === 2
-				? 'Couldn’t load the constellation lines and boundaries.'
-				: catalogFailed[0] === 'constellations'
-					? 'Couldn’t load the constellation lines.'
-					: 'Couldn’t load the constellation boundaries.'
-	);
 	/**
 	 * The view the address bar holds, as a fragment; null until the page has read it.
 	 * The bar is written only once the view differs from this, so a plain visit keeps
@@ -190,16 +138,6 @@
 	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
 	const layersDocked = $derived(!narrow);
 	const layersReservePx = $derived(layersDocked && layersPanelOpen ? LAYERS_PANEL_FOOTPRINT_PX : 0);
-	/** Room for the pinhole frame's handles between the two panels, around where the chart sits. */
-	const frameClipWidthPx = $derived(
-		clearWidthAroundChart(
-			chartClipWidthPx - 2 * CHART_AREA_PADDING_PX,
-			surfaceSizePx,
-			panelReservePx,
-			layersReservePx
-		) +
-			2 * CHART_AREA_PADDING_PX
-	);
 	const documentNote = $derived(
 		documentExporting
 			? 'Preparing…'
@@ -239,42 +177,6 @@
 		};
 		window.addEventListener('pagehide', flushDocument);
 		document.addEventListener('visibilitychange', handleVisibilityChange);
-		input = new InputController({
-			canvas: () => canvasEl,
-			onChange: markRenderDirty,
-			getMode: () => (projection.blend < 0.5 ? 'stereographic' : 'pinhole')
-		});
-		renderer = canvasEl ? new CanvasRenderer(canvasEl) : null;
-
-		const surfaceObserver = chartSurfaceEl
-			? new ResizeObserver((entries) => {
-					for (const entry of entries) {
-						if (entry.target === chartSurfaceEl) {
-							const { width, height } = entry.contentRect;
-							surfaceSizePx = Math.max(1, Math.min(width, height));
-						} else if (entry.target === chartAreaEl) {
-							measureChartClip();
-						}
-					}
-				})
-			: null;
-		if (surfaceObserver && chartSurfaceEl) {
-			surfaceObserver.observe(chartSurfaceEl);
-			const rect = chartSurfaceEl.getBoundingClientRect();
-			surfaceSizePx = Math.max(1, Math.min(rect.width, rect.height));
-		}
-		if (surfaceObserver && chartAreaEl) {
-			surfaceObserver.observe(chartAreaEl);
-			measureChartClip();
-		}
-
-		// Zoom gestures are taken on the whole chart surface, not just the canvas, so a
-		// trackpad pinch over the frame's resize handles still zooms the sky instead of
-		// the page.
-		const handleChartWheel = (event: WheelEvent) => input?.onCanvasWheel(event);
-		const handleChartGestureStart = (event: Event) => input?.onCanvasGestureStart(event);
-		const handleChartGestureChange = (event: Event) => input?.onCanvasGestureChange(event);
-
 		const handleKeyDown = (event: KeyboardEvent) => {
 			// ⌘Z/Ctrl+Z takes back what the toast offers to undo, from anywhere; the editor,
 			// which keeps its keys from the page, does the same through its `undo`.
@@ -311,27 +213,14 @@
 				!event.altKey
 			) {
 				event.preventDefault();
-				switchProjection(projection.otherMode);
+				stage.switchProjection(projection.otherMode);
 			}
-			input?.onKeyDown(event);
+			stage.keydown(event);
 		};
-		const handleKeyUp = (event: KeyboardEvent) => input?.onKeyUp(event);
-		const handleBlur = () => input?.onBlur();
 		const stopMenuDismiss = menus.listen();
 		window.addEventListener('keydown', handleKeyDown);
-		window.addEventListener('keyup', handleKeyUp);
-		window.addEventListener('blur', handleBlur);
-		chartSurfaceEl?.addEventListener('wheel', handleChartWheel, { passive: false });
-		chartSurfaceEl?.addEventListener('gesturestart', handleChartGestureStart, { passive: false });
-		chartSurfaceEl?.addEventListener('gesturechange', handleChartGestureChange, {
-			passive: false
-		});
-
-		void loadFlubberInterpolator().then((interpolate) => {
-			renderer?.setMorphInterpolatorFactory(interpolate);
-			markRenderDirty();
-		});
-		void loadCatalog(CATALOG_PARTS);
+		window.addEventListener('keyup', stage.keyup);
+		window.addEventListener('blur', stage.release);
 		return () => {
 			stopMenuDismiss();
 			window.removeEventListener('hashchange', flyToViewFromUrl);
@@ -342,44 +231,14 @@
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			flushDocument();
 			window.removeEventListener('keydown', handleKeyDown);
-			window.removeEventListener('keyup', handleKeyUp);
-			window.removeEventListener('blur', handleBlur);
-			chartSurfaceEl?.removeEventListener('wheel', handleChartWheel);
-			chartSurfaceEl?.removeEventListener('gesturestart', handleChartGestureStart);
-			chartSurfaceEl?.removeEventListener('gesturechange', handleChartGestureChange);
-			surfaceObserver?.disconnect();
-			if (rafId) {
-				cancelAnimationFrame(rafId);
-			}
-			input = null;
+			window.removeEventListener('keyup', stage.keyup);
+			window.removeEventListener('blur', stage.release);
 		};
 	});
 
-	/**
-	 * Fetch `parts` of the catalogue, drawing each as it arrives. What fails is kept
-	 * in `catalogFailed` for the notice; a `retry` says it is loading at once, so the
-	 * notice does not blink away and back when the backend is still down.
-	 */
-	async function loadCatalog(parts: readonly CatalogPart[], retry = false) {
-		catalogLoading = true;
-		catalogSlow = retry;
-		const slowTimer = setTimeout(() => (catalogSlow = true), CATALOG_SLOW_MS);
-		const arrived = await Promise.all(
-			parts.map(async (part) => {
-				const ok = await CATALOG_LOADERS[part]();
-				if (ok) markRenderDirty();
-				return ok;
-			})
-		);
-		clearTimeout(slowTimer);
-		catalogFailed = parts.filter((_, index) => !arrived[index]);
-		catalogLoading = false;
-		catalogSlow = false;
-	}
-
 	/** The view as the address bar would hold it. */
 	function viewHash(): string {
-		return encodeViewHash(currentChartView(), layers);
+		return encodeViewHash(stage.chartView, layers);
 	}
 
 	/**
@@ -391,26 +250,10 @@
 	function readViewFromUrl(fly = false) {
 		const shared = decodeViewHash(window.location.hash);
 		if (shared) {
-			const current = currentChartView();
+			const current = stage.chartView;
 			const next = applySharedView(current, shared);
-			input?.stopMotion();
-			view.pinholeAspectRatio = next.pinholeAspectRatio;
-			view.pinholeHeightFrac = next.pinholeHeightFrac;
 			layers.assign(shared.layers);
-			if (fly && input && next.projection === current.projection && !prefersReducedMotion()) {
-				const pinhole = next.projection === 'pinhole';
-				input.flyTo(
-					next.orientation,
-					pinhole ? next.pinholeFovDeg : next.stereoFovDeg,
-					next.projection
-				);
-			} else {
-				view.orientation = next.orientation;
-				view.stereoFovDeg = next.stereoFovDeg;
-				view.pinholeFovDeg = next.pinholeFovDeg;
-				projection.jump(next.projection);
-			}
-			markRenderDirty();
+			stage.show(next, fly && next.projection === current.projection && !prefersReducedMotion());
 		}
 		syncedHash = viewHash();
 	}
@@ -432,97 +275,6 @@
 		}
 	}
 
-	function measureChartClip() {
-		if (!chartAreaEl) return;
-		chartClipWidthPx = Math.max(1, chartAreaEl.clientWidth);
-		chartClipHeightPx = Math.max(1, chartAreaEl.clientHeight);
-	}
-
-	function markRenderDirty() {
-		renderDirty = true;
-		scheduleFrame();
-	}
-
-	function scheduleFrame() {
-		if (rafId) return;
-		rafId = requestAnimationFrame(onFrame);
-	}
-
-	function onFrame(frameTimeMs: number) {
-		rafId = 0;
-		const dtMs = lastFrameTimeMs > 0 ? Math.min(frameTimeMs - lastFrameTimeMs, 100) : 16;
-		lastFrameTimeMs = frameTimeMs;
-
-		// A frame-resize drag applies its latest pointer position here, so the overlay
-		// and the canvas move together, at most once per frame.
-		if (pinholeOverlay?.flush()) renderDirty = true;
-
-		const inputActive = input?.tick(dtMs) ?? false;
-		if (inputActive) renderDirty = true;
-
-		const linesAnimating = renderer?.hasActiveAnimations() ?? false;
-		if (!renderDirty && !projection.animating && !linesAnimating) {
-			lastFrameTimeMs = 0;
-			return;
-		}
-		renderDirty = false;
-
-		projection.tick(frameTimeMs);
-		renderer?.render({
-			orientation: view.orientation,
-			stereoFovDeg: view.stereoFovDeg,
-			pinholeFovDeg: view.pinholeFovDeg,
-			pinholeAspectRatio: view.pinholeAspectRatio,
-			pinholeHeightFrac: view.pinholeHeightFrac,
-			starVectors: catalog.starVectors,
-			projectionBlend: projection.blend,
-			referenceLines: layers.referenceLines,
-			constellations: catalog.constellations,
-			constellationBoundaries: catalog.constellationBoundaries
-		});
-
-		const linesAnimatingAfter = renderer?.hasActiveAnimations() ?? false;
-		if (projection.animating || inputActive || linesAnimatingAfter) {
-			scheduleFrame();
-		} else {
-			lastFrameTimeMs = 0;
-		}
-	}
-
-	$effect(() => {
-		// Reading the snapshot subscribes to every reference-line flag at once.
-		void layers.referenceLines;
-		markRenderDirty();
-	});
-
-	// A panel opening or closing changes what room the chart has, and the chart is laid
-	// out in its new place at once. It is then played there from where it was (first,
-	// last, invert, play): a transform alone, which the compositor runs without laying
-	// the page out or scaling the canvas again on every frame. A window resize changes
-	// no reserve and so moves the chart directly, as it should.
-	$effect.pre(() => {
-		void panelReservePx;
-		void layersReservePx;
-		const surface = chartSurfaceEl;
-		if (!surface || !untrack(() => motionReady) || prefersReducedMotion()) return;
-		if (typeof surface.animate !== 'function') return;
-		// Before the DOM takes the new reserves: where the chart is now, mid-move or not.
-		const first = surface.getBoundingClientRect();
-		void tick().then(() => {
-			surface.getAnimations().forEach((animation) => animation.cancel());
-			const last = surface.getBoundingClientRect();
-			if (last.width <= 0) return;
-			const scale = first.width / last.width;
-			const dx = first.left + first.width / 2 - (last.left + last.width / 2);
-			const dy = first.top + first.height / 2 - (last.top + last.height / 2);
-			if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(scale - 1) < 0.002) return;
-			surface.animate(
-				[{ transform: `translate(${dx}px, ${dy}px) scale(${scale})` }, { transform: 'none' }],
-				{ duration: CHART_MOVE_MS, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
-			);
-		});
-	});
-
 	$effect(() => {
 		// Reading the fragment subscribes to the view, the projection and the layers.
 		const hash = viewHash();
@@ -530,23 +282,6 @@
 		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
 		urlSyncTimer = setTimeout(writeViewToUrl, URL_SYNC_DELAY_MS);
 	});
-
-	function switchProjection(nextMode: ProjectionMode) {
-		projection.start(nextMode);
-		markRenderDirty();
-	}
-
-	/** What the preview shows now; the projection is the one it is heading to. */
-	function currentChartView(): ChartView {
-		return {
-			projection: projection.mode,
-			orientation: view.orientation,
-			stereoFovDeg: view.stereoFovDeg,
-			pinholeFovDeg: view.pinholeFovDeg,
-			pinholeAspectRatio: view.pinholeAspectRatio,
-			pinholeHeightFrac: view.pinholeHeightFrac
-		};
-	}
 
 	/**
 	 * Run an export that may be slow and may fail. Past EXPORT_PROGRESS_DELAY_MS a held
@@ -581,9 +316,9 @@
 	 * the backend from the view as it is now, and a second one waits for the first.
 	 */
 	async function runExport(format: ExportFormat) {
-		const config = () => buildRenderConfig(currentChartView(), layers, new Date());
+		const config = () => buildRenderConfig(stage.chartView, layers, new Date());
 		if (format === 'PNG') {
-			const result = await exportChart(canvasEl, format, config);
+			const result = await exportChart(stage.canvas, format, config);
 			if (result.ok) showExported(format);
 			else toast.show('Couldn’t save the PNG. Try again in a moment.');
 			return;
@@ -595,7 +330,7 @@
 		const busyTimer = setTimeout(() => (exportPhase = 'busy'), EXPORT_BUSY_DELAY_MS);
 		const result = await withExportProgress(
 			`Preparing the ${format}…`,
-			() => exportChart(canvasEl, format, config),
+			() => exportChart(stage.canvas, format, config),
 			() => `Couldn’t export the ${format}. Try again in a moment.`
 		);
 		clearTimeout(busyTimer);
@@ -622,7 +357,7 @@
 	 * opens on that page and flashes it; the toast offers to take the Add back.
 	 */
 	function addToPdf() {
-		const chartView = currentChartView();
+		const chartView = stage.chartView;
 		const chart = snapshotChart(chartView, layers);
 		// The backend's limits: a document past them would not export.
 		const blocker = documentStore.addChartBlocker(chart);
@@ -634,9 +369,10 @@
 			);
 			return;
 		}
-		const thumb = canvasEl ? chartThumbnail(canvasEl, chartView) : undefined;
+		const canvas = stage.canvas;
+		const thumb = canvas ? chartThumbnail(canvas, chartView) : undefined;
 		// Where the chart is on screen now: adding it may bring the pages panel in and move it.
-		const canvasBox = canvasEl?.getBoundingClientRect() ?? null;
+		const canvasBox = canvas?.getBoundingClientRect() ?? null;
 		// A copy still in the air from the last Add comes down at once.
 		void landPdfFlight();
 		// And where the charts already on the pages are: this one may move them to make room.
@@ -646,7 +382,7 @@
 		const flying =
 			canvasBox !== null &&
 			canvasBox.width > 0 &&
-			typeof canvasEl?.animate === 'function' &&
+			typeof canvas?.animate === 'function' &&
 			!prefersReducedMotion();
 		// Before the thumbnail is drawn: the chart's place on it stays empty until the copy lands.
 		if (flying) pendingItemId = itemId;
@@ -792,7 +528,7 @@
 	function openEditor(pageId: string) {
 		menus.closeAll();
 		// Keys held down as the editor opens must not keep turning the sky behind it.
-		input?.onBlur();
+		stage.release();
 		documentStore.selectedPageId = pageId;
 		editorPageId = pageId;
 	}
@@ -884,7 +620,7 @@
 		if (next) {
 			menus.closeAll();
 			// Keys held down as the dialog opens must not keep turning the sky behind it.
-			input?.onBlur();
+			stage.release();
 		}
 		aboutOpen = next;
 	}
@@ -892,14 +628,11 @@
 
 <main
 	class="page"
-	onpointerdown={(event) => input?.onPointerDown(event)}
-	onpointermove={(event) => {
-		input?.onPointerMove(event);
-		pinholeOverlay?.trackPointer(event);
-	}}
-	onpointerleave={() => pinholeOverlay?.clearPointer()}
-	onpointerup={(event) => input?.onPointerUp(event)}
-	onpointercancel={(event) => input?.onPointerUp(event)}
+	onpointerdown={stage.pointerdown}
+	onpointermove={stage.pointermove}
+	onpointerleave={stage.pointerleave}
+	onpointerup={stage.pointerup}
+	onpointercancel={stage.pointerup}
 >
 	<header class="ray-header">
 		<div class="ray-bottom">
@@ -1060,42 +793,12 @@
 			</div>
 		</div>
 	</header>
-	<section
-		class="chart-area"
-		bind:this={chartAreaEl}
-		style:--reserve-left="{panelReservePx}px"
-		style:--reserve-right="{layersReservePx}px"
+	<ChartStage
+		{stage}
+		reserveLeftPx={panelReservePx}
+		reserveRightPx={layersReservePx}
+		animated={motionReady}
 	>
-		<div class="chart-surface" bind:this={chartSurfaceEl}>
-			<canvas bind:this={canvasEl} width={CHART_CANVAS_BACKING_PX} height={CHART_CANVAS_BACKING_PX}
-			></canvas>
-			<PinholeFrameOverlay
-				bind:this={pinholeOverlay}
-				{surfaceSizePx}
-				clipWidthPx={Math.max(1, frameClipWidthPx)}
-				clipHeightPx={chartClipHeightPx}
-				visible={projection.isPinholeSettled}
-				onChange={markRenderDirty}
-			/>
-		</div>
-		<!-- Always in the tree, so the live region is there before its text changes. -->
-		<div class="catalog-notice-host" role="status">
-			{#if catalogLoading && catalogSlow}
-				<p class="catalog-notice">Loading the star catalogue…</p>
-			{:else if !catalogLoading && catalogFailed.length > 0}
-				<p class="catalog-notice">
-					<span class="catalog-notice-text">{catalogFailure}</span>
-					<span class="catalog-notice-divider" aria-hidden="true"></span>
-					<button
-						class="catalog-notice-action"
-						type="button"
-						onclick={() => loadCatalog(catalogFailed, true)}
-					>
-						Try again
-					</button>
-				</p>
-			{/if}
-		</div>
 		<PagesPanel
 			bind:this={pagesPanel}
 			bind:footprint={panelFootprintPx}
@@ -1116,7 +819,7 @@
 				onclose={closeLayersPanel}
 			/>
 		{/if}
-	</section>
+	</ChartStage>
 	<div class="control-bar-shell">
 		<div class="control-bar" role="group" aria-label="Generator display controls">
 			<div class="control-group">
@@ -1124,7 +827,7 @@
 					label="Projection"
 					options={PROJECTION_SEGMENTS}
 					value={projection.mode}
-					onselect={switchProjection}
+					onselect={stage.switchProjection}
 					shortcut="Shift+P"
 				/>
 			</div>
@@ -1180,91 +883,6 @@
 		overflow: hidden;
 	}
 
-	/*
-	 * The catalogue's notice: top centre of the chart area, over the chart. Styled as
-	 * the toast is; it stays until the catalogue has loaded.
-	 */
-	.catalog-notice-host {
-		position: absolute;
-		inset: 12px 12px auto;
-		z-index: 2;
-		display: flex;
-		justify-content: center;
-		pointer-events: none;
-	}
-
-	.catalog-notice {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		max-width: min(440px, 100%);
-		min-height: 40px;
-		margin: 0;
-		padding: 4px 14px;
-		border: 1px solid var(--hairline);
-		border-radius: var(--r-pop);
-		background: var(--pop);
-		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-		color: var(--fg-1);
-		font: var(--font-ui);
-		pointer-events: auto;
-		animation: catalog-notice-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
-	}
-
-	/* The toast's entrance, from the other side: this one hangs from the top. */
-	@keyframes catalog-notice-in {
-		from {
-			opacity: 0;
-			transform: translateY(-8px);
-		}
-	}
-
-	.catalog-notice:has(.catalog-notice-action) {
-		padding-right: 4px;
-	}
-
-	.catalog-notice-text {
-		min-width: 0;
-		padding: 4px 0;
-	}
-
-	.catalog-notice-divider {
-		flex-shrink: 0;
-		width: 1px;
-		height: 16px;
-		margin: 0 4px 0 8px;
-		background: var(--hairline);
-	}
-
-	.catalog-notice-action {
-		flex-shrink: 0;
-		height: var(--h-row);
-		padding: 0 10px;
-		border: 0;
-		border-radius: var(--r-row);
-		background: transparent;
-		color: var(--fg-1);
-		font: var(--font-ui);
-		font-weight: 600;
-		cursor: pointer;
-		transition: background var(--ease-ui);
-	}
-
-	@media (hover: hover) {
-		.catalog-notice-action:hover {
-			background: var(--fill-hover);
-		}
-	}
-
-	.catalog-notice-action:active {
-		background: var(--fill-press);
-	}
-
-	.catalog-notice-action:focus-visible {
-		outline: none;
-		box-shadow: var(--ring);
-	}
-
 	.ray-header {
 		height: 56px;
 		padding: 0 10px;
@@ -1273,47 +891,6 @@
 		background: #101114;
 		border-bottom: none;
 		z-index: 5;
-	}
-
-	/*
-	 * Its own stacking context: the pages panel and the frame overlay inside it
-	 * stay under the header's export menu and the dock's popover.
-	 */
-	.chart-area {
-		position: relative;
-		isolation: isolate;
-		min-height: 0;
-		min-width: 0;
-		padding: 12px;
-		display: grid;
-		place-items: center;
-		overflow: hidden;
-		container-type: size;
-	}
-
-	.chart-surface {
-		/* Квадрат: сторона = min(ширина области без панелей, высота области, фикс. кап);
-		   кап даёт стабильный размер на десктопе. Слева место занимает панель страниц
-		   (--reserve-left), справа панель слоёв (--reserve-right). Карта остаётся по центру
-		   области, пока там не задевает ни одну из панелей, иначе сдвигается ровно настолько,
-		   чтобы не уйти под панель (--chart-centre; та же формула в $lib/math/chart-area.ts),
-		   и только когда места не хватает и так, уменьшается. */
-		--chart-cap: 720px;
-		--chart-side: max(
-			0px,
-			min(100cqw - var(--reserve-left, 0px) - var(--reserve-right, 0px), 100cqh, var(--chart-cap))
-		);
-		--chart-centre: clamp(
-			var(--reserve-left, 0px) + var(--chart-side) / 2,
-			50cqw,
-			100cqw - var(--reserve-right, 0px) - var(--chart-side) / 2
-		);
-		position: relative;
-		left: calc(var(--chart-centre) - 50cqw);
-		width: var(--chart-side);
-		height: var(--chart-side);
-		display: grid;
-		place-items: center;
 	}
 
 	/*
@@ -1333,10 +910,12 @@
 		will-change: transform, opacity;
 	}
 
+	/* Drawn to fit, as the preview's canvas is. */
 	.pdf-flight canvas {
 		display: block;
 		width: 100%;
 		height: 100%;
+		object-fit: contain;
 	}
 
 	.pdf-flight-edge {
@@ -1612,10 +1191,9 @@
 	}
 
 	@media (prefers-reduced-motion: reduce) {
-		/* The ring still says "working" standing still; the check and the notice are simply there. */
+		/* The ring still says "working" standing still; the check is simply there. */
 		.export-spinner,
-		.export-done path,
-		.catalog-notice {
+		.export-done path {
 			animation: none;
 		}
 	}
@@ -1790,20 +1368,6 @@
 		.export-toggle .export-icon {
 			transition: none;
 		}
-	}
-
-	canvas {
-		width: 100%;
-		height: 100%;
-		display: block;
-		aspect-ratio: 1 / 1;
-		object-fit: contain;
-		touch-action: none;
-		cursor: grab;
-	}
-
-	canvas:active {
-		cursor: grabbing;
 	}
 
 	.control-bar-shell {

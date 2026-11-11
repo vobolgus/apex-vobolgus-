@@ -9,10 +9,10 @@
 	 * pointer, so dragging inside the frame still rotates the sky; only the hit
 	 * areas take events.
 	 *
-	 * The page drives two things from outside: `flush()` from its render loop,
-	 * which applies the latest drag position once per frame right before the
-	 * canvas draws it, and `trackPointer()` from its pointermove, which lights the
-	 * handles up when the pointer comes near the frame.
+	 * The stage drives two things from outside (`StageController`): `flush()` from
+	 * its render loop, which applies the latest drag position once per frame right
+	 * before the canvas draws it, and `trackPointer()` from the page's pointermove,
+	 * which lights the handles up when the pointer comes near the frame.
 	 */
 	import { onDestroy, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
