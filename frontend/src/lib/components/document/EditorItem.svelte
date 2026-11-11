@@ -43,6 +43,10 @@
 		mode?: ItemState;
 		/** Another chart is being carried: this one puts its frame and controls away. */
 		quiet?: boolean;
+		/** Its number on the page, shown while a text is choosing the chart it reads. */
+		badge?: number | null;
+		/** The selected text reads this chart. */
+		linked?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
 		onmovestart?: (event: PointerEvent, item: DocItem) => void;
@@ -64,6 +68,8 @@
 		interactive,
 		mode = 'idle',
 		quiet = false,
+		badge = null,
+		linked = false,
 		hintId,
 		onmovestart,
 		onresizestart,
@@ -178,6 +184,7 @@
 	class:is-interactive={interactive}
 	class:is-disc={disc}
 	class:is-quiet={quiet}
+	class:is-linked={linked}
 	data-item-id={item.id}
 	data-state={mode}
 	style:left="{(frame.x / page.w) * 100}%"
@@ -290,6 +297,9 @@
 		{#if mode === 'resizing'}
 			<span class="readout" aria-hidden="true">{sizeLabel(frame)}</span>
 		{/if}
+		{#if badge !== null && mode === 'idle'}
+			<span class="badge" aria-hidden="true">{badge}</span>
+		{/if}
 	{:else}
 		<!-- A neighbour's chart: not focusable, but it can be grabbed and dropped on another page.
 		     Pointer only, like dragging itself: the keys move a chart with Page Up/Down, and the
@@ -385,6 +395,40 @@
 
 	.is-disc .chart::before {
 		border-radius: 50%;
+	}
+
+	/* The chart the selected text reads: its edge in the accent, its number filled. */
+	.is-linked .chart::before {
+		box-shadow: inset 0 0 0 2px var(--accent);
+	}
+
+	/* A chart's number, at its top: a text is being told which chart to read. */
+	.badge {
+		position: absolute;
+		z-index: 2;
+		top: 6px;
+		left: 50%;
+		display: grid;
+		place-items: center;
+		min-width: 20px;
+		height: 20px;
+		box-sizing: border-box;
+		padding: 0 6px;
+		border-radius: 10px;
+		background: rgba(24, 24, 27, 0.92);
+		color: #eceef1;
+		font:
+			500 12px/1 Inter,
+			system-ui,
+			sans-serif;
+		font-variant-numeric: tabular-nums;
+		transform: translateX(-50%);
+		pointer-events: none;
+	}
+
+	.is-linked .badge {
+		background: var(--accent);
+		color: #ffffff;
 	}
 
 	/* A neighbour's chart: grabbed and dropped like the current page's, nothing more. */

@@ -14,8 +14,6 @@ use rust_core::catalog::HipCatalog;
 use serde::Deserialize;
 use std::io::Write;
 use std::net::SocketAddr;
-use std::sync::{Arc, OnceLock};
-use svg2pdf::usvg::fontdb;
 use tokio::sync::Semaphore;
 
 /// Charts drawn at once outside a document. A PDF takes tens of ms of CPU and some
@@ -81,23 +79,10 @@ pub(crate) fn validate_config(config: &RenderConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// The system fonts, found once: scanning the font directories on every export
-/// was a seventh of a PDF's CPU, for charts that carry no text yet.
-fn system_fonts() -> Arc<fontdb::Database> {
-    static FONTS: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
-    FONTS
-        .get_or_init(|| {
-            let mut fonts = fontdb::Database::new();
-            fonts.load_system_fonts();
-            Arc::new(fonts)
-        })
-        .clone()
-}
-
-/// usvg options with the system fonts, for turning chart SVG into PDF.
+/// usvg options with the fonts a PDF is set in (`crate::fonts`), for turning SVG into PDF.
 pub(crate) fn svg_options() -> svg2pdf::usvg::Options<'static> {
     svg2pdf::usvg::Options {
-        fontdb: system_fonts(),
+        fontdb: crate::fonts::database(),
         ..Default::default()
     }
 }

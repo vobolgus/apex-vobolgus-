@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aloneFrame } from './arrange';
-import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, overlaps } from './geometry';
+import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, overlaps, rotatedBounds } from './geometry';
 import {
 	createId,
 	DOCUMENT_STORAGE_KEY,
 	DocumentStore,
+	isBlank,
 	MAX_CHARTS,
 	MAX_ITEMS_PER_PAGE,
 	MAX_PAGES,
 	THUMB_BUDGET_CHARS,
 	type DocumentStorage
 } from './document.svelte';
-import type { ChartSnapshot, DocItem, DocPage, Rect } from './types';
+import { DEFAULT_TEXT_STYLE, MAX_TEXT_CHARS, MAX_TEXTS_PER_PAGE, MIN_TEXT_WIDTH_MM } from './text';
+import type { ChartSnapshot, DocItem, DocPage, DocText, Rect } from './types';
 
 function chart(aspect = 1): ChartSnapshot {
 	return {
@@ -819,6 +821,404 @@ describe('DocumentStore', () => {
 			doc.addPage();
 			expect(() => doc.flush()).not.toThrow();
 		});
+	});
+});
+
+describe('DocumentStore: text', () => {
+	const style = { ...DEFAULT_TEXT_STYLE };
+
+	function caption(frame: Rect = { x: 12, y: 200, w: 186, h: 6 }): Omit<DocText, 'id'> {
+		return { text: 'Latitude {lat}', style, frame };
+	}
+
+	it('puts a text on a page, fitted in, and the page is hand-arranged from then on', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, caption({ x: 150, y: 400, w: 500, h: 6 }))!;
+		const [page] = doc.pages;
+		expect(page.texts).toHaveLength(1);
+		expect(page.texts![0]).toEqual({
+			id,
+			text: 'Latitude {lat}',
+			style,
+			frame: { x: 12, y: 279, w: 186, h: 6 }
+		});
+		expect(page.manual).toBe(true);
+		expect(isBlank(page)).toBe(false);
+		expect(doc.chartCount).toBe(0);
+		expect(doc.addText('nowhere', caption())).toBeNull();
+	});
+
+	it('holds a text to the length and a page to the number the backend takes', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, { ...caption(), text: 'x'.repeat(MAX_TEXT_CHARS + 10) })!;
+		expect(doc.pages[0].texts![0].text).toHaveLength(MAX_TEXT_CHARS);
+		doc.updateText(pageId, id, { text: 'y'.repeat(MAX_TEXT_CHARS + 1) });
+		expect(doc.pages[0].texts![0].text).toHaveLength(MAX_TEXT_CHARS);
+		for (let i = 1; i < MAX_TEXTS_PER_PAGE; i++)
+			expect(doc.addText(pageId, caption())).not.toBeNull();
+		expect(doc.addText(pageId, caption())).toBeNull();
+		expect(doc.pages[0].texts).toHaveLength(MAX_TEXTS_PER_PAGE);
+	});
+
+	it('changes the words, the style, the frame and the chart a text reads', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, caption())!;
+		expect(
+			doc.updateText(pageId, id, {
+				text: 'φ = {lat}',
+				style: { ...style, bold: true, size: 18 },
+				frame: { x: 100, y: 20, w: 5, h: 9 },
+				chartId: 'chart-b'
+			})
+		).toBe(true);
+		expect(doc.pages[0].texts![0]).toEqual({
+			id,
+			text: 'φ = {lat}',
+			style: { ...style, bold: true, size: 18 },
+			frame: { x: 100, y: 20, w: MIN_TEXT_WIDTH_MM, h: 9 },
+			chartId: 'chart-b'
+		});
+		doc.updateText(pageId, id, { chartId: null });
+		expect(doc.pages[0].texts![0]).not.toHaveProperty('chartId');
+		expect(doc.updateText(pageId, 'gone', { text: 'x' })).toBe(false);
+	});
+
+	it('follows the height a text is laid out at without forgetting a turn', () => {
+		const doc = new DocumentStore(null);
+		doc.addChart(chart());
+		const [page] = doc.pages;
+		const id = doc.addText(page.id, caption({ x: 12, y: 260, w: 186, h: 6 }))!;
+		doc.setOrientation(page.id, 'landscape');
+		const memo = page.turnMemo;
+		expect(memo).toBeDefined();
+		doc.setTextHeight(page.id, id, 17);
+		expect(page.texts![0].frame.h).toBe(17);
+		expect(page.turnMemo).toBe(memo);
+		// A height that pushes it past the foot of the content box moves it up.
+		doc.setTextHeight(page.id, id, 60);
+		const { y, h } = page.texts![0].frame;
+		expect(y + h).toBeLessThanOrEqual(contentBox('landscape').y + contentBox('landscape').h + 1e-9);
+	});
+
+	it('turns the text with the page, and back to where it was', () => {
+		const doc = new DocumentStore(null);
+		doc.addChart(chart());
+		const [page] = doc.pages;
+		const frame = { x: 12, y: 250, w: 186, h: 6 };
+		doc.addText(page.id, caption(frame));
+		doc.addText(page.id, caption({ x: 105, y: 20, w: 93, h: 6 }));
+		doc.setOrientation(page.id, 'landscape');
+		const box = contentBox('landscape');
+		// The full width stays the full width; the half on the right stays the half on the right.
+		expect(page.texts![0].frame).toMatchObject({ x: box.x, w: box.w });
+		expect(page.texts![1].frame.x + page.texts![1].frame.w).toBeCloseTo(box.x + box.w);
+		expect(page.texts![1].frame.w).toBeCloseTo(box.w / 2);
+		for (const text of page.texts!) expectInside(text.frame, page);
+		expect(page.manual).toBe(true);
+		doc.setOrientation(page.id, 'portrait');
+		expect(page.texts![0].frame.x).toBeCloseTo(frame.x);
+		expect(page.texts![0].frame.y).toBeCloseTo(frame.y);
+		expect(page.texts![0].frame.w).toBeCloseTo(frame.w);
+		expect(page.manual).toBe(true);
+	});
+
+	it("moves a text to another page, where it reads that page's chart", () => {
+		const doc = new DocumentStore(null);
+		const first = doc.addPage();
+		const second = doc.addPage('landscape');
+		const id = doc.addText(first, { ...caption(), chartId: 'chart-a' })!;
+		expect(doc.moveText(id, second, { x: 200, y: 150, w: 186, h: 6 })).toBe(true);
+		expect(doc.pages[0].texts).toEqual([]);
+		const moved = doc.pages[1].texts![0];
+		expect(moved).toMatchObject({ id, text: 'Latitude {lat}' });
+		expect(moved).not.toHaveProperty('chartId');
+		expectInside(moved.frame, doc.pages[1]);
+		expect(doc.pages[1].manual).toBe(true);
+		// On its own page a move is a change of frame.
+		expect(doc.moveText(id, second, { x: 12, y: 12, w: 100, h: 6 })).toBe(true);
+		expect(doc.pages[1].texts![0].frame).toEqual({ x: 12, y: 12, w: 100, h: 6 });
+		expect(doc.moveText('gone', first, moved.frame)).toBe(false);
+	});
+
+	it('turns a text about its centre, fitted to the page by what it takes up', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, caption({ x: 12, y: 120, w: 186, h: 6 }))!;
+		const text = () => doc.pages[0].texts![0];
+		expect(text()).not.toHaveProperty('rotation');
+
+		expect(doc.updateText(pageId, id, { rotation: 90 })).toBe(true);
+		expect(text().rotation).toBe(90);
+		// The same centre, the same size: on its side it fits where it stood.
+		expect(text().frame).toEqual({ x: 12, y: 120, w: 186, h: 6 });
+		expect(rotatedBounds(text().frame, 90)).toMatchObject({ x: 102, y: 30, w: 6, h: 186 });
+
+		// 450° is 90°, 360° is upright again, and upright carries no rotation.
+		doc.updateText(pageId, id, { rotation: -270 });
+		expect(text().rotation).toBe(90);
+		doc.updateText(pageId, id, { rotation: 360 });
+		expect(text()).not.toHaveProperty('rotation');
+
+		// Turned at the edge, it is moved in until what it takes up is on the page.
+		doc.updateText(pageId, id, { frame: { x: 12, y: 14, w: 186, h: 6 } });
+		doc.updateText(pageId, id, { rotation: -90 });
+		const box = contentBox('portrait');
+		const taken = rotatedBounds(text().frame, -90);
+		expect(taken.y).toBeCloseTo(box.y);
+		expect(taken.h).toBeCloseTo(186);
+
+		// Its height changes from its own top-left corner: here the bottom-left of what it takes up.
+		const before = rotatedBounds(text().frame, -90);
+		doc.setTextHeight(pageId, id, 18);
+		const after = rotatedBounds(text().frame, -90);
+		expect(after.w).toBeCloseTo(18);
+		expect(after.x).toBeCloseTo(before.x);
+		expect(after.y + after.h).toBeCloseTo(before.y + before.h);
+	});
+
+	it('keeps the turn through a save, a move to another page and an Undo', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const first = doc.addPage();
+		const second = doc.addPage();
+		const id = doc.addText(first, { ...caption({ x: 40, y: 100, w: 100, h: 6 }), rotation: 180 })!;
+		expect(doc.pages[0].texts![0].rotation).toBe(180);
+		doc.moveText(id, second, { x: 40, y: 100, w: 100, h: 6 });
+		expect(doc.pages[1].texts![0].rotation).toBe(180);
+		const restore = doc.removeText(second, id);
+		expect(restore()).toBe(true);
+		expect(doc.pages[1].texts![0].rotation).toBe(180);
+		doc.flush();
+		const again = new DocumentStore(storage);
+		again.load();
+		expect(again.pages[1].texts![0].rotation).toBe(180);
+		// What does not read as an angle is upright.
+		const raw = saved(storage);
+		(raw.pages[1].texts![0] as { rotation: unknown }).rotation = 'sideways';
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		const odd = new DocumentStore(storage);
+		odd.load();
+		expect(odd.pages[1].texts![0]).not.toHaveProperty('rotation');
+	});
+
+	it('removes a text and puts it back once', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const a = doc.addText(pageId, caption())!;
+		const b = doc.addText(pageId, { ...caption(), text: 'second' })!;
+		const restore = doc.removeText(pageId, a);
+		expect(doc.pages[0].texts!.map((it) => it.id)).toEqual([b]);
+		expect(restore()).toBe(true);
+		expect(doc.pages[0].texts!.map((it) => it.id)).toEqual([a, b]);
+		expect(restore()).toBe(false);
+		expect(doc.removeText(pageId, 'gone')()).toBe(false);
+		const gone = doc.removeText(pageId, b);
+		doc.removePage(pageId);
+		expect(gone()).toBe(false);
+	});
+
+	it('gives Add to PDF the free space of a page with text, and never its place', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		doc.addText(pageId, caption({ x: 12, y: 12, w: 186, h: 10 }));
+		const result = doc.addChart(chart());
+		expect(result).toMatchObject({ pageId, newPage: false, relaid: false });
+		const [page] = doc.pages;
+		expect(page.manual).toBe(true);
+		expect(overlaps(page.items[0].frame, page.texts![0].frame, GUTTER_MM)).toBe(false);
+		expectInside(page.items[0].frame, page);
+		// Taken back, the text stays.
+		expect(result.undo()).toBe(true);
+		expect(page.items).toEqual([]);
+		expect(page.texts).toHaveLength(1);
+		expect(page.manual).toBe(true);
+	});
+
+	it('saves text and reads it back, dropping what does not parse', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, { ...caption(), chartId: 'chart-a' })!;
+		doc.flush();
+		const again = new DocumentStore(storage);
+		expect(again.load()).toBe(true);
+		expect(again.pages[0].texts).toEqual([
+			{
+				id,
+				text: 'Latitude {lat}',
+				style,
+				frame: { x: 12, y: 200, w: 186, h: 6 },
+				chartId: 'chart-a'
+			}
+		]);
+		expect(again.pages[0].manual).toBe(true);
+
+		const text = (overrides: object) => ({
+			id: 'ok',
+			text: 'kept',
+			style,
+			frame: { x: 12, y: 12, w: 80, h: 6 },
+			...overrides
+		});
+		const page = (texts: unknown) => ({ id: 'p', orientation: 'portrait', items: [], texts });
+		const load = (texts: unknown) => {
+			storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages: [page(texts)] }));
+			const store = new DocumentStore(storage);
+			expect(store.load()).toBe(true);
+			return store.pages[0];
+		};
+		const loaded = load([
+			text({}),
+			text({ id: 'ok' }),
+			text({ id: 'p' }),
+			text({ id: 'no-text', text: 7 }),
+			text({ id: 'no-style', style: null }),
+			text({ id: 'font', style: { ...style, font: 'comic' } }),
+			text({ id: 'size', style: { ...style, size: 500 } }),
+			text({ id: 'align', style: { ...style, align: 'justify' } }),
+			text({ id: 'bold', style: { ...style, bold: 'yes' } }),
+			text({ id: 'frame', frame: { x: 0, y: 0, w: -1, h: 6 } }),
+			text({ id: 'out', frame: { x: 500, y: 500, w: 80, h: 6 } }),
+			'nonsense'
+		]);
+		expect(loaded.texts!.map((it) => it.id)).toEqual(['ok', 'out']);
+		expectInside(loaded.texts![1].frame, loaded);
+		// A page saved before text was, or with none that parses, has no `texts` at all.
+		expect(load(undefined)).not.toHaveProperty('texts');
+		expect(load([text({ text: null })])).not.toHaveProperty('texts');
+		expect(load('nonsense').manual).toBeUndefined();
+	});
+});
+
+describe('DocumentStore: copy and paste', () => {
+	const style = { ...DEFAULT_TEXT_STYLE };
+
+	it('pastes a copied chart where it was when that is free, else clear of everything', () => {
+		const doc = new DocumentStore(null);
+		const first = doc.addPage();
+		const second = doc.addPage();
+		doc.addChart(chart());
+		const [page, other] = doc.pages;
+		expect(page.id).toBe(first);
+		doc.updateItem(first, page.items[0].id, { x: 12, y: 12, w: 90, h: 90 });
+		const copy = doc.copyBlock(page.items[0].id)!;
+		expect(copy).toEqual({ kind: 'chart', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } });
+
+		// On another page its place is free.
+		const there = doc.pasteBlock(second, copy);
+		expect(there).toMatchObject({ kind: 'chart' });
+		expect(other.items).toHaveLength(1);
+		expect(other.items[0].frame).toEqual({ x: 12, y: 12, w: 90, h: 90 });
+		expect(other.items[0].id).not.toBe(page.items[0].id);
+		expect(other.manual).toBe(true);
+
+		// On its own page the original is in it: the copy goes in the nearest free place, under
+		// it and a gutter clear (as near as the place beside it, and lower wins).
+		const here = doc.pasteBlock(first, copy) as { id: string };
+		expect(page.items).toHaveLength(2);
+		const pasted = page.items.find((it) => it.id === here.id)!;
+		expect(pasted.frame).toEqual({ x: 12, y: 108, w: 90, h: 90 });
+		expect(doc.chartCount).toBe(3);
+		// The copy is its own chart: changing one leaves the other.
+		expect(pasted.chart).not.toBe(page.items[0].chart);
+	});
+
+	it('pastes a copied text a little off the one in its place, turn and style kept', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, {
+			text: 'Key {lat}',
+			style: { ...style, bold: true },
+			frame: { x: 40, y: 100, w: 100, h: 6 },
+			rotation: 180,
+			chartId: 'chart-a'
+		})!;
+		const copy = doc.copyBlock(id)!;
+		expect(copy).toEqual({
+			kind: 'text',
+			text: 'Key {lat}',
+			style: { ...style, bold: true },
+			frame: { x: 40, y: 100, w: 100, h: 6 },
+			rotation: 180
+		});
+		const first = doc.pasteBlock(pageId, copy) as { id: string };
+		const second = doc.pasteBlock(pageId, copy) as { id: string };
+		const texts = doc.pages[0].texts!;
+		expect(texts.map((it) => it.id)).toEqual([id, first.id, second.id]);
+		// Each in the free place nearest to the original: under it, then over it.
+		expect(texts.map((it) => [it.frame.x, it.frame.y])).toEqual([
+			[40, 100],
+			[40, 112],
+			[40, 88]
+		]);
+		expect(texts[1]).toMatchObject({ text: 'Key {lat}', rotation: 180, style: { bold: true } });
+		// It reads the chart nearest to where it lands, not the one its original was told.
+		expect(texts[1]).not.toHaveProperty('chartId');
+		// An upright copy carries no turn.
+		const plain = doc.copyBlock(doc.addText(pageId, { text: 'x', style, frame: copy.frame })!)!;
+		expect(plain).not.toHaveProperty('rotation');
+	});
+
+	it('keeps the size of a copy; with no room it goes over what is there, under the pointer', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const big = { kind: 'chart', chart: chart(), frame: { x: 12, y: 12, w: 186, h: 186 } };
+		expect(doc.pasteBlock(pageId, big)).toMatchObject({ kind: 'chart' });
+		const [page] = doc.pages;
+		// 81 mm are left under it: no place for another 186 mm disc, which is not made smaller.
+		doc.pasteBlock(pageId, big, { x: 150, y: 250 });
+		expect(page.items[1].frame).toEqual({ x: 12, y: 99, w: 186, h: 186 });
+		// In the middle of the page it is centred on the pointer.
+		const small = { kind: 'chart', chart: chart(), frame: { x: 12, y: 12, w: 60, h: 60 } };
+		for (const it of page.items) it.frame = { x: 12, y: 12, w: 186, h: 273 };
+		doc.pasteBlock(pageId, small, { x: 100, y: 150 });
+		expect(page.items[2].frame).toEqual({ x: 70, y: 120, w: 60, h: 60 });
+		// With no pointer over the page it stands off what is exactly in its place.
+		doc.pasteBlock(pageId, small);
+		expect(page.items[3].frame).toEqual({ x: 17, y: 17, w: 60, h: 60 });
+
+		// A text likewise: at its own width, its middle under the pointer.
+		const words = { kind: 'text', text: 'x', style, frame: { x: 12, y: 12, w: 80, h: 6 } };
+		doc.pasteBlock(pageId, words, { x: 105, y: 200 });
+		expect(page.texts![0].frame).toEqual({ x: 65, y: 197, w: 80, h: 6 });
+		// A copy from a larger page is only as much smaller as this page makes it.
+		const wide = { kind: 'text', text: 'x', style, frame: { x: 12, y: 12, w: 273, h: 6 } };
+		const other = doc.addPage();
+		doc.pasteBlock(other, wide);
+		expect(doc.pages[1].texts![0].frame).toEqual({ x: 12, y: 12, w: 186, h: 6 });
+	});
+
+	it('pastes nothing past the limits, and nothing that is no copy', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const text = { kind: 'text', text: 'x', style, frame: { x: 12, y: 12, w: 80, h: 6 } };
+		for (let i = 0; i < MAX_TEXTS_PER_PAGE; i++)
+			expect(doc.pasteBlock(pageId, text)).not.toBe('full');
+		expect(doc.pasteBlock(pageId, text)).toBe('full');
+		const item = { kind: 'chart', chart: chart(), frame: { x: 12, y: 12, w: 40, h: 40 } };
+		expect(doc.pasteBlock(pageId, item)).toMatchObject({ kind: 'chart' });
+		// The page filled by hand: finding fifty free places is not what is tested here.
+		for (let i = 1; i < MAX_ITEMS_PER_PAGE; i++) {
+			doc.pages[0].items.push({ id: `filler-${i}`, chart: chart(), frame: item.frame });
+		}
+		expect(doc.pasteBlock(pageId, item)).toBe('full');
+
+		for (const bad of [
+			null,
+			'text',
+			{ kind: 'table', frame: text.frame },
+			{ ...text, frame: null },
+			{ ...text, style: { ...style, font: 'comic' } },
+			{ ...text, text: 7 },
+			{ ...item, chart: { view: {} } }
+		]) {
+			expect(doc.pasteBlock(doc.addPage(), bad), JSON.stringify(bad)).toBeNull();
+		}
+		expect(doc.pasteBlock('nowhere', text)).toBeNull();
+		expect(doc.copyBlock('gone')).toBeNull();
 	});
 });
 

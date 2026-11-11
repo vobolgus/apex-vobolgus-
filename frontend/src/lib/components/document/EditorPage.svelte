@@ -4,11 +4,13 @@
 
 	/** What a drag (or a keyboard nudge) draws on one page. */
 	export interface PageDrag {
-		/** This page's chart being dragged, if it is this page's. */
+		/** This page's chart or text being dragged, if it is this page's. */
 		itemId: string | null;
-		/** Where to draw that chart, this page's mm. */
+		/** Where to draw it, this page's mm. */
 		frame: Rect | null;
 		kind: 'moving' | 'detached' | 'resizing';
+		/** A text of this page being turned by its knob: where to, degrees. */
+		rotation: number | null;
 		/** Snap guides to draw on this page, mm. */
 		guides: SnapGuide[];
 		/** The chart would land on this page if dropped now. */
@@ -19,14 +21,17 @@
 <script lang="ts">
 	/**
 	 * One page in the editor: its label and orientation toggle above white paper,
-	 * and the charts on it. The current page's charts are editable; a neighbouring
+	 * and the charts and text on it. The current page's are editable; a neighbouring
 	 * page is a button that makes it current, and a drop target.
 	 */
 	import { contentBox, pageSize, type ResizeAnchor } from '$lib/document/geometry';
-	import type { DocItem, DocPage, PageOrientation } from '$lib/document/types';
-	import { chartCountLabel } from '$lib/document/labels';
+	import { isBlank } from '$lib/document/document.svelte';
+	import { boundItem, hasFields, shownText } from '$lib/document/text';
+	import type { DocItem, DocPage, DocText, PageOrientation, TextStyle } from '$lib/document/types';
+	import { chartCountLabel, plural } from '$lib/document/labels';
 	import EditorItem, { type ChartAction } from './EditorItem.svelte';
 	import EditorOrientation from './EditorOrientation.svelte';
+	import EditorText, { type TextSide } from './EditorText.svelte';
 	import type { Box, SlotRole } from './editor-geometry';
 
 	interface Props {
@@ -47,18 +52,35 @@
 		returningId: string | null;
 		/** A chart coming to rest after it was let go over a page. */
 		settlingId?: string | null;
-		/** A chart is being carried somewhere in the editor: the others go quiet. */
+		/** A chart or a text is being carried somewhere in the editor: the others go quiet. */
 		carrying?: boolean;
+		/** The text being typed in. */
+		editingId?: string | null;
 		hintId: string;
+		textHintId?: string;
 		onactivate: (pageId: string) => void;
 		onorientation: (pageId: string, orientation: PageOrientation) => void;
 		/** Delete this page; offered while it is empty. */
 		ondelete?: (pageId: string) => void;
+		/** Put a new text on this page; offered on the current one. */
+		onaddtext?: (pageId: string) => void;
 		onmovestart: (event: PointerEvent, item: DocItem) => void;
 		onresizestart: (event: PointerEvent, item: DocItem, handle: ResizeAnchor) => void;
 		onitemkeydown: (event: KeyboardEvent, item: DocItem) => void;
 		onremove: (item: DocItem) => void;
 		onitemaction: (item: DocItem, action: ChartAction) => void;
+		ontextmovestart?: (event: PointerEvent, text: DocText) => void;
+		ontextresizestart?: (event: PointerEvent, text: DocText, side: TextSide) => void;
+		ontextrotatestart?: (event: PointerEvent, text: DocText) => void;
+		ontextturn?: (text: DocText) => void;
+		ontextkeydown?: (event: KeyboardEvent, text: DocText) => void;
+		ontextstyle?: (text: DocText, style: TextStyle) => void;
+		ontextremove?: (text: DocText) => void;
+		ontextedit?: (text: DocText) => void;
+		ontextcommit?: (text: DocText, value: string) => void;
+		ontextheight?: (text: DocText, height: number) => void;
+		/** A text is told the chart to read, or with null to read the nearest again. */
+		ontextbind?: (text: DocText, chartId: string | null) => void;
 	}
 
 	let {
@@ -74,36 +96,86 @@
 		returningId,
 		settlingId = null,
 		carrying = false,
+		editingId = null,
 		hintId,
+		textHintId,
 		onactivate,
 		onorientation,
 		ondelete,
+		onaddtext,
 		onmovestart,
 		onresizestart,
 		onitemkeydown,
 		onremove,
-		onitemaction
+		onitemaction,
+		ontextmovestart,
+		ontextresizestart,
+		ontextrotatestart,
+		ontextturn,
+		ontextkeydown,
+		ontextstyle,
+		ontextremove,
+		ontextedit,
+		ontextcommit,
+		ontextheight,
+		ontextbind
 	}: Props = $props();
 
 	const current = $derived(role === 'current');
 	const size = $derived(pageSize(page.orientation));
 	const margin = $derived(contentBox(page.orientation));
 	const count = $derived(page.items.length);
-	const chartWord = $derived(chartCountLabel(count));
+	const texts = $derived(page.texts ?? []);
+	const blank = $derived(isBlank(page));
+	/** "2 charts", and "2 charts, 1 text" once the page has text. */
+	const chartWord = $derived(
+		texts.length > 0
+			? `${chartCountLabel(count)}, ${plural(texts.length, 'text')}`
+			: chartCountLabel(count)
+	);
+	/** Screen px per mm. */
+	const scale = $derived(box.width / size.w);
 
 	/**
-	 * One of this page's charts is in the hand, or on its way to rest after being let
-	 * go. The page then stacks above every other, the current one included: the chart
-	 * is this page's child wherever on the stage it is drawn, and under another page
-	 * it would be out of sight.
+	 * One of this page's charts or texts is in the hand, or on its way to rest after
+	 * being let go. The page then stacks above every other, the current one included:
+	 * the chart is this page's child wherever on the stage it is drawn, and under
+	 * another page it would be out of sight.
 	 */
 	const lifted = $derived(
-		page.items.some(
+		[...page.items, ...texts].some(
 			(item) => item.id === drag?.itemId || item.id === settlingId || item.id === returningId
 		)
 	);
 
-	function itemState(item: DocItem) {
+	/** The text that has the focus (itself, its field or its toolbar). */
+	let selectedTextId = $state<string | null>(null);
+
+	function textOf(target: EventTarget | null): string | null {
+		const element = (target as Element | null)?.closest?.<HTMLElement>('[data-kind="text"]');
+		return element?.dataset.itemId ?? null;
+	}
+
+	/**
+	 * The chart the selected text reads, while that is a question: the page has two
+	 * charts or more, and the text has fields (or is being typed in, and may get some).
+	 * The charts then show their numbers, this one marked.
+	 */
+	const readId = $derived.by(() => {
+		if (!current || count < 2) return null;
+		const text = texts.find((it) => it.id === selectedTextId);
+		if (!text || !(hasFields(text.text) || editingId === text.id)) return null;
+		return boundItem(page, text)?.id ?? null;
+	});
+
+	/** Where on the page the chart a text reads is, 0-based. */
+	function readIndex(text: DocText): number | null {
+		const id = boundItem(page, text)?.id;
+		const at = page.items.findIndex((item) => item.id === id);
+		return at < 0 ? null : at;
+	}
+
+	function itemState(item: { id: string }) {
 		if (drag?.itemId === item.id) return drag.kind;
 		if (settlingId === item.id) return 'settling';
 		return returningId === item.id ? 'returning' : 'idle';
@@ -138,10 +210,23 @@
 	<div class="label">
 		<span class="name">Page {number} <span class="format">· A4</span></span>
 		<div class="actions">
-			<!-- Only an empty page: one with charts is deleted from the pages panel, where they show. -->
-			{#if count === 0 && ondelete}
+			{#if current && onaddtext}
 				<button
-					class="delete"
+					class="action"
+					type="button"
+					aria-label="Add text to page {number}"
+					title="Add text"
+					onclick={() => onaddtext(page.id)}
+				>
+					<svg viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M3.5 5V3.5h9V5M8 3.5v9M6.25 12.5h3.5" />
+					</svg>
+				</button>
+			{/if}
+			<!-- Only an empty page: one with charts is deleted from the pages panel, where they show. -->
+			{#if blank && ondelete}
+				<button
+					class="action"
 					type="button"
 					aria-label="Delete page {number}"
 					aria-keyshortcuts={current ? 'Delete' : undefined}
@@ -171,6 +256,10 @@
 			: `Show page ${number}, ${chartWord}`}
 		style:height="{box.height}px"
 		onpointerdown={handlePaperPointerDown}
+		onfocusin={(event) => (selectedTextId = textOf(event.target))}
+		onfocusout={(event) => {
+			if (textOf(event.relatedTarget) === null) selectedTextId = null;
+		}}
 		onclick={() => {
 			if (!current) onactivate(page.id);
 		}}
@@ -190,6 +279,8 @@
 				interactive={current}
 				mode={itemState(item)}
 				quiet={carrying && itemState(item) === 'idle'}
+				badge={readId === null ? null : index + 1}
+				linked={readId === item.id}
 				{hintId}
 				{onmovestart}
 				{onresizestart}
@@ -199,12 +290,48 @@
 			/>
 		{/each}
 
+		{#each texts as text, index (text.id)}
+			{@const dragged = drag?.itemId === text.id && drag.frame ? drag.frame : null}
+			{@const turned = drag?.itemId === text.id ? drag.rotation : null}
+			<EditorText
+				{text}
+				shown={shownText(page, text)}
+				{index}
+				count={texts.length}
+				page={size}
+				{scale}
+				frame={dragged ?? text.frame}
+				rotation={turned ?? text.rotation ?? 0}
+				turning={turned !== null}
+				interactive={current}
+				mode={itemState(text)}
+				quiet={carrying && itemState(text) === 'idle'}
+				editing={current && editingId === text.id}
+				charts={count}
+				reads={readIndex(text)}
+				pinned={page.items.some((item) => item.id === text.chartId)}
+				onbind={(bound, chart) =>
+					ontextbind?.(bound, chart === null ? null : (page.items[chart]?.id ?? null))}
+				hintId={textHintId}
+				onmovestart={ontextmovestart}
+				onresizestart={ontextresizestart}
+				onrotatestart={ontextrotatestart}
+				onturn={ontextturn}
+				onkeydown={ontextkeydown}
+				onstyle={ontextstyle}
+				onremove={ontextremove}
+				onedit={ontextedit}
+				oncommit={ontextcommit}
+				onheight={ontextheight}
+			/>
+		{/each}
+
 		<!-- Only on the current page: a neighbour is dimmed, which would take its words under 4.5:1. -->
-		{#if count === 0 && current && !drag?.target}
+		{#if blank && current && !drag?.target}
 			<div class="empty" aria-hidden="true">
 				<span class="empty-title">Empty page</span>
 				<span class="empty-note"
-					>Drag a chart here from a neighbouring page, or use Add to PDF.</span
+					>Drag a chart here from a neighbouring page, use Add to PDF, or add text.</span
 				>
 			</div>
 		{/if}
@@ -309,7 +436,7 @@
 		gap: 6px;
 	}
 
-	.delete {
+	.action {
 		display: grid;
 		place-items: center;
 		width: 28px;
@@ -326,25 +453,25 @@
 	}
 
 	@media (hover: hover) {
-		.delete:hover {
+		.action:hover {
 			background: var(--fill-hover);
 			color: var(--fg-1);
 		}
 	}
 
-	.delete:active {
+	.action:active {
 		background: var(--fill-press);
 		color: var(--fg-1);
 	}
 
-	.delete:focus-visible {
+	.action:focus-visible {
 		outline: 2px solid transparent;
 		outline-offset: 2px;
 		color: var(--fg-1);
 		box-shadow: var(--ring);
 	}
 
-	.delete svg {
+	.action svg {
 		width: 16px;
 		height: 16px;
 		fill: none;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * One page at a small scale: a white sheet with its charts where they sit.
-	 * Decorative: whatever holds it carries the name.
+	 * One page at a small scale: a white sheet with its charts and text where they
+	 * sit. Decorative: whatever holds it carries the name.
 	 *
 	 * Each chart is drawn here at its size on the sheet (`drawChartThumbnail`): the
 	 * brighter stars, none under half a pixel. The vector preview draws stars at
@@ -13,12 +13,18 @@
 	 * of it from the preview): its place on the sheet is kept, empty, until the copy
 	 * lands on it, and then it is drawn. The copy is this same drawing, so nothing
 	 * changes under the eye at that moment.
+	 *
+	 * Text is set as in the editor, in its own lines; at this scale it is a grey of
+	 * the right shape, which is what a page seen from afar looks like.
 	 */
 	import { PINHOLE_CORNER_RADIUS } from '$lib/constants';
 	import { pageSize, PRINT_MM_PER_PREVIEW_PX } from '$lib/document/geometry';
+	import { anchoredFrame, shownText } from '$lib/document/text';
+	import { measuredLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage } from '$lib/document/types';
 	import { catalog } from '$lib/stores.svelte';
 	import { drawChartThumbnail } from './chart-thumbnail';
+	import TextLines from './TextLines.svelte';
 
 	interface Props {
 		page: DocPage;
@@ -71,6 +77,21 @@
 			{/if}
 		</div>
 	{/each}
+	{#each page.texts ?? [] as text (text.id)}
+		{@const layout = measuredLayout(shownText(page, text), text.style, text.frame.w)}
+		{@const box = anchoredFrame(text.frame, text.rotation ?? 0, text.frame.w, layout.height)}
+		<div
+			class="text"
+			data-item-id={text.id}
+			style:left="{box.x * scale}px"
+			style:top="{box.y * scale}px"
+			style:width="{box.w * scale}px"
+			style:height="{box.h * scale}px"
+			style:rotate="{text.rotation ?? 0}deg"
+		>
+			<TextLines {layout} style={text.style} width={text.frame.w} />
+		</div>
+	{/each}
 </div>
 
 <style>
@@ -89,6 +110,11 @@
 		border-radius: var(--corner);
 		pointer-events: none;
 		user-select: none;
+	}
+
+	.text {
+		position: absolute;
+		pointer-events: none;
 	}
 
 	.chart canvas {

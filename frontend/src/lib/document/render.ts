@@ -1,10 +1,14 @@
 /**
- * The document's charts as RenderConfigs: vector previews and the PDF export.
+ * The document's charts as RenderConfigs, and its text as lines: vector previews
+ * and the PDF export.
  *
  * Each chart is drawn at its frame size in mm with `view.px` set to mm per preview
  * px, so scaling a chart on the page spreads the stars apart but keeps their radius
  * and the line widths. The paper style leaves the page showing through around a
  * white sky with a hairline edge.
+ *
+ * Text is broken into lines here (`text.ts`), with the fonts the backend sets it
+ * in, and sent line by line: the PDF breaks where the editor does.
  */
 
 import {
@@ -14,7 +18,17 @@ import {
 	type RenderConfig
 } from '$lib/api/render-config';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
-import type { ChartSnapshot, DocItem, DocPage } from './types';
+import {
+	alignAnchor,
+	anchoredFrame,
+	layoutText,
+	MAX_LINE_CHARS,
+	MAX_TEXT_LINES,
+	shownText,
+	type Measure
+} from './text';
+import { loadTextFonts, measureText } from './text-fonts.svelte';
+import type { ChartSnapshot, DocItem, DocPage, DocText, TextFont } from './types';
 
 /**
  * Overrides of the preview's style for a chart on white paper. The outline is
@@ -38,10 +52,25 @@ export interface DocumentItemRequest {
 	config: RenderConfig;
 }
 
+/** A text, line by line: where each baseline starts (or its middle, or its end), mm. */
+export interface DocumentTextRequest {
+	font: TextFont;
+	bold: boolean;
+	italic: boolean;
+	size_mm: number;
+	anchor: 'start' | 'middle' | 'end';
+	/** Degrees the lines are turned clockwise about (`cx_mm`, `cy_mm`), where they are given upright. */
+	rotation_deg: number;
+	cx_mm: number;
+	cy_mm: number;
+	lines: { x_mm: number; y_mm: number; text: string }[];
+}
+
 export interface DocumentPageRequest {
 	width_mm: number;
 	height_mm: number;
 	items: DocumentItemRequest[];
+	texts: DocumentTextRequest[];
 }
 
 /** Body of `POST /api/export/document`. */
@@ -93,7 +122,53 @@ export function itemRenderConfig(item: DocItem): RenderConfig {
 	};
 }
 
-export function documentRequest(pages: readonly DocPage[]): DocumentRequest {
+/**
+ * A text as the backend sets it: its fields read from its chart, wrapped to its
+ * width, its lines given upright with the turn to make about its centre. A line
+ * whose baseline starts off the page (once turned) is left out (the backend refuses
+ * it), as is everything past the backend's limits.
+ */
+export function textRequest(page: DocPage, text: DocText, measure: Measure): DocumentTextRequest {
+	const { w, h } = pageSize(page.orientation);
+	const { style, rotation = 0 } = text;
+	const layout = layoutText(shownText(page, text), style, text.frame.w, measure);
+	// As the editor draws it: as tall as its lines, from its own top-left corner.
+	const frame = anchoredFrame(text.frame, rotation, text.frame.w, layout.height);
+	const cx = frame.x + frame.w / 2;
+	const cy = frame.y + frame.h / 2;
+	const angle = (rotation * Math.PI) / 180;
+	const onPage = (x: number, y: number) => {
+		const px = cx + (x - cx) * Math.cos(angle) - (y - cy) * Math.sin(angle);
+		const py = cy + (x - cx) * Math.sin(angle) + (y - cy) * Math.cos(angle);
+		return px >= 0 && px <= w && py >= 0 && py <= h;
+	};
+	const { x, anchor } = alignAnchor(style.align, frame.w);
+	const lines = layout.lines
+		.map((line) => ({
+			x_mm: frame.x + x,
+			y_mm: frame.y + line.baseline,
+			text: Array.from(line.text).slice(0, MAX_LINE_CHARS).join('')
+		}))
+		.filter((line) => line.text !== '' && onPage(line.x_mm, line.y_mm))
+		.slice(0, MAX_TEXT_LINES);
+	return {
+		font: style.font,
+		bold: style.bold,
+		italic: style.italic,
+		size_mm: layout.size,
+		anchor,
+		rotation_deg: rotation,
+		cx_mm: cx,
+		cy_mm: cy,
+		lines
+	};
+}
+
+/** `measure` breaks the text into lines: the canvas's, once the fonts have loaded. */
+export function documentRequest(
+	pages: readonly DocPage[],
+	measure: Measure = measureText
+): DocumentRequest {
 	return {
 		pages: pages.map((page) => {
 			const { w, h } = pageSize(page.orientation);
@@ -106,7 +181,8 @@ export function documentRequest(pages: readonly DocPage[]): DocumentRequest {
 					width_mm: item.frame.w,
 					height_mm: item.frame.h,
 					config: itemRenderConfig(item)
-				}))
+				})),
+				texts: (page.texts ?? []).map((text) => textRequest(page, text, measure))
 			};
 		})
 	};
@@ -121,6 +197,8 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<Documen
 	if (pages.length === 0) return { ok: false, message: null };
 	let message: string | null = null;
 	try {
+		// Lines broken in a fallback font would break elsewhere in the PDF.
+		await loadTextFonts(pages.flatMap((page) => (page.texts ?? []).map((text) => text.style)));
 		const response = await fetch('/api/export/document', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

@@ -213,14 +213,17 @@ Other errors:
 
 ## Document export
 
-- `POST /api/export/document` - several charts placed on pages, as one multi-page PDF
+- `POST /api/export/document` - charts and text placed on pages, as one multi-page PDF
   - Request: `Content-Type: application/json`, body up to 2 MB:
 
     ```json
     {
       "pages": [
         { "width_mm": 210, "height_mm": 297,
-          "items": [{ "x_mm": 12, "y_mm": 12, "width_mm": 90, "height_mm": 90, "config": { "...": "RenderConfig with a view" } }] },
+          "items": [{ "x_mm": 12, "y_mm": 12, "width_mm": 90, "height_mm": 90, "config": { "...": "RenderConfig with a view" } }],
+          "texts": [{ "font": "serif", "bold": false, "italic": false, "size_mm": 4.23, "anchor": "start",
+                      "rotation_deg": 0, "cx_mm": 105, "cy_mm": 110,
+                      "lines": [{ "x_mm": 12, "y_mm": 110, "text": "Latitude 56° N" }] }] },
         { "width_mm": 297, "height_mm": 210, "items": [] }
       ]
     }
@@ -228,12 +231,23 @@ Other errors:
 
   - Response: `application/pdf`, `Content-Disposition: attachment; filename="skycharts.pdf"`,
     one PDF page per entry of `pages`, in order, each exactly `width_mm × height_mm`
-    (1 mm = 72/25.4 pt; A4 is 595.28 × 841.89 pt). A page without items is a blank page
+    (1 mm = 72/25.4 pt; A4 is 595.28 × 841.89 pt). A page without items or texts is a
+    blank page
 - Geometry is in mm from the page's top-left corner, y down. Each chart is drawn into its
   box with its `view.width × view.height` as the viewBox, aspect kept (centred if the box's
   aspect differs). The generator sends `view.width/height` = the box in mm and `view.px`,
   so star radii and line widths are fixed in mm whatever the chart's size; for paper it
   uses `background_color: "none"`, a white `chart_color` and a `chart_outline`
+- A text (`texts`, optional) comes already broken into lines: the page editor wraps it,
+  and each line is set where it says, over the charts, in black. `font` is `serif` (PT
+  Serif) or `sans` (PT Sans), with `bold` and `italic` (both default `false`); `size_mm`
+  is the font size; a line's `x_mm`/`y_mm` is the start of its baseline, or its middle or
+  end with `anchor` `middle` or `end` (default `start`). A text turned `rotation_deg`
+  degrees clockwise (default `0`) gives its lines as they are before the turn, which is
+  made about (`cx_mm`, `cy_mm`). The fonts are the files in
+  `frontend/static/fonts`, which this server carries in its binary and the page loads
+  from `/fonts/`: the same files on both sides, so a line fits as it did in the editor.
+  They are embedded in the PDF as subsets, so the text can be selected and searched
 - How it is built: each page is an SVG in mm with every chart nested as an inner `<svg>`
   under its own id prefix (so their clip paths cannot collide), converted with
   `svg2pdf::to_chunk`; `pdf-writer` assembles the chunks into one page tree
@@ -246,6 +260,11 @@ Validation (`400`, plain-text message naming the page and item, 1-based, e.g.
 - page and item `width_mm`/`height_mm` positive, finite and at most `2000`
 - every item inside its page, with 1 mm of tolerance on each side
 - every item `config` has a `view` and passes the `/api/export` checks above
+- `0..=50` texts per page, each of at most `200` lines of at most `400` characters;
+  `size_mm` in `1..=100`; every line's `x_mm`/`y_mm` on its page, with 1 mm of tolerance
+  once the text is turned (e.g. `page 1, text 2: line 3 must start inside its page`);
+  `rotation_deg`, `cx_mm` and `cy_mm` finite. A control character in a
+  line is drawn as a space
 
 Other errors as for `/api/export` (`422` for a body that does not match, `500` for a
 failed conversion; `413` above 2 MB). At most two documents are converted at once; a

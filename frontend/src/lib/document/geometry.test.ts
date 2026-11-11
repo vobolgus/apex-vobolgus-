@@ -6,6 +6,7 @@ import {
 	GUTTER_MM,
 	gridLines,
 	MIN_CHART_SIDE_MM,
+	nearestFreePlace,
 	overlaps,
 	pageSize,
 	placeFrame,
@@ -15,6 +16,7 @@ import {
 	snapMove,
 	snapResize,
 	snapThresholdMm,
+	snapWidth,
 	stepSize,
 	trackSize,
 	type ResizeAnchor,
@@ -501,6 +503,90 @@ describe('snapResize', () => {
 				expect(guide.at).toBeCloseTo(guide.axis === 'x' ? movingX : movingY, 6);
 			}
 		}
+	});
+});
+
+describe('snapWidth', () => {
+	const box = contentBox('portrait');
+	const frame = { x: 40, y: 100, w: 80, h: 12 };
+
+	it('moves the dragged side and keeps the other, and the height', () => {
+		expect(snapWidth(frame, 'e', 150.3, 20, [], 'portrait', 0).frame).toEqual({
+			x: 40,
+			y: 100,
+			w: 150.3 - 40,
+			h: 12
+		});
+		const west = snapWidth(frame, 'w', 61.7, 20, [], 'portrait', 0).frame;
+		expect(west.x).toBe(61.7);
+		expect(west.x + west.w).toBeCloseTo(120);
+		expect(west.h).toBe(12);
+	});
+
+	it('stops at the smallest width and at the content box', () => {
+		expect(snapWidth(frame, 'e', 45, 20, [], 'portrait', 0).frame.w).toBe(20);
+		expect(snapWidth(frame, 'e', 500, 20, [], 'portrait', 0).frame.w).toBe(box.x + box.w - 40);
+		expect(snapWidth(frame, 'w', 119, 20, [], 'portrait', 0).frame).toMatchObject({
+			x: 100,
+			w: 20
+		});
+		expect(snapWidth(frame, 'w', -50, 20, [], 'portrait', 0).frame).toMatchObject({
+			x: box.x,
+			w: 120 - box.x
+		});
+	});
+
+	it('snaps the dragged side to a column line in reach, with its guide', () => {
+		// The middle gutter of the 2-way split: the left column ends at 102.
+		const edge = gridLines('portrait', 'x').edges.find((x) => Math.abs(x - 102) < 1e-9)!;
+		const { frame: snapped, guides } = snapWidth(frame, 'e', edge + 1.5, 20, [], 'portrait', 2);
+		expect(snapped.x + snapped.w).toBeCloseTo(edge);
+		expect(guides).toEqual([{ axis: 'x', at: edge, from: box.y, to: box.y + box.h }]);
+		// Out of reach it stays where the pointer has it.
+		const free = snapWidth(frame, 'e', edge + 2.5, 20, [], 'portrait', 2);
+		expect(free.frame.x + free.frame.w).toBeCloseTo(edge + 2.5);
+		expect(free.guides).toEqual([]);
+	});
+
+	it('snaps to the edge of another frame, and a gutter off it on the side facing it', () => {
+		const other = { x: 150.4, y: 30, w: 40, h: 40 };
+		const flush = snapWidth(frame, 'e', 190, 20, [other], 'portrait', 1);
+		expect(flush.frame.x + flush.frame.w).toBeCloseTo(190.4);
+		const off = snapWidth(frame, 'e', 144, 20, [other], 'portrait', 1);
+		expect(off.frame.x + off.frame.w).toBeCloseTo(150.4 - GUTTER_MM);
+		expect(off.guides).toEqual([{ axis: 'x', at: 150.4 - GUTTER_MM, from: 30, to: 112 }]);
+	});
+});
+
+describe('nearestFreePlace', () => {
+	const box = contentBox('portrait');
+
+	it('is where the frame is when nothing is in the way of a place there', () => {
+		const frame = { x: 12, y: 12, w: 90, h: 90 };
+		expect(nearestFreePlace(frame, [], 'portrait')).toEqual(frame);
+	});
+
+	it('is the nearest place a gutter clear of what is there, lower on a tie', () => {
+		const taken = { x: 12, y: 12, w: 90, h: 90 };
+		// Under it and beside it are as near: under wins.
+		expect(nearestFreePlace(taken, [taken], 'portrait')).toEqual({ x: 12, y: 108, w: 90, h: 90 });
+		// With the place under it taken too, beside.
+		const under = { x: 12, y: 108, w: 90, h: 90 };
+		expect(nearestFreePlace(taken, [taken, under], 'portrait')).toEqual({
+			x: 108,
+			y: 12,
+			w: 90,
+			h: 90
+		});
+	});
+
+	it('keeps the size, and is null when the page has no room for it', () => {
+		const disc = { x: 12, y: 12, w: 186, h: 186 };
+		expect(nearestFreePlace(disc, [disc], 'portrait')).toBeNull();
+		const strip = { x: 12, y: 12, w: 186, h: 60 };
+		const place = nearestFreePlace(strip, [disc], 'portrait')!;
+		expect(place).toEqual({ x: 12, y: 204, w: 186, h: 60 });
+		expect(place.y + place.h).toBeLessThanOrEqual(box.y + box.h);
 	});
 });
 

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 mod cached;
+mod fonts;
 mod limits;
 mod models;
 mod static_site;

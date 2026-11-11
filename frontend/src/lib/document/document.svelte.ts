@@ -1,8 +1,8 @@
 /**
- * The PDF document: its pages and charts, kept in localStorage.
+ * The PDF document: its pages, their charts and text, kept in localStorage.
  *
  * Change it through the methods: they keep every frame inside its page's content
- * box at its chart's aspect, and save. Saves are debounced, so a drag may call
+ * box (a chart's at its aspect), and save. Saves are debounced, so a drag may call
  * `updateItem` on every move; `flush` writes a pending save at once. Nothing is
  * read from storage until `load` (call it on mount, so the server render and
  * hydration agree on an empty document).
@@ -11,19 +11,45 @@
  * A drag, resize or nudge, or a chart dropped on a page, makes that page `manual`:
  * Add then moves nothing there. A turn re-lays the page and remembers it as it was,
  * so that turning back restores it; any other change to the page forgets that.
+ *
+ * A page with text on it is hand-arranged too: the arranger lays out charts, and
+ * would lay them over the text. A turn moves a page's text with the content box.
  */
 
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
 import { chartKind, planAdd, turnLayout, type PlacedChart } from './arrange';
-import { contentBox, fitFrame } from './geometry';
+
+export { isBlank } from './arrange';
+import {
+	clampPosition,
+	contentBox,
+	fitFrame,
+	GUTTER_MM,
+	nearestFreePlace,
+	overlaps,
+	rotatedBounds
+} from './geometry';
+import {
+	anchoredFrame,
+	fitTextFrame,
+	MAX_TEXT_CHARS,
+	normalizeRotation,
+	textBounds,
+	MAX_TEXTS_PER_PAGE,
+	TEXT_ALIGNS,
+	TEXT_FONTS,
+	TEXT_SIZES
+} from './text';
 import type {
 	ChartSnapshot,
 	DocItem,
 	DocPage,
+	DocText,
 	LayoutTree,
 	PageLayout,
 	PageOrientation,
 	Rect,
+	TextStyle,
 	TurnMemo
 } from './types';
 
@@ -40,6 +66,17 @@ export const THUMB_BUDGET_CHARS = 2_000_000;
 const SAVE_DELAY_MS = 250;
 
 export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem'>;
+
+/**
+ * A chart or a text as copied: what goes on the clipboard, and what `pasteBlock`
+ * reads back (from anywhere, so it is parsed like saved data).
+ */
+export type BlockCopy =
+	| { kind: 'chart'; chart: ChartSnapshot; frame: Rect }
+	| { kind: 'text'; text: string; style: TextStyle; frame: Rect; rotation?: number };
+
+/** How far a copy pasted with no room and no pointer stands off what is in its place, mm down and right. */
+const PASTE_OFFSET_MM = 5;
 
 export interface AddChartResult {
 	pageId: string;
@@ -200,9 +237,26 @@ export class DocumentStore {
 		const page = this.page(id);
 		if (!page || page.orientation === orientation) return;
 		const plan = turnLayout($state.snapshot(page), orientation);
+		const from = contentBox(page.orientation);
+		const to = contentBox(orientation);
 		page.orientation = orientation;
 		page.items = placeItems(page.items, plan.items);
-		setLayout(page, plan);
+		// Text keeps its place in the content box, which is as far across and down it
+		// as before, and its share of the width; turning back puts it where it was.
+		for (const text of page.texts ?? []) {
+			const { x, y, w, h } = text.frame;
+			text.frame = fitTextFrame(
+				{
+					x: to.x + ((x - from.x) * to.w) / from.w,
+					y: to.y + ((y - from.y) * to.h) / from.h,
+					w: (w * to.w) / from.w,
+					h
+				},
+				orientation,
+				text.rotation
+			);
+		}
+		setLayout(page, hasText(page) ? { ...plan, manual: true } : plan);
 		this.#scheduleSave();
 	}
 
@@ -266,6 +320,194 @@ export class DocumentStore {
 			this.#scheduleSave();
 			return true;
 		});
+	}
+
+	// === Text ===
+
+	/**
+	 * Put a text on a page, over its charts, its frame fitted to the page
+	 * (`fitTextFrame`); the page is hand-arranged from then on. Returns the text's id,
+	 * or null for a page that is not there or holds `MAX_TEXTS_PER_PAGE`.
+	 */
+	addText(pageId: string, text: Omit<DocText, 'id'>): string | null {
+		const page = this.page(pageId);
+		if (!page || (page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) return null;
+		const added: DocText = {
+			...$state.snapshot(text),
+			id: createId(),
+			text: text.text.slice(0, MAX_TEXT_CHARS),
+			frame: fitTextFrame(text.frame, page.orientation, text.rotation)
+		};
+		setRotation(added, text.rotation ?? 0);
+		page.texts = [...(page.texts ?? []), added];
+		setLayout(page, { manual: true });
+		this.#scheduleSave();
+		return added.id;
+	}
+
+	/**
+	 * Change a text: what it says, how it is set, where it is, the chart its fields
+	 * read (`chartId: null` goes back to the nearest one), how far it is turned
+	 * (`rotation`, degrees clockwise about its centre). Its frame is fitted to the
+	 * page at its turn; the height follows the lines later (`setTextHeight`).
+	 */
+	updateText(
+		pageId: string,
+		textId: string,
+		patch: {
+			text?: string;
+			style?: TextStyle;
+			frame?: Rect;
+			chartId?: string | null;
+			rotation?: number;
+		}
+	): boolean {
+		const page = this.page(pageId);
+		const text = page?.texts?.find((it) => it.id === textId);
+		if (!page || !text) return false;
+		if (patch.text !== undefined) text.text = patch.text.slice(0, MAX_TEXT_CHARS);
+		if (patch.style) text.style = { ...patch.style };
+		if (patch.rotation !== undefined) setRotation(text, patch.rotation);
+		if (patch.frame || patch.rotation !== undefined) {
+			text.frame = fitTextFrame(patch.frame ?? text.frame, page.orientation, text.rotation);
+		}
+		if (patch.chartId === null) delete text.chartId;
+		else if (patch.chartId !== undefined) text.chartId = patch.chartId;
+		setLayout(page, { manual: true });
+		this.#scheduleSave();
+		return true;
+	}
+
+	/**
+	 * The height a text turned out to be when it was laid out: only the box kept for
+	 * it follows, from its own top-left corner down (`anchoredFrame`); nothing on the
+	 * page has been arranged, and a turn of the page is not forgotten.
+	 */
+	setTextHeight(pageId: string, textId: string, height: number): void {
+		const page = this.page(pageId);
+		const text = page?.texts?.find((it) => it.id === textId);
+		if (!page || !text || !(height > 0) || Math.abs(text.frame.h - height) <= 1e-6) return;
+		const { frame, rotation = 0 } = text;
+		text.frame = fitTextFrame(
+			anchoredFrame(frame, rotation, frame.w, height),
+			page.orientation,
+			rotation
+		);
+		this.#scheduleSave();
+	}
+
+	/**
+	 * Move a text to `toPageId` (on top of its text) at `frame`, fitted like
+	 * `updateText`. A page holding `MAX_TEXTS_PER_PAGE` takes no more. Its fields
+	 * read the chart nearest to where it lands.
+	 */
+	moveText(textId: string, toPageId: string, frame: Rect): boolean {
+		const from = this.pages.find((page) => page.texts?.some((it) => it.id === textId));
+		const to = this.page(toPageId);
+		if (!from || !to) return false;
+		if (from === to) return this.updateText(toPageId, textId, { frame });
+		if ((to.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) return false;
+		const index = from.texts!.findIndex((it) => it.id === textId);
+		const moved = $state.snapshot(from.texts![index]);
+		delete moved.chartId;
+		from.texts!.splice(index, 1);
+		setLayout(from, { manual: from.manual });
+		to.texts = [
+			...(to.texts ?? []),
+			{ ...moved, frame: fitTextFrame(frame, to.orientation, moved.rotation) }
+		];
+		setLayout(to, { manual: true });
+		this.#scheduleSave();
+		return true;
+	}
+
+	/**
+	 * Delete a text; the returned function puts it back on its page (once, if that
+	 * page still exists and has room) and says whether it did.
+	 */
+	removeText(pageId: string, textId: string): () => boolean {
+		const page = this.page(pageId);
+		const index = page?.texts?.findIndex((it) => it.id === textId) ?? -1;
+		if (!page || index < 0) return () => false;
+		const removed = $state.snapshot(page.texts![index]);
+		page.texts!.splice(index, 1);
+		setLayout(page, { manual: page.manual });
+		this.#scheduleSave();
+		return once(() => {
+			const target = this.page(pageId);
+			if (!target || this.pages.some((p) => p.texts?.some((it) => it.id === removed.id))) {
+				return false;
+			}
+			const texts = [...(target.texts ?? [])];
+			if (texts.length >= MAX_TEXTS_PER_PAGE) return false;
+			const frame = fitTextFrame(removed.frame, target.orientation, removed.rotation);
+			texts.splice(Math.min(index, texts.length), 0, { ...removed, frame });
+			target.texts = texts;
+			setLayout(target, { manual: true });
+			this.#scheduleSave();
+			return true;
+		});
+	}
+
+	// === Copy and paste ===
+
+	/** A copy of the chart or text `id`, to paste on any page; null when there is none. */
+	copyBlock(id: string): BlockCopy | null {
+		for (const page of this.pages) {
+			const item = page.items.find((it) => it.id === id);
+			if (item) {
+				const { chart, frame } = $state.snapshot(item);
+				return { kind: 'chart', chart, frame };
+			}
+			const text = page.texts?.find((it) => it.id === id);
+			if (text) {
+				const { text: words, style, frame, rotation } = $state.snapshot(text);
+				const copy: BlockCopy = { kind: 'text', text: words, style, frame };
+				if (rotation) copy.rotation = rotation;
+				return copy;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Put a copy on a page, at its own size (smaller only where the page itself is):
+	 * where it was copied from if that is clear of everything, else in the free place
+	 * nearest to there (`nearestFreePlace`). On a page with no room for it, it goes
+	 * over what is there: its middle at `at` (where the pointer is on that page, mm),
+	 * or without a pointer a little down and to the right of where it was. The page is
+	 * hand-arranged from then on. Returns what was added; `'full'` when the page or
+	 * the document holds no more; null for something that is no copy.
+	 */
+	pasteBlock(
+		pageId: string,
+		value: unknown,
+		at?: { x: number; y: number }
+	): { kind: BlockCopy['kind']; id: string } | 'full' | null {
+		const page = this.page(pageId);
+		if (!page || !isRecord(value)) return null;
+		const frame = parseRect(value.frame);
+		if (!frame) return null;
+		if (value.kind === 'chart') {
+			const chart = parseChart(value.chart);
+			if (!chart) return null;
+			if (page.items.length >= MAX_ITEMS_PER_PAGE || this.chartCount >= MAX_CHARTS) return 'full';
+			const sized = fitFrame(frame, chart.aspect, page.orientation);
+			const item: DocItem = { id: createId(), chart, frame: pastePlace(page, sized, 0, at) };
+			page.items.push(item);
+			setLayout(page, { manual: true });
+			this.#scheduleSave();
+			return { kind: 'chart', id: item.id };
+		}
+		if (value.kind !== 'text') return null;
+		const style = parseTextStyle(value.style);
+		if (typeof value.text !== 'string' || !style) return null;
+		if ((page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) return 'full';
+		const rotation = isFiniteNumber(value.rotation) ? normalizeRotation(value.rotation) : 0;
+		const sized = fitTextFrame(frame, page.orientation, rotation);
+		const placed = pastePlace(page, sized, rotation, at);
+		const id = this.addText(pageId, { text: value.text, style, frame: placed, rotation });
+		return id ? { kind: 'text', id } : 'full';
 	}
 
 	/**
@@ -338,6 +580,53 @@ export class DocumentStore {
 
 function emptyPage(orientation: PageOrientation): DocPage {
 	return { id: createId(), orientation, items: [] };
+}
+
+/** Turn a text to `degrees`; an upright one carries no `rotation`. */
+function setRotation(text: DocText, degrees: number) {
+	const rotation = normalizeRotation(degrees);
+	if (rotation === 0) delete text.rotation;
+	else text.rotation = rotation;
+}
+
+/**
+ * Where a pasted `frame` (turned `rotation`, already the size it will be) goes on
+ * `page`: see `pasteBlock`. What it takes up on the page is what is placed.
+ */
+function pastePlace(
+	page: DocPage,
+	frame: Rect,
+	rotation: number,
+	at: { x: number; y: number } | undefined
+): Rect {
+	const box = contentBox(page.orientation);
+	const others = [...page.items.map((it) => it.frame), ...(page.texts ?? []).map(textBounds)];
+	const bounds = rotatedBounds(frame, rotation);
+	const clear = !others.some((other) => overlaps(bounds, other, GUTTER_MM));
+	let place = clear ? bounds : nearestFreePlace(bounds, others, page.orientation);
+	if (!place && at) {
+		// No room: over what is there, under the pointer.
+		place = clampPosition({ ...bounds, x: at.x - bounds.w / 2, y: at.y - bounds.h / 2 }, box);
+	}
+	if (!place) {
+		// And with no pointer, off whatever lies exactly where it was, so that it shows.
+		place = bounds;
+		const taken = (it: Rect) =>
+			others.some((other) => Math.abs(other.x - it.x) < 0.5 && Math.abs(other.y - it.y) < 0.5);
+		for (let i = 0; i < MAX_ITEMS_PER_PAGE && taken(place); i++) {
+			const next = clampPosition(
+				{ ...place, x: place.x + PASTE_OFFSET_MM, y: place.y + PASTE_OFFSET_MM },
+				box
+			);
+			if (sameFrame(next, place)) break;
+			place = next;
+		}
+	}
+	return { ...frame, x: frame.x + place.x - bounds.x, y: frame.y + place.y - bounds.y };
+}
+
+function hasText(page: Pick<DocPage, 'texts'>): boolean {
+	return (page.texts?.length ?? 0) > 0;
 }
 
 /**
@@ -470,7 +759,15 @@ function parsePage(value: unknown, ids: Set<string>): DocPage | null {
 		.map((item) => parseItem(item, ids, orientation))
 		.filter((item): item is DocItem => item !== null);
 	const page: DocPage = { id, orientation, items };
-	if (value.manual === true) page.manual = true;
+	if (Array.isArray(value.texts)) {
+		const texts = value.texts
+			.map((text) => parseText(text, ids, orientation))
+			.filter((text): text is DocText => text !== null)
+			.slice(0, MAX_TEXTS_PER_PAGE);
+		if (texts.length > 0) page.texts = texts;
+	}
+	// A page with text is hand-arranged, whatever was saved.
+	if (value.manual === true || hasText(page)) page.manual = true;
 	const layout = parseLayout(value.layout, items.length);
 	if (layout) page.layout = layout;
 	const turnMemo = parseTurnMemo(value.turnMemo, page);
@@ -558,6 +855,44 @@ function parseItem(value: unknown, ids: Set<string>, orientation: PageOrientatio
 	const item: DocItem = { id, chart, frame: keptFrame(frame, chart.aspect, orientation) };
 	if (typeof thumb === 'string' && thumb.startsWith('data:image/')) item.thumb = thumb;
 	return item;
+}
+
+function parseText(value: unknown, ids: Set<string>, orientation: PageOrientation): DocText | null {
+	if (!isRecord(value)) return null;
+	const { id, text, chartId } = value;
+	if (typeof id !== 'string' || id === '' || ids.has(id)) return null;
+	const style = parseTextStyle(value.style);
+	const frame = parseRect(value.frame);
+	if (typeof text !== 'string' || !style || !frame) return null;
+	ids.add(id);
+	const rotation = isFiniteNumber(value.rotation) ? normalizeRotation(value.rotation) : 0;
+	const parsed: DocText = {
+		id,
+		text: text.slice(0, MAX_TEXT_CHARS),
+		style,
+		frame: fitTextFrame(frame, orientation, rotation)
+	};
+	if (rotation !== 0) parsed.rotation = rotation;
+	if (typeof chartId === 'string' && chartId !== '') parsed.chartId = chartId;
+	return parsed;
+}
+
+function parseTextStyle(value: unknown): TextStyle | null {
+	if (!isRecord(value)) return null;
+	const { font, size, bold, italic, align } = value;
+	if (!TEXT_FONTS.includes(font as TextStyle['font'])) return null;
+	if (!TEXT_ALIGNS.includes(align as TextStyle['align'])) return null;
+	if (!isFiniteNumber(size) || size < TEXT_SIZES[0] || size > TEXT_SIZES[TEXT_SIZES.length - 1]) {
+		return null;
+	}
+	if (typeof bold !== 'boolean' || typeof italic !== 'boolean') return null;
+	return {
+		font: font as TextStyle['font'],
+		size,
+		bold,
+		italic,
+		align: align as TextStyle['align']
+	};
 }
 
 function parseRect(value: unknown): Rect | null {

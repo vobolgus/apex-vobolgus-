@@ -10,9 +10,11 @@ import {
 	itemRenderConfig,
 	PAPER_STYLE,
 	PREVIEW_CACHE_LIMIT,
-	snapshotChart
+	snapshotChart,
+	textRequest
 } from './render';
-import type { DocItem, DocPage } from './types';
+import { DEFAULT_TEXT_STYLE, FONT_METRICS, LINE_HEIGHT, MM_PER_PT, NO_VALUE } from './text';
+import type { DocItem, DocPage, DocText } from './types';
 
 const VIEW: ChartView = {
 	projection: 'stereographic',
@@ -141,6 +143,107 @@ describe('itemRenderConfig', () => {
 	});
 });
 
+describe('textRequest', () => {
+	/** Half a font size a character. */
+	const measure = (line: string) => Array.from(line).length / 2;
+	const size = 12 * MM_PER_PT;
+	const lineHeight = size * LINE_HEIGHT;
+	const { ascent, descent } = FONT_METRICS.serif;
+	const first = ((LINE_HEIGHT - ascent - descent) / 2 + ascent) * size;
+
+	function text(overrides: Partial<DocText> = {}): DocText {
+		return {
+			id: 't',
+			text: 'one two three',
+			style: { ...DEFAULT_TEXT_STYLE },
+			// Room for seven characters a line.
+			frame: { x: 20, y: 100, w: 3.5 * size, h: 10 },
+			...overrides
+		};
+	}
+
+	const page = (items: DocItem[] = []): DocPage => ({ id: 'p', orientation: 'portrait', items });
+
+	it("sends each line where its baseline starts, in the text's font and size", () => {
+		const request = textRequest(page(), text(), measure);
+		expect(request).toMatchObject({ font: 'serif', bold: false, italic: false, anchor: 'start' });
+		expect(request.size_mm).toBeCloseTo(size);
+		expect(request.lines.map((line) => line.text)).toEqual(['one two', 'three']);
+		expect(request.lines[0].x_mm).toBe(20);
+		expect(request.lines[0].y_mm).toBeCloseTo(100 + first);
+		expect(request.lines[1].y_mm).toBeCloseTo(100 + first + lineHeight);
+	});
+
+	it('anchors centred and right-aligned lines at the middle and the end of the frame', () => {
+		const style = { ...DEFAULT_TEXT_STYLE, font: 'sans' as const, bold: true, italic: true };
+		const centred = textRequest(page(), text({ style: { ...style, align: 'center' } }), measure);
+		expect(centred).toMatchObject({ font: 'sans', bold: true, italic: true, anchor: 'middle' });
+		expect(centred.lines[0].x_mm).toBeCloseTo(20 + (3.5 * size) / 2);
+		const right = textRequest(page(), text({ style: { ...style, align: 'right' } }), measure);
+		expect(right.anchor).toBe('end');
+		expect(right.lines[0].x_mm).toBeCloseTo(20 + 3.5 * size);
+	});
+
+	it("reads the fields from the page's chart, and wraps what they say", () => {
+		const wide = { x: 20, y: 100, w: 150, h: 10 };
+		const filled = textRequest(
+			page([stereoItem()]),
+			text({ text: 'FOV {fov}', frame: wide }),
+			measure
+		);
+		expect(filled.lines.map((line) => line.text)).toEqual(['FOV 160°']);
+		const empty = textRequest(page(), text({ text: 'FOV {fov}', frame: wide }), measure);
+		expect(empty.lines.map((line) => line.text)).toEqual([`FOV ${NO_VALUE}`]);
+	});
+
+	it('sends the lines upright, with the turn to make about the centre of the text', () => {
+		const upright = textRequest(page(), text(), measure);
+		expect(upright).toMatchObject({ rotation_deg: 0 });
+		expect(upright.cx_mm).toBeCloseTo(20 + (3.5 * size) / 2);
+		expect(upright.cy_mm).toBeCloseTo(100 + lineHeight);
+
+		// Stored one line high, laid out two: it grows from its own top-left, the centre with it.
+		const stored = { x: 20, y: 100, w: 3.5 * size, h: lineHeight };
+		const turned = textRequest(page(), text({ frame: stored, rotation: 90 }), measure);
+		expect(turned.rotation_deg).toBe(90);
+		expect(turned.lines.map((line) => line.text)).toEqual(['one two', 'three']);
+		const corner = {
+			x: 20 + (3.5 * size) / 2 + lineHeight / 2,
+			y: 100 + lineHeight / 2 - (3.5 * size) / 2
+		};
+		// The top-left corner of the lines, turned about the centre sent, is where it was.
+		const dx = turned.lines[0].x_mm - turned.cx_mm;
+		const dy = turned.lines[0].y_mm - first - turned.cy_mm;
+		expect(turned.cx_mm - dy).toBeCloseTo(corner.x);
+		expect(turned.cy_mm + dx).toBeCloseTo(corner.y);
+	});
+
+	it('keeps the lines a turn brings onto the page, and leaves out those it takes off', () => {
+		// Down the left margin: upright, its lines would start 100 mm off the page.
+		const frame = { x: 15 - 120, y: 148, w: 240, h: lineHeight };
+		const down = textRequest(page(), text({ text: 'margin', frame, rotation: -90 }), measure);
+		expect(down.lines).toHaveLength(1);
+		expect(down.lines[0].x_mm).toBeLessThan(0);
+		const flat = textRequest(page(), text({ text: 'margin', frame }), measure);
+		expect(flat.lines).toEqual([]);
+	});
+
+	it('leaves out blank lines and lines off the foot of the page', () => {
+		const blank = textRequest(page(), text({ text: 'one\n\ntwo' }), measure);
+		expect(blank.lines.map((line) => line.text)).toEqual(['one', 'two']);
+		expect(blank.lines[1].y_mm).toBeCloseTo(100 + first + 2 * lineHeight);
+		const low = textRequest(
+			page(),
+			text({
+				text: 'one\ntwo\nthree',
+				frame: { x: 20, y: 297 - first - lineHeight - 0.1, w: 80, h: 10 }
+			}),
+			measure
+		);
+		expect(low.lines.map((line) => line.text)).toEqual(['one', 'two']);
+	});
+});
+
 describe('documentRequest', () => {
 	it('sends every page at its A4 size in mm and every chart at its frame', () => {
 		const pages: DocPage[] = [
@@ -150,7 +253,7 @@ describe('documentRequest', () => {
 		const body = documentRequest(pages);
 		expect(body.pages).toHaveLength(2);
 		expect(body.pages[0]).toMatchObject({ width_mm: 210, height_mm: 297 });
-		expect(body.pages[1]).toEqual({ width_mm: 297, height_mm: 210, items: [] });
+		expect(body.pages[1]).toEqual({ width_mm: 297, height_mm: 210, items: [], texts: [] });
 		expect(body.pages[0].items).toEqual([
 			{
 				x_mm: 12,

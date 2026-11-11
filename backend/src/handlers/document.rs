@@ -1,8 +1,9 @@
-//! `POST /api/export/document`: charts placed on pages, as one multi-page PDF.
+//! `POST /api/export/document`: charts and text placed on pages, as one multi-page PDF.
 //!
-//! Every page becomes one SVG in mm with each chart nested in its box, is converted
-//! with `svg2pdf::to_chunk`, and `pdf-writer` puts the chunks on pages of exactly the
-//! requested size (`svg2pdf::to_pdf` only writes single-page files).
+//! Every page becomes one SVG in mm with each chart nested in its box and each line
+//! of text where the client put it, is converted with `svg2pdf::to_chunk`, and
+//! `pdf-writer` puts the chunks on pages of exactly the requested size
+//! (`svg2pdf::to_pdf` only writes single-page files).
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -20,9 +21,10 @@ use rust_core::catalog::HipCatalog;
 use tokio::sync::Semaphore;
 
 use crate::AppState;
+use crate::fonts;
 use crate::handlers::export::{svg_options, validate_config};
 use crate::limits::{PDF_CHART_COST, client_key, too_many_requests};
-use crate::models::{DocumentPage, DocumentRequest};
+use crate::models::{DocumentPage, DocumentRequest, DocumentText, TextAnchor, TextFont};
 use crate::svg_generator::{Placement, SvgGenerator};
 
 const MAX_PAGES: usize = 100;
@@ -31,6 +33,15 @@ const MAX_ITEMS_PER_PAGE: usize = 50;
 /// size (every star to the magnitude limit, roughly 1 MB of PDF), so the work and the
 /// file are capped here: the page and item counts alone would allow 5000.
 const MAX_CHARTS: usize = 200;
+/// Blocks of text on one page.
+const MAX_TEXTS_PER_PAGE: usize = 50;
+/// Lines in one block of text: a page of 6 pt type is under 200.
+const MAX_LINES_PER_TEXT: usize = 200;
+/// Characters in one line: far more than a page is wide at any size worth reading.
+const MAX_LINE_CHARS: usize = 400;
+/// Font sizes, mm: about 3 pt to 280 pt.
+const MIN_TEXT_SIZE_MM: f64 = 1.0;
+const MAX_TEXT_SIZE_MM: f64 = 100.0;
 /// Documents converted at once; the next ones wait their turn instead of adding
 /// another few hundred MB to the peak.
 const CONCURRENT_EXPORTS: usize = 2;
@@ -97,12 +108,129 @@ pub(crate) fn validate_document(document: &DocumentRequest) -> Result<(), String
             }
             validate_config(&item.config).map_err(|message| format!("{at}: {message}"))?;
         }
+        if page.texts.len() > MAX_TEXTS_PER_PAGE {
+            return Err(format!(
+                "page {page_number}: at most {MAX_TEXTS_PER_PAGE} texts, got {}",
+                page.texts.len()
+            ));
+        }
+        for (text_index, text) in page.texts.iter().enumerate() {
+            validate_text(text, page).map_err(|message| {
+                format!("page {page_number}, text {}: {message}", text_index + 1)
+            })?;
+        }
     }
     Ok(())
 }
 
+fn validate_text(text: &DocumentText, page: &DocumentPage) -> Result<(), String> {
+    if !(MIN_TEXT_SIZE_MM..=MAX_TEXT_SIZE_MM).contains(&text.size_mm) {
+        return Err(format!(
+            "size_mm must be in {MIN_TEXT_SIZE_MM}..={MAX_TEXT_SIZE_MM}"
+        ));
+    }
+    if text.lines.len() > MAX_LINES_PER_TEXT {
+        return Err(format!(
+            "at most {MAX_LINES_PER_TEXT} lines, got {}",
+            text.lines.len()
+        ));
+    }
+    let turn = [text.rotation_deg, text.cx_mm, text.cy_mm];
+    if !turn
+        .iter()
+        .all(|value| value.is_finite() && value.abs() <= MAX_SIDE_MM)
+    {
+        return Err(format!(
+            "rotation_deg, cx_mm and cy_mm must be finite and within ±{MAX_SIDE_MM}"
+        ));
+    }
+    let (sin, cos) = text.rotation_deg.to_radians().sin_cos();
+    for (line_index, line) in text.lines.iter().enumerate() {
+        let line_number = line_index + 1;
+        // Where the line starts once the text is turned. A baseline off the page is a
+        // line nobody would see: the client leaves it out.
+        let (dx, dy) = (line.x_mm - text.cx_mm, line.y_mm - text.cy_mm);
+        let x_mm = text.cx_mm + dx * cos - dy * sin;
+        let y_mm = text.cy_mm + dx * sin + dy * cos;
+        let inside = x_mm >= -PAGE_TOLERANCE_MM
+            && y_mm >= -PAGE_TOLERANCE_MM
+            && x_mm <= page.width_mm + PAGE_TOLERANCE_MM
+            && y_mm <= page.height_mm + PAGE_TOLERANCE_MM;
+        if !inside {
+            return Err(format!("line {line_number} must start inside its page"));
+        }
+        let chars = line.text.chars().count();
+        if chars > MAX_LINE_CHARS {
+            return Err(format!(
+                "line {line_number}: at most {MAX_LINE_CHARS} characters, got {chars}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `text` as XML character data. A character XML has no place for (a control
+/// character; a tab or a line break has no meaning inside a line either) is a space.
+fn xml_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c if c.is_control() || matches!(c, '\u{FFFE}' | '\u{FFFF}') => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A block of text as SVG: one `<text>` per line, black, in a bundled font, the block
+/// turned about its centre when it is.
+fn text_svg(svg: &mut String, text: &DocumentText) {
+    let family = match text.font {
+        TextFont::Serif => fonts::SERIF,
+        TextFont::Sans => fonts::SANS,
+    };
+    let weight = if text.bold { 700 } else { 400 };
+    let style = if text.italic { "italic" } else { "normal" };
+    let anchor = match text.anchor {
+        TextAnchor::Start => "start",
+        TextAnchor::Middle => "middle",
+        TextAnchor::End => "end",
+    };
+    let _ = write!(
+        svg,
+        r##"<g font-family="{family}" font-size="{}" font-weight="{weight}" font-style="{style}" text-anchor="{anchor}" fill="#000000""##,
+        text.size_mm
+    );
+    if text.rotation_deg != 0.0 {
+        let _ = write!(
+            svg,
+            r##" transform="rotate({} {} {})""##,
+            text.rotation_deg, text.cx_mm, text.cy_mm
+        );
+    }
+    svg.push('>');
+    for line in &text.lines {
+        // Nothing to draw, and usvg would only carry an empty node along.
+        if line.text.trim().is_empty() {
+            continue;
+        }
+        let _ = write!(
+            svg,
+            r##"<text x="{}" y="{}" xml:space="preserve">{}</text>"##,
+            line.x_mm,
+            line.y_mm,
+            xml_text(&line.text)
+        );
+    }
+    svg.push_str("</g>");
+}
+
 /// One page as SVG in mm: `viewBox` in mm and a physical size, each chart nested at
-/// its box under its own id prefix so the charts' clip paths cannot collide.
+/// its box under its own id prefix so the charts' clip paths cannot collide, and the
+/// text over them.
 pub(crate) fn page_svg(page: &DocumentPage, page_index: usize, hip_catalog: &HipCatalog) -> String {
     let mut svg = String::new();
     let _ = write!(
@@ -125,6 +253,9 @@ pub(crate) fn page_svg(page: &DocumentPage, page_index: usize, hip_catalog: &Hip
             &id_prefix,
             Some(placement),
         ));
+    }
+    for text in &page.texts {
+        text_svg(&mut svg, text);
     }
     svg.push_str("</svg>");
     svg
@@ -251,7 +382,7 @@ pub async fn export_document(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::DocumentItem;
+    use crate::models::{DocumentItem, DocumentTextLine};
     use std::collections::HashSet;
     use std::sync::{Arc, OnceLock};
 
@@ -312,6 +443,7 @@ mod tests {
             width_mm,
             height_mm,
             items,
+            texts: vec![],
         }
     }
 
@@ -529,6 +661,205 @@ mod tests {
             svg,
             r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 297 210" width="297mm" height="210mm"></svg>"##
         );
+    }
+
+    fn line(x_mm: f64, y_mm: f64, text: &str) -> DocumentTextLine {
+        DocumentTextLine {
+            x_mm,
+            y_mm,
+            text: text.to_string(),
+        }
+    }
+
+    fn text(lines: Vec<DocumentTextLine>) -> DocumentText {
+        DocumentText {
+            font: TextFont::Serif,
+            bold: false,
+            italic: false,
+            size_mm: 4.0,
+            anchor: TextAnchor::Start,
+            rotation_deg: 0.0,
+            cx_mm: 0.0,
+            cy_mm: 0.0,
+            lines,
+        }
+    }
+
+    fn page_with_text(text: DocumentText) -> DocumentRequest {
+        let mut page = a4(false, vec![]);
+        page.texts.push(text);
+        DocumentRequest { pages: vec![page] }
+    }
+
+    #[test]
+    fn text_is_read_with_its_defaults() {
+        let page: DocumentPage = serde_json::from_value(serde_json::json!({
+            "width_mm": 210, "height_mm": 297,
+            "texts": [{ "font": "sans", "size_mm": 3.5, "lines": [{ "x_mm": 12, "y_mm": 20, "text": "Hi" }] }]
+        }))
+        .unwrap();
+        assert!(page.items.is_empty());
+        let text = &page.texts[0];
+        assert_eq!(text.font, TextFont::Sans);
+        assert_eq!(text.anchor, TextAnchor::Start);
+        assert!(!text.bold && !text.italic);
+        // A page from before text was: no `texts` at all.
+        let old: DocumentPage =
+            serde_json::from_value(serde_json::json!({ "width_mm": 210, "height_mm": 297 }))
+                .unwrap();
+        assert!(old.texts.is_empty());
+    }
+
+    #[test]
+    fn rejects_text_out_of_bounds() {
+        let ok = page_with_text(text(vec![line(12.0, 20.0, "Latitude")]));
+        assert_eq!(validate_document(&ok), Ok(()));
+
+        for size_mm in [0.0, 0.5, 100.5, f64::NAN] {
+            let mut bad = text(vec![line(12.0, 20.0, "x")]);
+            bad.size_mm = size_mm;
+            assert!(
+                rejected(&page_with_text(bad)).starts_with("page 1, text 1: size_mm must be in"),
+                "size {size_mm} must be rejected"
+            );
+        }
+        for (x, y) in [(-1.5, 20.0), (211.5, 20.0), (12.0, 298.5), (f64::NAN, 20.0)] {
+            assert_eq!(
+                rejected(&page_with_text(text(vec![
+                    line(12.0, 20.0, "in"),
+                    line(x, y, "out")
+                ]))),
+                "page 1, text 1: line 2 must start inside its page"
+            );
+        }
+        let long = "я".repeat(MAX_LINE_CHARS + 1);
+        assert!(
+            rejected(&page_with_text(text(vec![line(12.0, 20.0, &long)])))
+                .contains("at most 400 characters, got 401")
+        );
+        // Characters, not bytes: 400 Cyrillic letters are 800 bytes.
+        let fits = "я".repeat(MAX_LINE_CHARS);
+        assert_eq!(
+            validate_document(&page_with_text(text(vec![line(12.0, 20.0, &fits)]))),
+            Ok(())
+        );
+        let many = (0..=MAX_LINES_PER_TEXT)
+            .map(|_| line(12.0, 20.0, "x"))
+            .collect();
+        assert!(rejected(&page_with_text(text(many))).contains("at most 200 lines"));
+
+        let mut page = a4(false, vec![]);
+        page.texts = (0..=MAX_TEXTS_PER_PAGE)
+            .map(|_| text(vec![line(12.0, 20.0, "x")]))
+            .collect();
+        assert_eq!(
+            rejected(&DocumentRequest { pages: vec![page] }),
+            "page 1: at most 50 texts, got 51"
+        );
+    }
+
+    #[test]
+    fn text_is_set_line_by_line_over_the_charts_in_a_bundled_font() {
+        let mut page = a4(false, vec![item(12.0, 30.0, 90.0, 90.0, "stereo")]);
+        page.texts.push(DocumentText {
+            font: TextFont::Sans,
+            bold: true,
+            italic: true,
+            size_mm: 4.5,
+            anchor: TextAnchor::Middle,
+            rotation_deg: 0.0,
+            cx_mm: 0.0,
+            cy_mm: 0.0,
+            lines: vec![
+                line(105.0, 18.0, "φ < 56° & \"LST\""),
+                line(105.0, 24.0, "   "),
+                line(105.0, 30.0, "Широта\tи\u{7}время"),
+            ],
+        });
+        let svg = page_svg(&page, 0, hip_catalog());
+        let group = r##"<g font-family="PT Sans" font-size="4.5" font-weight="700" font-style="italic" text-anchor="middle" fill="#000000">"##;
+        assert!(svg.contains(group), "{}", &svg[svg.len() - 400..]);
+        assert!(svg.contains(
+            r##"<text x="105" y="18" xml:space="preserve">φ &lt; 56° &amp; "LST"</text>"##
+        ));
+        // A blank line is not drawn; a control character is a space.
+        assert_eq!(svg.matches("<text x=\"105\"").count(), 2);
+        assert!(svg.contains(">Широта и время</text>"));
+        // Over the charts: after the last of them.
+        assert!(svg.find(group).unwrap() > svg.rfind("sky-mask").unwrap());
+        assert!(svg.ends_with("</text></g></svg>"));
+
+        let tree = svg2pdf::usvg::Tree::from_str(&svg, &svg_options()).unwrap();
+        let mut glyphs = Vec::new();
+        fn texts(group: &svg2pdf::usvg::Group, glyphs: &mut Vec<usize>) {
+            for node in group.children() {
+                match node {
+                    svg2pdf::usvg::Node::Group(group) => texts(group, glyphs),
+                    svg2pdf::usvg::Node::Text(text) => glyphs.push(
+                        text.layouted()
+                            .iter()
+                            .map(|span| span.positioned_glyphs.len())
+                            .sum(),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        texts(tree.root(), &mut glyphs);
+        // Laid out: the font was found, or the lines would have no glyphs.
+        assert_eq!(glyphs.len(), 2, "two lines drawn");
+        assert!(glyphs.iter().all(|&count| count >= 14), "{glyphs:?}");
+    }
+
+    #[test]
+    fn a_turned_text_is_checked_and_drawn_where_the_turn_puts_it() {
+        // Down the left margin: upright its lines would start 78 mm off the page.
+        let mut sideways = text(vec![line(-78.0, 150.0, "Key: 56° N, 13h 45m")]);
+        sideways.rotation_deg = -90.0;
+        sideways.cx_mm = 15.0;
+        sideways.cy_mm = 148.5;
+        let document = page_with_text(sideways.clone());
+        assert_eq!(validate_document(&document), Ok(()));
+        let svg = page_svg(&document.pages[0], 0, hip_catalog());
+        assert!(svg.contains(r##"fill="#000000" transform="rotate(-90 15 148.5)">"##));
+        // An upright text has no transform at all.
+        let upright = page_svg(
+            &page_with_text(text(vec![line(12.0, 20.0, "x")])).pages[0],
+            0,
+            hip_catalog(),
+        );
+        assert!(!upright.contains("transform=\"rotate"));
+
+        // The same lines, not turned, are off the page; so is a turn that throws them off.
+        let mut flat = sideways.clone();
+        flat.rotation_deg = 0.0;
+        assert_eq!(
+            rejected(&page_with_text(flat)),
+            "page 1, text 1: line 1 must start inside its page"
+        );
+        let mut thrown = text(vec![line(12.0, 20.0, "x")]);
+        thrown.rotation_deg = 180.0;
+        thrown.cx_mm = 0.0;
+        thrown.cy_mm = 0.0;
+        assert!(rejected(&page_with_text(thrown)).contains("must start inside its page"));
+        for bad in [f64::NAN, f64::INFINITY, 1e9] {
+            let mut wild = text(vec![line(12.0, 20.0, "x")]);
+            wild.rotation_deg = bad;
+            assert!(
+                rejected(&page_with_text(wild)).contains("rotation_deg, cx_mm and cy_mm"),
+                "{bad} must be rejected"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_page_of_text_is_a_pdf_with_its_font_embedded() {
+        let state = AppState::new(Arc::new(HipCatalog::new()));
+        let document = page_with_text(text(vec![line(12.0, 20.0, "Широта: 56° N")]));
+        let (_, pdf) = export_document(State(state), Json(document)).await.unwrap();
+        let body = String::from_utf8_lossy(&pdf);
+        assert!(body.contains("/Type /Font"), "no font in the PDF");
+        assert!(body.contains("PTSerif"), "not set in PT Serif");
     }
 
     /// The media box of every page object, in file order (which is page order: they

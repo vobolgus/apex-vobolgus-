@@ -13,7 +13,14 @@
  * width alone on the page; a disc is packed as its square box.
  */
 
-import { contentBox, GUTTER_MM, MIN_CHART_SIDE_MM, rotateLayout, underMinSide } from './geometry';
+import {
+	contentBox,
+	GUTTER_MM,
+	MIN_CHART_SIDE_MM,
+	rotatedBounds,
+	rotateLayout,
+	underMinSide
+} from './geometry';
 import type {
 	ChartKind,
 	ChartSnapshot,
@@ -1115,6 +1122,11 @@ function sameRect(a: Rect, b: Rect): boolean {
 	);
 }
 
+/** Whether a page holds nothing at all: no chart and no text. */
+export function isBlank(page: Pick<DocPage, 'items' | 'texts'>): boolean {
+	return page.items.length === 0 && (page.texts?.length ?? 0) === 0;
+}
+
 /** A page laid out from scratch (a future "Re-arrange page"). */
 export function arrangePage(page: DocPage): {
 	items: PlacedChart[];
@@ -1144,7 +1156,7 @@ function contains(outer: Rect, r: Rect): boolean {
 }
 
 /** The maximal free rectangles of `box` around the obstacles grown by the gutter (MaxRects). */
-function freeRects(box: Rect, obstacles: readonly Rect[]): Rect[] {
+export function freeRects(box: Rect, obstacles: readonly Rect[]): Rect[] {
 	let free: Rect[] = [{ ...box }];
 	for (const ob of obstacles) {
 		const o = {
@@ -1177,14 +1189,21 @@ function freeRects(box: Rect, obstacles: readonly Rect[]): Rect[] {
 
 /**
  * The largest frame of `aspect` in a page's free space, centred in its free rectangle, one
- * gutter clear of every chart; null when it would be under the smallest side.
+ * gutter clear of every chart and text; null when it would be under the smallest side.
  */
 export function freeSpot(
-	page: { orientation: PageOrientation; items: readonly { frame: Rect }[] },
+	page: {
+		orientation: PageOrientation;
+		items: readonly { frame: Rect }[];
+		texts?: readonly { frame: Rect; rotation?: number }[];
+	},
 	aspect: number
 ): Rect | null {
 	const box = contentBox(page.orientation);
-	const obstacles = page.items.map((it) => it.frame);
+	const obstacles = [
+		...page.items.map((it) => it.frame),
+		...(page.texts ?? []).map((it) => rotatedBounds(it.frame, it.rotation))
+	];
 	let best: Rect | null = null;
 	for (const f of freeRects(box, obstacles)) {
 		const w = Math.min(f.w, f.h * aspect);
@@ -1235,8 +1254,9 @@ function areaFeasible(page: DocPage, chart: ArrangeChart, tau: number, altSide: 
 /** The chart on one occupied page: the first layout in the band that passes the gate, else the best. */
 function tryPage(page: DocPage, chart: ArrangeChart, tau: number, altSide: number): Trial | null {
 	const old: PlacedChart[] = page.items.map((it, index) => ({ index, frame: it.frame }));
-	if (page.manual) {
-		// Nothing moves on a hand-arranged page: the chart takes the free spot, if any.
+	if (page.manual || page.texts?.length) {
+		// Nothing moves on a hand-arranged page, as one with text is: the chart takes the
+		// free spot, if any.
 		const frame = freeSpot(page, chart.aspect);
 		if (!frame) return null;
 		const q = Math.min(1, frame.w / altSide);
@@ -1280,7 +1300,7 @@ function tryPage(page: DocPage, chart: ArrangeChart, tau: number, altSide: numbe
 /**
  * Where Add to PDF puts `chart`, and how that page is laid out again. Only that page changes.
  *
- * A disc takes the first empty page. Otherwise each occupied page (the latest first) is tried
+ * A disc takes the first empty page (one with text on it is not empty). Otherwise each occupied page (the latest first) is tried
  * against the alternative, the first empty page or else a new one: the chart joins when
  * q ≥ 0.90 while an empty page waits, q ≥ 0.70 when the alternative is a new page. The page
  * with the highest q wins, ties (within 0.02) to the latest. A hand-arranged page is never
@@ -1301,7 +1321,7 @@ export function planAdd(
 		relaid: false,
 		q: null
 	});
-	const empty = pages.findIndex((p) => p.items.length === 0);
+	const empty = pages.findIndex(isBlank);
 	if (chart.kind === 'stereo' && empty >= 0) return alone(empty, pages[empty].orientation);
 
 	// What the chart gets elsewhere: alone on the first empty page, else on a portrait page,
@@ -1313,7 +1333,7 @@ export function planAdd(
 	const pass: (Trial & { k: number })[] = [];
 	for (let k = pages.length - 1; k >= 0; k--) {
 		const p = pages[k];
-		if (!p.items.length) continue;
+		if (isBlank(p)) continue;
 		if (now() - t0 > ARRANGE.budgetMs) break;
 		if (p.items.length >= ARRANGE.maxAuto) continue;
 		if (!areaFeasible(p, chart, tau, altSide)) continue;

@@ -127,6 +127,22 @@ export function overlaps(a: Rect, b: Rect, gutter = 0): boolean {
 	);
 }
 
+/**
+ * The upright box around `frame` turned `degrees` about its centre: what a turned
+ * text takes up on the page. The same centre; the frame itself when not turned.
+ */
+export function rotatedBounds(frame: Rect, degrees = 0): Rect {
+	if (!degrees) return frame;
+	const angle = (degrees * Math.PI) / 180;
+	// A right angle is exact: the cosine of 90° is not quite 0 in floating point.
+	const exact = (value: number) => (Math.abs(value) < 1e-12 ? 0 : Math.abs(value));
+	const c = exact(Math.cos(angle));
+	const s = exact(Math.sin(angle));
+	const w = frame.w * c + frame.h * s;
+	const h = frame.w * s + frame.h * c;
+	return { x: frame.x + (frame.w - w) / 2, y: frame.y + (frame.h - h) / 2, w, h };
+}
+
 // === Snapping ===
 
 /**
@@ -357,6 +373,46 @@ export function snapResize(
 	return { frame: snapped, guides: mergeGuides(guides) };
 }
 
+/**
+ * Snap a change of width: the frame's left (`'w'`) or right (`'e'`) side dragged to
+ * `edge`, the other side and the height staying as they are (a text, whose height is
+ * its lines'). The dragged side stays in the content box and no closer than `minW`
+ * to the other, and snaps to the column lines and to the other frames' edges and
+ * gutter lines. Guides mark the lines it ends up on.
+ */
+export function snapWidth(
+	frame: Rect,
+	side: 'w' | 'e',
+	edge: number,
+	minW: number,
+	others: readonly Rect[],
+	o: PageOrientation,
+	thresholdMm: number
+): SnapResult {
+	const box = contentBox(o);
+	const east = side === 'e';
+	const fixed = clamp(east ? frame.x : frame.x + frame.w, box.x, box.x + box.w);
+	const lo = east ? Math.min(fixed + minW, box.x + box.w) : box.x;
+	const hi = east ? box.x + box.w : Math.max(fixed - minW, box.x);
+	const raw = clamp(edge, lo, hi);
+	const moving: Feature = east ? 'end' : 'start';
+	const xs = targets(o, 'x', others).filter((t) => accepts(t.kind, moving));
+	let at = raw;
+	let reach = Infinity;
+	for (const target of xs) {
+		const distance = Math.abs(target.at - raw);
+		if (distance > thresholdMm + EPS || target.at < lo - EPS || target.at > hi + EPS) continue;
+		if (distance < reach - EPS) {
+			at = target.at;
+			reach = distance;
+		}
+	}
+	const snapped: Rect = east
+		? { ...frame, x: fixed, w: at - fixed }
+		: { ...frame, x: at, w: fixed - at };
+	return { frame: snapped, guides: mergeGuides(guidesAt('x', at, moving, snapped, xs, box)) };
+}
+
 // === Placement ===
 
 /**
@@ -396,6 +452,37 @@ function spotPositions(o: PageOrientation, axis: Axis, size: number, obstacles: 
 		starts.push(start, start + extent - size, start + extent + GUTTER_MM, start - GUTTER_MM - size);
 	}
 	return uniqueSorted(starts.filter((s) => s >= lo - EPS && s + size <= lo + length + EPS));
+}
+
+/**
+ * The place for `frame`, at its own size, clear of `obstacles` by a gutter, that is
+ * nearest to where it is; of places as near, the one further down the page, then
+ * further right (a copy goes after what it was copied from). The places tried are
+ * those `findSpot` tries: on the grid lines, or against an obstacle. Null when the
+ * page has no room for it.
+ */
+export function nearestFreePlace(
+	frame: Rect,
+	obstacles: readonly Rect[],
+	o: PageOrientation
+): Rect | null {
+	const box = contentBox(o);
+	const xs = spotPositions(o, 'x', frame.w, obstacles);
+	const ys = spotPositions(o, 'y', frame.h, obstacles);
+	let best: Rect | null = null;
+	let bestDistance = Infinity;
+	for (const y of ys) {
+		for (const x of xs) {
+			const distance = Math.hypot(x - frame.x, y - frame.y);
+			if (distance > bestDistance + EPS) continue;
+			const place = { x, y, w: frame.w, h: frame.h };
+			if (!inside(place, box) || obstacles.some((ob) => overlaps(place, ob, GUTTER_MM))) continue;
+			// Rows go top to bottom and columns left to right: a tie is later, so it wins.
+			best = place;
+			bestDistance = distance;
+		}
+	}
+	return best;
 }
 
 // === Fitting ===
@@ -594,7 +681,7 @@ function clamp(value: number, lo: number, hi: number): number {
 }
 
 /** Moves `frame` into `box` without resizing it (to the top-left if it is larger). */
-function clampPosition(frame: Rect, box: Rect): Rect {
+export function clampPosition(frame: Rect, box: Rect): Rect {
 	return {
 		...frame,
 		x: Math.max(box.x, Math.min(frame.x, box.x + box.w - frame.w)),

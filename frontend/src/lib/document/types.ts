@@ -1,5 +1,5 @@
 /**
- * The PDF document: A4 pages holding frozen copies of the preview's chart.
+ * The PDF document: A4 pages holding frozen copies of the preview's chart, and text.
  *
  * All geometry is in millimetres, origin at the page's top-left, y down.
  */
@@ -34,6 +34,38 @@ export interface DocItem {
 	frame: Rect;
 	/** PNG data URL of the preview at add time, shown until the vector preview loads. */
 	thumb?: string;
+}
+
+export type TextFont = 'serif' | 'sans';
+export type TextAlign = 'left' | 'center' | 'right';
+
+export interface TextStyle {
+	font: TextFont;
+	/** The font size, pt. */
+	size: number;
+	bold: boolean;
+	italic: boolean;
+	align: TextAlign;
+}
+
+/**
+ * A block of text on a page. Its width is set by hand and its lines wrap to it; the
+ * height follows the text, so `frame.h` is only the height it was last laid out at
+ * (`text.ts`), kept for whoever needs the block's box without measuring type.
+ */
+export interface DocText {
+	id: string;
+	/** As typed: line breaks, and `{fields}` that show the values of a chart (`text.ts`). */
+	text: string;
+	style: TextStyle;
+	frame: Rect;
+	/**
+	 * Degrees it is turned clockwise about the centre of its frame, in (−180, 180];
+	 * absent when upright. The frame is the text's own box, as it is before the turn.
+	 */
+	rotation?: number;
+	/** The chart on this page its fields read; the nearest one when absent or gone (`boundItem`). */
+	chartId?: string;
 }
 
 /** How Add to PDF and a turn lay a page out: stereo charts are discs, the rest pinholes. */
@@ -77,6 +109,8 @@ export interface DocPage {
 	id: string;
 	orientation: PageOrientation;
 	items: DocItem[];
+	/** Text, drawn over the charts. A page with text is arranged by hand (`manual`). */
+	texts?: DocText[];
 	/** Arranged by hand (a drag, a resize, a nudge, a drop): Add to PDF moves nothing here. */
 	manual?: boolean;
 	/** The arranger's layout, while the frames are still the ones it made. */

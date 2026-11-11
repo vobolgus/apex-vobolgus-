@@ -79,7 +79,7 @@ pub struct StyleConfig {
     pub magnitude_scale: f32,
 }
 
-/// `POST /api/export/document`: pages of a multi-page PDF, each holding charts.
+/// `POST /api/export/document`: pages of a multi-page PDF, each holding charts and text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentRequest {
     pub pages: Vec<DocumentPage>,
@@ -92,6 +92,9 @@ pub struct DocumentPage {
     pub height_mm: f64,
     #[serde(default)]
     pub items: Vec<DocumentItem>,
+    /// Drawn over the charts.
+    #[serde(default)]
+    pub texts: Vec<DocumentText>,
 }
 
 /// A chart on a page: its box in mm from the page's top-left, y down, and what to draw.
@@ -103,4 +106,55 @@ pub struct DocumentItem {
     pub width_mm: f64,
     pub height_mm: f64,
     pub config: RenderConfig,
+}
+
+/// A block of text on a page, already broken into lines: the page editor wraps it
+/// (it shows the text as it is typed) and this server only sets each line where it is
+/// told to, in the same font file (`crate::fonts`), so the PDF breaks where the editor did.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentText {
+    pub font: TextFont,
+    #[serde(default)]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    /// The font size, mm.
+    pub size_mm: f64,
+    /// Which point of a line its `x_mm` is.
+    #[serde(default)]
+    pub anchor: TextAnchor,
+    /// Degrees the text is turned clockwise about (`cx_mm`, `cy_mm`). Its lines are
+    /// given as they are before the turn.
+    #[serde(default)]
+    pub rotation_deg: f64,
+    #[serde(default)]
+    pub cx_mm: f64,
+    #[serde(default)]
+    pub cy_mm: f64,
+    pub lines: Vec<DocumentTextLine>,
+}
+
+/// One line of text: where its baseline starts (or its middle, or its end: the
+/// text's `anchor`), mm from the page's top-left, y down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentTextLine {
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextFont {
+    Serif,
+    Sans,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextAnchor {
+    #[default]
+    Start,
+    Middle,
+    End,
 }

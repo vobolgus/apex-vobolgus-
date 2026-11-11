@@ -104,6 +104,19 @@
 										/>
 									{/if}
 								{/each}
+								{#each page.texts ?? [] as text (text.id)}
+									<rect
+										class="sheet-text"
+										x={text.frame.x}
+										y={text.frame.y}
+										width={text.frame.w}
+										height={Math.max(text.frame.h, 4)}
+										rx="1.5"
+										transform="rotate({text.rotation ?? 0} {text.frame.x + text.frame.w / 2} {text
+											.frame.y +
+											text.frame.h / 2})"
+									/>
+								{/each}
 							</svg>
 						</span>
 						<span class="number" aria-hidden="true">{index + 1}</span>
@@ -195,6 +208,11 @@
 
 	.sheet-chart {
 		fill: var(--paper-chart-mini);
+	}
+
+	/* A text is a bar of its box: darker than a chart, as type is on a page. */
+	.sheet-text {
+		fill: var(--paper-edge);
 	}
 
 	.number {

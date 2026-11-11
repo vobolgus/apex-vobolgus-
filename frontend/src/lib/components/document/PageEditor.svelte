@@ -17,31 +17,79 @@
 	 * after, and Delete removes it; ←/→ elsewhere change the page. A selected chart's
 	 * toolbar does the same without a drag.
 	 *
+	 * A page also holds text ("Add text" by its name). A text moves like a chart, from
+	 * page to page too; its sides set its width and its height follows its lines; the
+	 * knob over it turns it about its centre, Shift holding it to the right angles (R
+	 * and the toolbar turn it by quarters). Enter
+	 * or a double click types in it (Escape keeps what was typed), + and − step the
+	 * type's size, and its toolbar sets the font, bold, italic and the alignment. Its
+	 * fields read the chart nearest to it; on a page with several, the toolbar tells it
+	 * another by number.
+	 *
+	 * ⌘C / Ctrl+C copies the selected chart or text, ⌘X cuts it, and ⌘V puts a copy
+	 * on the page being shown, at its own size: where it was copied from if that is
+	 * free, else in the nearest free place, and on a page with no room for it over
+	 * what is there, under the pointer. Words copied anywhere else are pasted as a new
+	 * text.
+	 *
 	 * ⌘Z / Ctrl+Z is the toast's Undo, as on the page behind (which the modal keeps
-	 * from these keys): a chart removed here, or a page deleted in the panel.
+	 * from these keys): a chart or a text removed here, or a page deleted in the panel.
 	 */
 	import { tick } from 'svelte';
-	import { MAX_ITEMS_PER_PAGE, type DocumentStore } from '$lib/document/document.svelte';
 	import {
+		isBlank,
+		MAX_ITEMS_PER_PAGE,
+		type BlockCopy,
+		type DocumentStore
+	} from '$lib/document/document.svelte';
+	import {
+		contentBox,
 		fitFrame,
 		pageSize,
+		rotatedBounds,
 		placeFrame,
 		snapMove,
 		snapResize,
 		snapThresholdMm,
+		snapWidth,
 		stepSize,
 		type ResizeAnchor,
 		type SnapGuide
 	} from '$lib/document/geometry';
 	import { plural } from '$lib/document/labels';
-	import type { DocItem, DocPage, PageOrientation, Rect } from '$lib/document/types';
+	import {
+		anchoredFrame,
+		DEFAULT_TEXT_STYLE,
+		fitTextFrame,
+		MAX_TEXT_CHARS,
+		MAX_TEXTS_PER_PAGE,
+		MIN_TEXT_WIDTH_MM,
+		newTextFrame,
+		normalizeRotation,
+		quarterTurn,
+		shownText,
+		squareRotation,
+		stepTextSize,
+		textBounds
+	} from '$lib/document/text';
+	import { measuredLayout } from '$lib/document/text-fonts.svelte';
+	import type {
+		DocItem,
+		DocPage,
+		DocText,
+		PageOrientation,
+		Rect,
+		TextStyle
+	} from '$lib/document/types';
 	import { prefersReducedMotion } from '$lib/ui/motion';
 	import { isModShortcut } from '$lib/shortcuts';
 	import type { ChartAction } from './EditorItem.svelte';
 	import EditorPage, { type PageDrag } from './EditorPage.svelte';
 	import EditorStrip from './EditorStrip.svelte';
+	import type { TextSide } from './EditorText.svelte';
 	import {
 		anchorOf,
+		containsPoint,
 		cornerOf,
 		landingPage,
 		EDITOR_LAYOUT,
@@ -89,11 +137,16 @@
 	const RETURN_MS = 200;
 	/** How long a chart let go over a page takes to come to rest in its place. */
 	const SETTLE_MS = 220;
+	/** The clipboard type a copied chart or text travels under. */
+	const CLIP_TYPE = 'application/x-skycharts-block';
+	/** What a new text says until it is typed over. */
+	const NEW_TEXT = 'Text';
 	/** Stage size before the first measurement (and in tests, which have no layout). */
 	const FALLBACK_STAGE: Size = { w: 1200, h: 640 };
 
 	const id = $props.id();
 	const hintId = `${id}-hint`;
+	const textHintId = `${id}-text-hint`;
 
 	let dialogEl = $state<HTMLDialogElement>();
 	let stageEl = $state<HTMLDivElement>();
@@ -108,6 +161,14 @@
 	let returningId = $state<string | null>(null);
 	/** A chart coming to rest after it was let go over a page. */
 	let settlingId = $state<string | null>(null);
+	/** The text being typed in. */
+	let editingId = $state<string | null>(null);
+	/** How the last text was set: the next one starts the same. */
+	let lastStyle: TextStyle = DEFAULT_TEXT_STYLE;
+	/** The last chart or text copied here, as JSON, with the plain text that went with it. */
+	let copied: { json: string; plain: string } | null = null;
+	/** Where the pointer last was, screen px: a copy with no room on the page is pasted under it. */
+	let pointer: Point | null = null;
 	let flash = $state.raw<{ pageId: string; guides: SnapGuide[] } | null>(null);
 	let flashTimer: ReturnType<typeof setTimeout> | undefined;
 	/** The strip's height, px: the toast, lodged in the dialog, sits above it. */
@@ -217,6 +278,7 @@
 
 	function handleClose() {
 		endDrag();
+		editingId = null;
 		clearTimeout(flashTimer);
 		flash = null;
 		animated = false;
@@ -225,10 +287,14 @@
 	}
 
 	function handleCancel(event: Event) {
-		// Escape mid-drag (or a platform's back gesture) drops the drag, not the editor.
+		// Escape mid-drag (or a platform's back gesture) drops the drag, not the editor;
+		// while a text is typed in, it ends the typing.
 		if (session) {
 			event.preventDefault();
 			cancelDrag();
+		} else if (editingId !== null) {
+			event.preventDefault();
+			focusChart(editingId);
 		}
 	}
 
@@ -276,13 +342,13 @@
 
 	/**
 	 * Delete an empty page (its label's button, or Delete with the focus on the page).
-	 * A page with charts on it is not deleted from here: its charts are removed one by
-	 * one, or the page is deleted in the pages panel. The page that takes its place is
+	 * A page with charts or text on it is not deleted from here: they are removed one
+	 * by one, or the page is deleted in the pages panel. The page that takes its place is
 	 * shown; with none left the editor closes. The toast's Undo brings it back.
 	 */
 	function deletePage(id: string) {
 		const page = store.page(id);
-		if (session || !page || page.items.length > 0) return;
+		if (session || !page || !isBlank(page)) return;
 		const number = store.pageIndex(id) + 1;
 		const restore = store.removePage(id);
 		notify(`Page ${number} deleted`, () => {
@@ -318,7 +384,7 @@
 		const target = event.target as Element | null;
 		// Delete on the page itself (no chart selected) deletes it, if it is empty.
 		if (event.key === 'Delete' || event.key === 'Backspace') {
-			if (current?.items.length === 0 && target?.matches?.('[data-paper]')) {
+			if (current && isBlank(current) && target?.matches?.('[data-paper]')) {
 				event.preventDefault();
 				if (!event.repeat) deletePage(current.id);
 			}
@@ -333,8 +399,66 @@
 
 	// === Pointer drags ===
 
+	/** What a drag or a key acts on: a chart or a text, by what the two share. */
+	interface Block {
+		kind: 'chart' | 'text';
+		id: string;
+		frame: Rect;
+		/** A chart's own; a text's is whatever its lines make it. */
+		aspect: number;
+		/** Degrees a text is turned; a chart is not. */
+		rotation: number;
+	}
+
+	function chartBlock(item: DocItem): Block {
+		const { id, frame, chart } = item;
+		return { kind: 'chart', id, frame, aspect: chart.aspect, rotation: 0 };
+	}
+
+	function textBlock(text: DocText): Block {
+		const { id, frame, rotation = 0 } = text;
+		return { kind: 'text', id, frame, aspect: frame.w / frame.h, rotation };
+	}
+
+	/** What every chart and text takes up on `page`, but for the block `exceptId`. */
+	function framesOn(page: DocPage, exceptId?: string): Rect[] {
+		return [
+			...page.items.filter((it) => it.id !== exceptId).map((it) => it.frame),
+			...(page.texts ?? []).filter((it) => it.id !== exceptId).map(textBounds)
+		];
+	}
+
+	/**
+	 * `frame` (turned `rotation`) moved as `snapMove` moves what it takes up on the
+	 * page: a turned text snaps and stops by the upright box around it.
+	 */
+	function snapBlock(
+		frame: Rect,
+		rotation: number,
+		others: readonly Rect[],
+		orientation: PageOrientation,
+		threshold: number
+	): { frame: Rect; guides: SnapGuide[] } {
+		const bounds = rotatedBounds(frame, rotation);
+		const snapped = snapMove(bounds, others, orientation, threshold);
+		return {
+			frame: {
+				...frame,
+				x: frame.x + snapped.frame.x - bounds.x,
+				y: frame.y + snapped.frame.y - bounds.y
+			},
+			guides: snapped.guides
+		};
+	}
+
 	interface Session {
-		kind: 'move' | 'resize';
+		kind: 'move' | 'resize' | 'rotate';
+		block: Block['kind'];
+		/** Degrees the block is turned at the press. */
+		rotation: number;
+		/** Rotate: the centre it turns about, screen px, and the pointer's bearing from it at the press, degrees. */
+		centre: Point;
+		bearing: number;
 		pageId: string;
 		itemId: string;
 		aspect: number;
@@ -351,6 +475,8 @@
 		grab: Point;
 		/** Resize: the fixed corner, and the dragged one at the press, mm. */
 		anchor: ResizeAnchor;
+		/** Resize of a text: the side being dragged. */
+		side: TextSide;
 		anchorPoint: Point;
 		corner: Point;
 		moved: boolean;
@@ -379,6 +505,8 @@
 		landing: Rect | null;
 		/** The lines a resize is snapped to; a chart being carried shows its own only with Shift held. */
 		guides: SnapGuide[];
+		/** A text being turned by its knob: where it is turned to, degrees. */
+		rotation?: number;
 	}
 
 	let session: Session | null = null;
@@ -414,26 +542,34 @@
 		return true;
 	}
 
-	/** The page a chart is on: the current one, or a neighbour it is grabbed from. */
-	function pageOf(item: DocItem): DocPage | undefined {
-		return store.pages.find((page) => page.items.some((it) => it.id === item.id));
+	/** The page a chart or a text is on: the current one, or a neighbour it is grabbed from. */
+	function pageOf(id: string): DocPage | undefined {
+		return store.pages.find(
+			(page) => page.items.some((it) => it.id === id) || page.texts?.some((it) => it.id === id)
+		);
 	}
 
 	function beginSession(
 		event: PointerEvent,
-		item: DocItem,
+		item: Block,
 		pageId: string,
 		kind: Session['kind'],
-		extra: Partial<Pick<Session, 'grab' | 'anchor' | 'anchorPoint' | 'corner'>>
+		extra: Partial<
+			Pick<Session, 'grab' | 'anchor' | 'anchorPoint' | 'corner' | 'side' | 'centre' | 'bearing'>
+		>
 	) {
 		const element = event.currentTarget as HTMLElement;
 		const listeners = new AbortController();
 		const { signal } = listeners;
 		session = {
 			kind,
+			block: item.kind,
 			pageId,
 			itemId: item.id,
-			aspect: item.chart.aspect,
+			aspect: item.aspect,
+			rotation: item.rotation,
+			centre: { x: 0, y: 0 },
+			bearing: 0,
 			pointerId: event.pointerId,
 			element,
 			listeners,
@@ -443,6 +579,7 @@
 			scale: layout.scale,
 			grab: { x: 0, y: 0 },
 			anchor: 'nw',
+			side: 'e',
 			anchorPoint: { x: 0, y: 0 },
 			corner: { x: 0, y: 0 },
 			moved: false,
@@ -473,7 +610,15 @@
 	}
 
 	function startMove(event: PointerEvent, item: DocItem) {
-		const page = pageOf(item);
+		startBlockMove(event, chartBlock(item));
+	}
+
+	function startTextMove(event: PointerEvent, text: DocText) {
+		startBlockMove(event, textBlock(text));
+	}
+
+	function startBlockMove(event: PointerEvent, item: Block) {
+		const page = pageOf(item.id);
 		const box = page && pageBoxes().find((b) => b.id === page.id)?.box;
 		if (!page || !box || !claimPointer(event)) return;
 		// A neighbour's chart is not focusable; it takes the focus once it lands on the current page.
@@ -481,6 +626,38 @@
 		const pointer = screenToMm({ x: event.clientX, y: event.clientY }, box, layout.scale);
 		beginSession(event, item, page.id, 'move', {
 			grab: { x: pointer.x - item.frame.x, y: pointer.y - item.frame.y }
+		});
+	}
+
+	/** A text's side handle: that side follows the pointer, the other stays. */
+	function startTextResize(event: PointerEvent, text: DocText, side: TextSide) {
+		if (!claimPointer(event)) return;
+		event.stopPropagation();
+		focusChart(text.id);
+		const { x, y, w } = text.frame;
+		beginSession(event, textBlock(text), current!.id, 'resize', {
+			side,
+			anchorPoint: { x: side === 'e' ? x : x + w, y },
+			corner: { x: side === 'e' ? x + w : x, y }
+		});
+	}
+
+	/** The pointer's bearing from `centre`, degrees clockwise from the screen's x axis. */
+	function bearingFrom(centre: Point, point: Point): number {
+		return (Math.atan2(point.y - centre.y, point.x - centre.x) * 180) / Math.PI;
+	}
+
+	/** A text's knob: the text turns about its centre as the pointer goes round it. */
+	function startTextRotate(event: PointerEvent, text: DocText) {
+		const element = itemElement(text.id);
+		if (!element || !claimPointer(event)) return;
+		event.stopPropagation();
+		focusChart(text.id);
+		const rect = element.getBoundingClientRect();
+		const centre = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+		beginSession(event, textBlock(text), current!.id, 'rotate', {
+			centre,
+			bearing: bearingFrom(centre, { x: event.clientX, y: event.clientY })
 		});
 	}
 
@@ -492,7 +669,7 @@
 			?.querySelector<HTMLElement>('[role="button"]');
 		chartEl?.focus({ preventScroll: true });
 		const anchor = anchorOf(handle);
-		beginSession(event, item, current!.id, 'resize', {
+		beginSession(event, chartBlock(item), current!.id, 'resize', {
 			anchor,
 			anchorPoint: cornerOf(item.frame, anchor),
 			corner: cornerOf(item.frame, handle)
@@ -538,12 +715,64 @@
 		const threshold = snapThresholdMm(s.scale);
 		const base = { pageId: s.pageId, itemId: s.itemId };
 
+		if (s.kind === 'rotate') {
+			// As far round as the pointer has gone; with Shift, the nearest right angle.
+			const turned = s.rotation + bearingFrom(s.centre, point) - s.bearing;
+			drag = {
+				...base,
+				kind: 'resizing',
+				targetId: s.pageId,
+				landing: null,
+				frame: s.startFrame,
+				guides: [],
+				rotation: s.shift ? squareRotation(turned) : normalizeRotation(turned)
+			};
+			return;
+		}
+
 		if (s.kind === 'resize') {
 			const page = store.page(s.pageId);
 			if (!page) return;
 			const corner = { x: s.corner.x + dx / s.scale, y: s.corner.y + dy / s.scale };
+			const others = framesOn(page, s.itemId);
+			if (s.block === 'text') {
+				const text = page.texts?.find((it) => it.id === s.itemId);
+				if (!text) return;
+				// Its lines wrap to the new width as it is dragged; the height is theirs.
+				const heightAt = (w: number) => measuredLayout(shownText(page, text), text.style, w).height;
+				let frame: Rect;
+				let guides: SnapGuide[] = [];
+				if (s.rotation === 0) {
+					const snapped = snapWidth(
+						s.startFrame,
+						s.side,
+						corner.x,
+						MIN_TEXT_WIDTH_MM,
+						others,
+						page.orientation,
+						threshold
+					);
+					frame = { ...snapped.frame, h: heightAt(snapped.frame.w) };
+					guides = snapped.guides;
+				} else {
+					// Turned, the side goes along the text's own line, the other side staying
+					// where it is on the page; there are no lines of the page to snap to.
+					const angle = (s.rotation * Math.PI) / 180;
+					const along = (dx * Math.cos(angle) + dy * Math.sin(angle)) / s.scale;
+					const w = Math.max(MIN_TEXT_WIDTH_MM, s.startFrame.w + (s.side === 'e' ? along : -along));
+					const fitted = fitTextFrame({ ...s.startFrame, w }, page.orientation, s.rotation).w;
+					frame = anchoredFrame(
+						s.startFrame,
+						s.rotation,
+						fitted,
+						heightAt(fitted),
+						s.side === 'e' ? 'left' : 'right'
+					);
+				}
+				drag = { ...base, kind: 'resizing', targetId: s.pageId, landing: null, frame, guides };
+				return;
+			}
 			const raw = resizeRect(s.anchor, s.anchorPoint, corner);
-			const others = page.items.filter((it) => it.id !== s.itemId).map((it) => it.frame);
 			const snapped = snapResize(raw, s.anchor, s.aspect, others, page.orientation, threshold);
 			drag = { ...base, kind: 'resizing', targetId: s.pageId, landing: null, ...snapped };
 			return;
@@ -573,17 +802,26 @@
 			drag = { ...base, kind: 'detached', targetId: null, frame, landing: null, guides: [] };
 			return;
 		}
-		// A chart too large for the target page shrinks to fit it, as it will on the drop.
+		// A chart too large for the target page shrinks to fit it, as it will on the drop;
+		// a text too wide for it gets narrower.
+		const atOrigin = { ...s.startFrame, x: 0, y: 0 };
 		const size =
 			target.id === s.pageId
 				? s.startFrame
-				: fitFrame({ ...s.startFrame, x: 0, y: 0 }, s.aspect, target.orientation);
+				: s.block === 'text'
+					? fitTextFrame(atOrigin, target.orientation, s.rotation)
+					: fitFrame(atOrigin, s.aspect, target.orientation);
 		if (size.w !== s.startFrame.w || size.h !== s.startFrame.h) {
 			frame = frameUnderPointer(screenToMm(point, home, s.scale), s.grab, s.startFrame, size);
 		}
 		const raw = frameUnderPointer(screenToMm(point, box, s.scale), s.grab, s.startFrame, size);
-		const others = target.items.filter((it) => it.id !== s.itemId).map((it) => it.frame);
-		const landing = snapMove(raw, others, target.orientation, threshold);
+		const landing = snapBlock(
+			raw,
+			s.rotation,
+			framesOn(target, s.itemId),
+			target.orientation,
+			threshold
+		);
 		drag = {
 			...base,
 			kind: 'moving',
@@ -612,15 +850,25 @@
 		// The click this release ends in must not make the page it was grabbed on current.
 		swallowClick = true;
 		setTimeout(() => (swallowClick = false));
-		if (view.kind === 'resizing') {
-			store.updateItem(s.pageId, s.itemId, view.frame);
+		const text = s.block === 'text';
+		if (view.rotation !== undefined) {
+			store.updateText(s.pageId, s.itemId, { rotation: view.rotation });
+			announce(`Turned to ${Math.round(view.rotation)} degrees`);
+		} else if (view.kind === 'resizing') {
+			if (text) store.updateText(s.pageId, s.itemId, { frame: view.frame });
+			else store.updateItem(s.pageId, s.itemId, view.frame);
 		} else if (view.targetId === null || !view.landing) {
 			snapBack(s.itemId);
 		} else if (view.targetId === s.pageId) {
-			store.updateItem(s.pageId, s.itemId, view.landing);
+			if (text) store.updateText(s.pageId, s.itemId, { frame: view.landing });
+			else store.updateItem(s.pageId, s.itemId, view.landing);
 			settle(s.itemId, held);
-		} else if (store.moveItem(s.itemId, view.targetId, view.landing)) {
-			announce(`Chart moved to page ${store.pageIndex(view.targetId) + 1}`);
+		} else if (
+			text
+				? store.moveText(s.itemId, view.targetId, view.landing)
+				: store.moveItem(s.itemId, view.targetId, view.landing)
+		) {
+			announce(`${text ? 'Text' : 'Chart'} moved to page ${store.pageIndex(view.targetId) + 1}`);
 			settle(s.itemId, held);
 			// Its element is gone with it: the focus goes to it on the current page, else stays here.
 			const itemId = s.itemId;
@@ -700,7 +948,14 @@
 		const view = drag;
 		if (!view) {
 			return flash?.pageId === page.id
-				? { itemId: null, frame: null, kind: 'moving', guides: flash.guides, target: false }
+				? {
+						itemId: null,
+						frame: null,
+						kind: 'moving',
+						rotation: null,
+						guides: flash.guides,
+						target: false
+					}
 				: null;
 		}
 		const isSource = view.pageId === page.id;
@@ -712,6 +967,7 @@
 			// past its own edges, above the others.
 			frame: isSource ? view.frame : null,
 			kind: view.kind,
+			rotation: isSource ? (view.rotation ?? null) : null,
 			guides: isTarget ? view.guides : [],
 			target: isTarget
 		};
@@ -724,7 +980,7 @@
 		const delta = nudgeDelta(event.key, event.shiftKey);
 		const step = sizeStep(event.key, event.code);
 		let action: (() => void) | null = null;
-		if (delta) action = () => nudge(item, delta);
+		if (delta) action = () => nudge(chartBlock(item), delta);
 		else if (step !== 0) action = () => handleItemAction(item, step > 0 ? 'larger' : 'smaller');
 		else if (event.key === 'PageUp') action = () => handleItemAction(item, 'prev');
 		else if (event.key === 'PageDown') action = () => handleItemAction(item, 'next');
@@ -775,13 +1031,19 @@
 	}
 
 	/** Moves by `delta` mm through `snapMove` with no reach: it only clamps, and shows the lines it lands on. */
-	function nudge(item: DocItem, delta: Point) {
+	function nudge(item: Block, delta: Point) {
 		const page = current;
 		if (!page) return;
-		const others = page.items.filter((it) => it.id !== item.id).map((it) => it.frame);
 		const moved = { ...item.frame, x: item.frame.x + delta.x, y: item.frame.y + delta.y };
-		const { frame, guides } = snapMove(moved, others, page.orientation, 0);
-		store.updateItem(page.id, item.id, frame);
+		const { frame, guides } = snapBlock(
+			moved,
+			item.rotation,
+			framesOn(page, item.id),
+			page.orientation,
+			0
+		);
+		if (item.kind === 'text') store.updateText(page.id, item.id, { frame });
+		else store.updateItem(page.id, item.id, frame);
 		announce(`${Math.round(frame.x)}, ${Math.round(frame.y)} mm`);
 		clearTimeout(flashTimer);
 		flash = guides.length > 0 ? { pageId: page.id, guides } : null;
@@ -813,6 +1075,234 @@
 		if (pageId !== current?.id) setCurrent(pageId, false, true);
 		announce('Chart restored');
 		void tick().then(() => focusChart(itemId));
+	}
+
+	// === Text ===
+
+	/**
+	 * A new text on the current page, in the topmost free place there and as wide as
+	 * it, set like the last one; it opens for typing with its word selected.
+	 */
+	function addText(pageId: string) {
+		const page = store.page(pageId);
+		if (session || !page) return;
+		if ((page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) {
+			announce('This page holds no more text');
+			return;
+		}
+		const style = { ...lastStyle };
+		const width = contentBox(page.orientation).w;
+		const { height } = measuredLayout(NEW_TEXT, style, width);
+		const frame = newTextFrame(page, height);
+		const textId = store.addText(page.id, { text: NEW_TEXT, style, frame });
+		if (!textId) return;
+		editingId = textId;
+		announce('Text added. Type to replace it');
+	}
+
+	function editText(text: DocText) {
+		if (!session) editingId = text.id;
+	}
+
+	/** Typing is over. A text left empty is taken off the page: there is nothing of it to keep. */
+	function commitText(text: DocText, value: string) {
+		if (editingId === text.id) editingId = null;
+		const page = pageOf(text.id);
+		if (!page) return;
+		if (value.trim() === '') {
+			store.removeText(page.id, text.id);
+			// If the focus was on its way to the text itself, it has nowhere to land.
+			void tick().then(() => {
+				if (!dialogEl?.contains(document.activeElement) || document.activeElement === dialogEl) {
+					focusPaper();
+				}
+			});
+		} else if (value !== text.text) {
+			store.updateText(page.id, text.id, { text: value });
+		}
+	}
+
+	function setTextStyle(text: DocText, style: TextStyle) {
+		const page = pageOf(text.id);
+		if (!page || session) return;
+		lastStyle = { ...style };
+		store.updateText(page.id, text.id, { style });
+	}
+
+	/** Which chart a text's fields read: `chartId`, or the nearest again with null. */
+	function bindText(text: DocText, chartId: string | null) {
+		const page = pageOf(text.id);
+		if (!page || session) return;
+		store.updateText(page.id, text.id, { chartId });
+		const at = page.items.findIndex((item) => item.id === chartId);
+		announce(at < 0 ? 'Reads the nearest chart' : `Reads chart ${at + 1}`);
+	}
+
+	function setTextHeight(text: DocText, height: number) {
+		const page = pageOf(text.id);
+		if (page) store.setTextHeight(page.id, text.id, height);
+	}
+
+	function handleTextKeydown(event: KeyboardEvent, text: DocText) {
+		if (event.metaKey || event.ctrlKey || event.altKey || editingId !== null) return;
+		const delta = nudgeDelta(event.key, event.shiftKey);
+		const step = sizeStep(event.key, event.code);
+		let action: (() => void) | null = null;
+		if (delta) action = () => nudge(textBlock(text), delta);
+		else if (step !== 0) action = () => stepText(text, step);
+		else if (event.key === 'Enter' || event.key === 'F2') action = () => editText(text);
+		else if (event.code === 'KeyR') action = () => turnText(text, event.shiftKey ? -1 : 1);
+		else if (event.key === 'PageUp') action = () => moveTextToPage(text, -1);
+		else if (event.key === 'PageDown') action = () => moveTextToPage(text, 1);
+		else if (event.key === 'Delete' || event.key === 'Backspace') action = () => removeText(text);
+		if (!action) return;
+		event.preventDefault();
+		event.stopPropagation();
+		// A key held down keeps moving and sizing; it does not open, move away or delete twice.
+		if (session || (event.repeat && !delta && step === 0)) return;
+		action();
+	}
+
+	function stepText(text: DocText, direction: 1 | -1) {
+		const size = stepTextSize(text.style.size, direction);
+		if (size === null) {
+			announce(direction > 0 ? 'Already the largest size' : 'Already the smallest size');
+			return;
+		}
+		setTextStyle(text, { ...text.style, size });
+		announce(`${size} points`);
+	}
+
+	/** A quarter turn, to the next right angle: clockwise, or back with Shift. */
+	function turnText(text: DocText, direction: 1 | -1 = 1) {
+		const page = pageOf(text.id);
+		if (!page || session) return;
+		const rotation = quarterTurn(text.rotation ?? 0, direction);
+		store.updateText(page.id, text.id, { rotation });
+		announce(rotation === 0 ? 'Upright' : `Turned to ${rotation} degrees`);
+	}
+
+	/** To the page before or after, where it was on this one as far as that page allows. */
+	function moveTextToPage(text: DocText, by: -1 | 1) {
+		const target = pages[index + by];
+		const number = index + by + 1;
+		if (!target) {
+			announce(by < 0 ? 'No page before this one' : 'No page after this one');
+			return;
+		}
+		if (!store.moveText(text.id, target.id, text.frame)) {
+			announce(`Page ${number} holds no more text`);
+			return;
+		}
+		setCurrent(target.id, false, true);
+		announce(`Text moved to page ${number}`);
+		void tick().then(() => focusChart(text.id));
+	}
+
+	function removeText(text: DocText) {
+		const page = pageOf(text.id);
+		if (!page || session) return;
+		if (editingId === text.id) editingId = null;
+		const restore = store.removeText(page.id, text.id);
+		notify('Text removed', () => {
+			if (!restore() || !open) return;
+			if (page.id !== current?.id) setCurrent(page.id, false, true);
+			announce('Text restored');
+			void tick().then(() => focusChart(text.id));
+		});
+		void tick().then(focusPaper);
+	}
+
+	// === Copy and paste ===
+
+	/** Whether a clipboard event is a field's own: typing in a text copies and pastes words. */
+	function inField(target: EventTarget | null): boolean {
+		return Boolean((target as Element | null)?.closest?.('input, textarea, select'));
+	}
+
+	/** The chart or text with the focus on the current page. */
+	function selectedBlock(): { item?: DocItem; text?: DocText } | null {
+		const selected = (document.activeElement as Element | null)?.closest<HTMLElement>(
+			'.slot[data-role="current"] [data-item-id]'
+		);
+		const blockId = selected?.dataset.itemId;
+		const item = current?.items.find((it) => it.id === blockId);
+		const text = current?.texts?.find((it) => it.id === blockId);
+		return item || text ? { item, text } : null;
+	}
+
+	/**
+	 * ⌘C / ⌘X on a chart or a text. The copy goes on the system clipboard under a type
+	 * of its own (a text's words also as plain text, to paste anywhere), and is kept
+	 * here as well, for a browser that hands back only the plain text.
+	 */
+	function handleCopy(event: ClipboardEvent) {
+		if (inField(event.target) || session) return;
+		const block = selectedBlock();
+		const copy = block && store.copyBlock((block.item ?? block.text)!.id);
+		if (!block || !copy) return;
+		event.preventDefault();
+		const json = JSON.stringify(copy);
+		const plain = copy.kind === 'text' ? copy.text : '';
+		copied = { json, plain };
+		event.clipboardData?.setData(CLIP_TYPE, json);
+		event.clipboardData?.setData('text/plain', plain);
+		if (event.type !== 'cut') announce(copy.kind === 'text' ? 'Text copied' : 'Chart copied');
+		else if (block.item) removeChart(block.item);
+		else if (block.text) removeText(block.text);
+	}
+
+	/**
+	 * ⌘V: a copied chart or text goes on the page being shown; words from anywhere
+	 * else become a new text there. The toast's Undo takes it off again.
+	 */
+	function handlePaste(event: ClipboardEvent) {
+		const page = current;
+		if (inField(event.target) || session || !page) return;
+		const plain = event.clipboardData?.getData('text/plain') ?? '';
+		let json = event.clipboardData?.getData(CLIP_TYPE) ?? '';
+		if (!json && copied && plain === copied.plain) json = copied.json;
+		if (!json && plain.trim() === '') return;
+		event.preventDefault();
+		let copy: unknown;
+		try {
+			copy = json ? JSON.parse(json) : wordsAsText(page, plain);
+		} catch {
+			return;
+		}
+		const pasted = store.pasteBlock(page.id, copy, pointerOnPage(page.id));
+		if (pasted === 'full') {
+			announce(`Page ${index + 1} holds no more`);
+			notify(`Page ${index + 1} is full: nothing was pasted`);
+			return;
+		}
+		if (!pasted) return;
+		const what = pasted.kind === 'text' ? 'Text' : 'Chart';
+		announce(`${what} pasted`);
+		notify(`${what} pasted`, () => {
+			if (pasted.kind === 'text') store.removeText(page.id, pasted.id);
+			else store.removeItem(page.id, pasted.id);
+			if (open) void tick().then(focusPaper);
+		});
+		void tick().then(() => focusChart(pasted.id));
+	}
+
+	/** Where the pointer is on the page `pageId`, mm; undefined off its paper, or with no pointer yet. */
+	function pointerOnPage(pageId: string): Point | undefined {
+		const box = pageBoxes().find((b) => b.id === pageId)?.box;
+		if (!box || !pointer || !containsPoint(box, pointer)) return undefined;
+		return screenToMm(pointer, box, layout.scale);
+	}
+
+	/** Words from the clipboard as a text to paste: set like the last one, in the topmost free place. */
+	function wordsAsText(page: DocPage, words: string): BlockCopy {
+		const text = words.replace(/\r\n?/g, '\n').trim().slice(0, MAX_TEXT_CHARS);
+		const style = { ...lastStyle };
+		const full = contentBox(page.orientation).w;
+		const place = newTextFrame(page, measuredLayout(text, style, full).height);
+		// The place may be narrower than the page, and the words taller for it.
+		const frame = { ...place, h: measuredLayout(text, style, place.w).height };
+		return { kind: 'text', text, style, frame };
 	}
 
 	function focusChart(itemId: string) {
@@ -851,6 +1341,10 @@
 	onpointerdown={handleBackdropPointerDown}
 	onclick={handleBackdropClick}
 	onclickcapture={handleClickCapture}
+	oncopy={handleCopy}
+	oncut={handleCopy}
+	onpaste={handlePaste}
+	onpointermove={(event) => (pointer = { x: event.clientX, y: event.clientY })}
 >
 	{#if open && current}
 		<div class="content">
@@ -889,15 +1383,29 @@
 						{returningId}
 						{settlingId}
 						{carrying}
+						{editingId}
 						{hintId}
+						{textHintId}
 						onactivate={(id) => setCurrent(id)}
 						onorientation={setOrientation}
 						ondelete={deletePage}
+						onaddtext={addText}
 						onmovestart={startMove}
 						onresizestart={startResize}
 						onitemkeydown={handleItemKeydown}
 						onremove={removeChart}
 						onitemaction={handleItemAction}
+						ontextmovestart={startTextMove}
+						ontextresizestart={startTextResize}
+						ontextrotatestart={startTextRotate}
+						ontextturn={(text) => turnText(text)}
+						ontextkeydown={handleTextKeydown}
+						ontextstyle={setTextStyle}
+						ontextremove={removeText}
+						ontextedit={editText}
+						ontextcommit={commitText}
+						ontextheight={setTextHeight}
+						ontextbind={bindText}
 					/>
 				{/each}
 			</div>
@@ -913,7 +1421,15 @@
 			<p class="sr-only" id={hintId}>
 				Drag to move it, holding Shift to see the lines it will snap to, or use the arrow keys, with
 				Shift for 10 millimetres; Page Up and Page Down move it to the page before or after. Drag a
-				corner to resize it, or press plus or minus. Delete removes it.
+				corner to resize it, or press plus or minus. Delete removes it. Copy, cut and paste work on
+				it as on words.
+			</p>
+			<p class="sr-only" id={textHintId}>
+				Press Enter to type in it, Escape when done. Drag to move it, or use the arrow keys, with
+				Shift for 10 millimetres; Page Up and Page Down move it to the page before or after. Drag a
+				side to set its width; plus and minus change the size of the type. R turns it a quarter
+				clockwise, Shift R back; the knob over it turns it freely, to a right angle with Shift held.
+				Delete removes it. Copy, cut and paste work on it as on words.
 			</p>
 			<p class="sr-only" aria-live="polite">{announcement}</p>
 		</div>

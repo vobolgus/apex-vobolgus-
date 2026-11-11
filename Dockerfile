@@ -19,12 +19,15 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY rust-core rust-core
 COPY backend backend
+# The fonts text on a page is set in: the binary carries the files the page serves.
+COPY frontend/static/fonts frontend/static/fonts
 RUN cargo build --release --locked -p backend
 
 # --- What runs: the binary, the page and one font family.
 FROM debian:bookworm-slim
 # A chart with text (constellation names, the print footer) needs a font to set it
-# in; without one the text is silently left out of the PDF.
+# in; without one the text is silently left out of the PDF. (Text on a page of a
+# document is set in the fonts the binary carries.)
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends fonts-dejavu-core \
 	&& rm -rf /var/lib/apt/lists/*
