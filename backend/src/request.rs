@@ -4,14 +4,21 @@
 //! These types only say what the JSON looks like. Nothing here is checked yet: a
 //! chart is checked when it becomes a `crate::chart::Chart`, a document when it
 //! becomes a `crate::document::Document`.
+//!
+//! The page's TypeScript is written from these same types (`crate::wire`), which is
+//! what the `ts` attributes are for. They say what the JSON reader takes: an
+//! `Option` may be left out or be `null`, and a field with a default may be left
+//! out, which `ts-rs` has to be told by calling it an `Option`.
 
 use serde::{Deserialize, Serialize};
 
 /// One chart, as `POST /api/export` takes it and as a document carries it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct RenderConfig {
     /// `"stereo"` or `"pinhole"`. Text here, so that any other name is refused by
     /// the chart's own check with its own message, and not by the JSON reader.
+    #[cfg_attr(test, ts(as = "crate::chart::Projection"))]
     pub(crate) projection: String,
     /// The instant the planets are placed at and the horizon chart is turned to:
     /// RFC 3339, `YYYY-MM-DD HH:MM:SS` or a bare date, read as UTC.
@@ -46,6 +53,7 @@ pub(crate) struct RenderConfig {
     pub(crate) style: StyleConfig,
     /// Places ringed on the chart: where a close-up chart looks, on the wide one.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) marks: Vec<SkyMark>,
     /// Print the observer's place and the time in the chart's corner.
     pub(crate) print_info: Option<bool>,
@@ -57,6 +65,7 @@ pub(crate) struct RenderConfig {
 // The unit is part of every field's name on the wire.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct SkyMark {
     /// Right ascension of the ring's centre, degrees, J2000.
     pub(crate) ra_deg: f64,
@@ -69,6 +78,7 @@ pub(crate) struct SkyMark {
 /// Camera basis in the equatorial frame (x → RA 0h, z → north pole), and the
 /// chart size. Sizes are px of the preview, so stars and lines keep its proportions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct ViewConfig {
     /// Screen right.
     pub(crate) right: [f64; 3],
@@ -92,6 +102,7 @@ pub(crate) struct ViewConfig {
 // One switch a layer is what the page sends.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct LayersConfig {
     /// The ecliptic, a line.
     pub(crate) ecliptic: bool,
@@ -109,6 +120,7 @@ pub(crate) struct LayersConfig {
     pub(crate) constellations: bool,
     /// The constellations' IAU boundaries.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) constellation_boundaries: bool,
     /// The constellations' names, and the planets' beside them.
     pub(crate) constellation_names: bool,
@@ -120,6 +132,7 @@ pub(crate) struct LayersConfig {
 
 /// A chart's colours (anything SVG takes as a paint), its font and its star sizes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct StyleConfig {
     /// Fill of the stars.
     pub(crate) star_color: String,
@@ -144,6 +157,7 @@ pub(crate) struct StyleConfig {
 
 /// `POST /api/export/document`: pages of a multi-page PDF, each holding charts and text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentRequest {
     /// The pages, in order.
     pub(crate) pages: Vec<DocumentPage>,
@@ -160,6 +174,7 @@ impl DocumentRequest {
 // The unit is part of every field's name on the wire.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentPage {
     /// The page's width, mm.
     pub(crate) width_mm: f64,
@@ -167,15 +182,18 @@ pub(crate) struct DocumentPage {
     pub(crate) height_mm: f64,
     /// The charts on it.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) items: Vec<DocumentItem>,
     /// Drawn over the charts.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) texts: Vec<DocumentText>,
 }
 
 /// A chart on a page: its box in mm from the page's top-left, y down, and what to draw.
 /// The config's `view` sizes the chart's own coordinates, which are fitted into the box.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentItem {
     /// The box's left edge, mm from the page's.
     pub(crate) x_mm: f64,
@@ -193,34 +211,42 @@ pub(crate) struct DocumentItem {
 /// (it shows the text as it is typed) and this server only sets each line where it is
 /// told to, in the same font file (`crate::fonts`), so the PDF breaks where the editor did.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentText {
     /// Which bundled family the text is set in.
     pub(crate) font: TextFont,
     /// Set in the bold face.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) bold: bool,
     /// Set in the italic face.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) italic: bool,
     /// The font size, mm.
     pub(crate) size_mm: f64,
     /// Which point of a line its `x_mm` is.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) anchor: TextAnchor,
     /// Degrees the text is turned clockwise about (`cx_mm`, `cy_mm`). Its lines are
     /// given as they are before the turn.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) rotation_deg: f64,
     /// The centre of the turn, mm from the page's left edge.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) cx_mm: f64,
     /// The centre of the turn, mm from the page's top edge.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) cy_mm: f64,
     /// The lines, each where the editor put it.
     pub(crate) lines: Vec<DocumentTextLine>,
     /// Hairlines drawn with the text and turned with it: the rules of a table.
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<_>", optional))]
     pub(crate) rules: Vec<DocumentRule>,
 }
 
@@ -228,6 +254,7 @@ pub(crate) struct DocumentText {
 // The unit is part of every field's name on the wire.
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentRule {
     /// Where the rule starts, mm from the page's left edge.
     pub(crate) x1_mm: f64,
@@ -245,6 +272,7 @@ pub(crate) struct DocumentRule {
 /// text's `anchor`), mm from the page's top-left, y down. A cell of a table is a
 /// line with an anchor and a weight of its own.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct DocumentTextLine {
     /// The anchor point of the line, mm from the page's left edge.
     pub(crate) x_mm: f64,
@@ -262,6 +290,7 @@ pub(crate) struct DocumentTextLine {
 
 /// The bundled families a text may be set in (`crate::fonts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum TextFont {
     /// PT Serif.
@@ -272,6 +301,7 @@ pub(crate) enum TextFont {
 
 /// Which point of a line of text its `x_mm` is: SVG's `text-anchor`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum TextAnchor {
     /// The line starts at `x_mm`.

@@ -27,6 +27,7 @@ static CHART_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_CHARTS);
 
 /// The query of `/api/export`.
 #[derive(Debug, Deserialize, Default)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct ExportQuery {
     /// `svg` asks for the SVG; anything else, or nothing, for the PDF.
     format: Option<String>,

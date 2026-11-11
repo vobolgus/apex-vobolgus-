@@ -15,6 +15,7 @@ use crate::state::AppState;
 
 /// The magnitude range a star route is asked for; both ends are optional.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 pub(crate) struct CatalogQuery {
     /// The faintest star wanted; the route's own default when absent.
     max_mag: Option<f32>,

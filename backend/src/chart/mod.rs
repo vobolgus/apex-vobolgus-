@@ -49,8 +49,11 @@ use crate::svg::SvgWriter;
 /// naked-eye sky holds.
 const DEFAULT_MAGNITUDE_LIMIT: f32 = 6.5;
 
-/// How the sky is flattened onto a chart.
+/// How the sky is flattened onto a chart. On the wire it is its name in small letters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// The page's TypeScript has the names from here (`crate::wire`), where a test holds
+// them to the ones `FromStr` reads.
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename_all = "lowercase"))]
 pub(crate) enum Projection {
     /// Stereographic: a round chart, the whole sky if need be.
     Stereo,

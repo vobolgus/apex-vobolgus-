@@ -1,5 +1,7 @@
 //! What the catalogue routes send: the stars, the Messier objects and the
 //! constellations, each as the JSON a chart is drawn from in the browser.
+//!
+//! The page's TypeScript is written from these same types (`crate::wire`).
 
 use std::collections::HashMap;
 
@@ -21,6 +23,7 @@ const FIGURE_MAX_MAG: f32 = 7.5;
 /// and the unit vector; a client derives the vector from `ra` and `dec`, and
 /// leaving the four fields out makes the payload about a third of the size.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct CatalogStar {
     /// Visual magnitude.
     v_mag: f32,
@@ -50,6 +53,7 @@ pub(crate) fn stars(catalog: &HipCatalog, max_mag: f32, min_mag: Option<f32>) ->
 
 /// A Messier object as `/api/catalog/messier` sends it: what to call it and where it is.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct MessierEntry {
     /// Its number: 42 for M 42.
     m: i32,
@@ -87,9 +91,11 @@ pub(crate) fn messier() -> Vec<MessierEntry> {
     objects
 }
 
-/// A direction on the sky: a unit vector in the J2000 equatorial frame.
+/// A point of a constellation's line: a direction on the sky, as a unit vector in
+/// the J2000 equatorial frame.
 #[derive(Debug, Serialize)]
-pub(crate) struct Point {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(crate) struct SegmentPoint {
     /// Towards RA 0h on the equator.
     x: f32,
     /// Towards RA 6h on the equator.
@@ -98,7 +104,7 @@ pub(crate) struct Point {
     z: f32,
 }
 
-impl From<(f32, f32, f32)> for Point {
+impl From<(f32, f32, f32)> for SegmentPoint {
     fn from((x, y, z): (f32, f32, f32)) -> Self {
         Self { x, y, z }
     }
@@ -107,11 +113,12 @@ impl From<(f32, f32, f32)> for Point {
 /// One constellation's lines: the polylines of its stick figure, or the polygons of
 /// its boundary.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ConstellationSegments {
     /// The constellation's abbreviation in capitals: "ORI".
     abbr: String,
     /// The lines, each a run of points joined in order.
-    segments: Vec<Vec<Point>>,
+    segments: Vec<Vec<SegmentPoint>>,
 }
 
 /// The IAU boundaries as polygons of unit vectors, sorted by constellation.
@@ -152,14 +159,14 @@ pub(crate) fn constellation_figures(catalog: &HipCatalog) -> Vec<ConstellationSe
     let mut result: Vec<ConstellationSegments> = constellations::figures()
         .iter()
         .filter_map(|(abbr, figure)| {
-            let segments: Vec<Vec<Point>> = figure
+            let segments: Vec<Vec<SegmentPoint>> = figure
                 .lines
                 .iter()
                 .filter_map(|line| {
-                    let points: Vec<Point> = line
+                    let points: Vec<SegmentPoint> = line
                         .iter()
                         .filter_map(|hip_id| stars.get(hip_id))
-                        .map(|star| Point::from((star.x, star.y, star.z)))
+                        .map(|star| SegmentPoint::from((star.x, star.y, star.z)))
                         .collect();
                     (points.len() >= 2).then_some(points)
                 })

@@ -30,3 +30,8 @@ thiserror = "2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Says the wire types in TypeScript for the page: a test writes and checks the
+# frontend's copy (see src/wire.rs), so the server itself is built without it.
+ts-rs = "12"

@@ -17,6 +17,10 @@
 //! - `limits` holds every number that bounds a request, and `budget` rations the
 //!   exports with them.
 //! - `fonts` are the faces a PDF is set in, `static_site` the page itself.
+//!
+//! The page's TypeScript for all that crosses the wire is written from these types
+//! by `wire`, a test: `WIRE_TYPES=write cargo test -p backend wire` after a change
+//! to `request`, `payload` or `limits`.
 
 mod budget;
 mod cached;
@@ -46,6 +50,9 @@ mod svg;
     clippy::too_many_lines
 )]
 mod golden;
+
+#[cfg(test)]
+mod wire;
 
 pub use router::router;
 pub use state::AppState;
