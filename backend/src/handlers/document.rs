@@ -6,18 +6,14 @@ use axum::Json;
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use tokio::sync::Semaphore;
 
 use super::{Download, headers, off_the_runtime};
 use crate::budget::client_key;
 use crate::document::Document;
 use crate::error::ApiError;
-use crate::limits::{CONCURRENT_DOCUMENTS, PDF_CHART_COST};
+use crate::limits::PDF_CHART_COST;
 use crate::request::DocumentRequest;
 use crate::state::AppState;
-
-/// A permit a document being converted.
-static DOCUMENT_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_DOCUMENTS);
 
 /// `POST /api/export/document`, charged to the export budget by its charts
 /// (`crate::budget`) before anything is drawn.
@@ -43,11 +39,10 @@ async fn convert_off_the_runtime(
     request: DocumentRequest,
 ) -> Result<Download, ApiError> {
     let document = Document::try_from(request)?;
-    let pdf = off_the_runtime(&DOCUMENT_PERMITS, move || {
-        document.to_pdf(&state.hip_catalog)
-    })
-    .await
-    .map_err(ApiError::DocumentLost)??;
+    let permits = state.document_permits.clone();
+    let pdf = off_the_runtime(permits, move || document.to_pdf(&state.hip_catalog))
+        .await
+        .map_err(ApiError::DocumentLost)??;
 
     let headers = headers([
         (header::CONTENT_TYPE, "application/pdf"),

@@ -8,7 +8,7 @@ use crate::request::{LayersConfig, RenderConfig, StyleConfig};
 /// The export without the budget, as the handler runs it once a request is let through.
 async fn export_as(config: RenderConfig, format: Format) -> Result<Download, ApiError> {
     let state = AppState::new(Arc::new(HipCatalog::new()));
-    draw_off_the_runtime(state, config, format, false).await
+    draw_off_the_runtime(state, config, format).await
 }
 
 #[tokio::test]
@@ -145,7 +145,7 @@ async fn export(payload: serde_json::Value, format: Option<&str>) -> Result<Down
     let query = ExportQuery {
         format: format.map(str::to_string),
     };
-    export_as(config, query.format()).await
+    export_as(config, query.format(&HeaderMap::new())).await
 }
 
 #[tokio::test]
@@ -211,11 +211,20 @@ fn only_svg_by_name_is_the_svg() {
         ExportQuery {
             format: name.map(str::to_string),
         }
-        .format()
+        .format(&HeaderMap::new())
     };
-    assert_eq!(format(Some("svg")), Format::Svg);
+    assert_eq!(format(Some("svg")), Format::Svg(Packing::Plain));
     for other in [None, Some("pdf"), Some("SVG"), Some("")] {
         assert_eq!(format(other), Format::Pdf);
     }
-    assert!(Format::Pdf.cost() > Format::Svg.cost());
+    let takes_gzip: HeaderMap = [(header::ACCEPT_ENCODING, HeaderValue::from_static("gzip"))]
+        .into_iter()
+        .collect();
+    let query = |name: &str| ExportQuery {
+        format: Some(name.to_owned()),
+    };
+    assert_eq!(query("svg").format(&takes_gzip), Format::Svg(Packing::Gzip));
+    // Packing is the SVG's: a PDF is sent as it is, whatever the client takes.
+    assert_eq!(query("pdf").format(&takes_gzip), Format::Pdf);
+    assert!(Format::Pdf.cost() > Format::Svg(Packing::Plain).cost());
 }
