@@ -25,6 +25,8 @@ flate2 = "1.1"
 # `fs` and `set-header` serve the frontend's static build (see src/static_site.rs).
 tower-http = { version = "0.5", features = ["cors", "fs", "set-header"] }
 tower = { version = "0.5.3", features = ["util"] }
+# The typed errors of the checks and the conversions, and the one a handler answers with.
+thiserror = "2"
 
 [lints]
 workspace = true

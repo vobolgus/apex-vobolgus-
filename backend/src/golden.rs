@@ -33,7 +33,8 @@ mod subject {
     use rust_core::catalog::HipCatalog;
     use serde_json::Value;
 
-    use crate::models::DocumentRequest;
+    use crate::document::Document;
+    use crate::request::DocumentRequest;
 
     fn catalog() -> Arc<HipCatalog> {
         static HIP: OnceLock<Arc<HipCatalog>> = OnceLock::new();
@@ -47,14 +48,14 @@ mod subject {
 
     /// The SVG of every page of a document request, as the PDF is made from them.
     pub fn page_svgs(document: &Value) -> Vec<String> {
-        let document: DocumentRequest =
+        let request: DocumentRequest =
             serde_json::from_value(document.clone()).expect("the fixture is a document request");
-        crate::handlers::document::validate_document(&document).expect("the fixture is valid");
+        let document = Document::try_from(request).expect("the fixture is valid");
         document
-            .pages
+            .pages()
             .iter()
             .enumerate()
-            .map(|(index, page)| crate::handlers::document::page_svg(page, index, &catalog()))
+            .map(|(index, page)| page.to_svg(index, &catalog()))
             .collect()
     }
 }

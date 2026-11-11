@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use rust_core::HipCatalog;
 
+use crate::budget::ExportBudget;
 use crate::cached::CatalogCache;
-use crate::limits::ExportLimiter;
 
 /// The server's shared state: the star catalogue and what is kept beside it. Cheap
 /// to clone, every handler gets its own handle on the same data.
@@ -16,7 +16,7 @@ pub struct AppState {
     /// The catalog endpoints' answers, serialized and compressed once.
     pub(crate) catalog_cache: Arc<CatalogCache>,
     /// What the export endpoints may spend, per client and in all.
-    pub(crate) export_limiter: Arc<ExportLimiter>,
+    pub(crate) export_budget: Arc<ExportBudget>,
 }
 
 impl AppState {
@@ -26,7 +26,7 @@ impl AppState {
         Self {
             hip_catalog,
             catalog_cache: Arc::default(),
-            export_limiter: Arc::default(),
+            export_budget: Arc::default(),
         }
     }
 

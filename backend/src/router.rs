@@ -23,19 +23,19 @@ pub fn router(state: AppState, static_dir: Option<&Path>) -> Router {
         // The generator used to live at /generator; old links keep working.
         .route("/generator", get(|| async { Redirect::permanent("/") }))
         // Catalog endpoints
-        .route("/api/catalog/bright", get(catalog::get_bright_stars))
-        .route("/api/catalog/full", get(catalog::get_full_stars))
-        .route("/api/catalog/messier", get(catalog::get_messier))
-        .route("/api/constellations", get(catalog::get_constellations))
+        .route("/api/catalog/bright", get(catalog::bright_stars))
+        .route("/api/catalog/full", get(catalog::full_stars))
+        .route("/api/catalog/messier", get(catalog::messier))
+        .route("/api/constellations", get(catalog::constellations))
         .route(
             "/api/constellation-boundaries",
-            get(catalog::get_constellation_boundaries),
+            get(catalog::constellation_boundaries),
         )
         // PDF Export
         .route("/api/export", post(export::export_chart))
         .route(
             "/api/export/document",
-            post(document::export_document_within_budget).layer(middleware::document_body_limit()),
+            post(document::export_document).layer(middleware::document_body_limit()),
         )
         .layer(middleware::cors())
         .with_state(state)

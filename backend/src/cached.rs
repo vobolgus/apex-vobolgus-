@@ -15,10 +15,7 @@ use serde::Serialize;
 use std::io::Write;
 use std::sync::OnceLock;
 
-use crate::handlers::catalog::{
-    BRIGHT_MAX_MAG, FULL_MAX_MAG, constellation_boundaries_payload, constellations_payload,
-    messier_payload, stars_payload,
-};
+use crate::payload::{self, BRIGHT_MAX_MAG, FULL_MAX_MAG};
 
 /// Fresh for a day, and for a week after that the stale copy is shown while a new
 /// one is fetched behind it: the catalogs only change with a deploy.
@@ -135,27 +132,27 @@ pub struct CatalogCache {
 impl CatalogCache {
     pub fn bright(&self, catalog: &HipCatalog) -> &CachedJson {
         self.bright
-            .get_or_init(|| CachedJson::new(&stars_payload(catalog, BRIGHT_MAX_MAG, None)))
+            .get_or_init(|| CachedJson::new(&payload::stars(catalog, BRIGHT_MAX_MAG, None)))
     }
 
     pub fn full(&self, catalog: &HipCatalog) -> &CachedJson {
         self.full
-            .get_or_init(|| CachedJson::new(&stars_payload(catalog, FULL_MAX_MAG, None)))
+            .get_or_init(|| CachedJson::new(&payload::stars(catalog, FULL_MAX_MAG, None)))
     }
 
     pub fn constellations(&self, catalog: &HipCatalog) -> &CachedJson {
         self.constellations
-            .get_or_init(|| CachedJson::new(&constellations_payload(catalog)))
+            .get_or_init(|| CachedJson::new(&payload::constellation_figures(catalog)))
     }
 
     pub fn constellation_boundaries(&self) -> &CachedJson {
         self.constellation_boundaries
-            .get_or_init(|| CachedJson::new(&constellation_boundaries_payload()))
+            .get_or_init(|| CachedJson::new(&payload::constellation_boundaries()))
     }
 
     pub fn messier(&self) -> &CachedJson {
         self.messier
-            .get_or_init(|| CachedJson::new(&messier_payload()))
+            .get_or_init(|| CachedJson::new(&payload::messier()))
     }
 
     pub fn warm(&self, catalog: &HipCatalog) {

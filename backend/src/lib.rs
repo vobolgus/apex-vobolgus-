@@ -8,16 +8,23 @@
 // The workspace's pedantic lints and missing docs: lifted in the backend step.
 #![allow(clippy::pedantic, missing_docs)]
 
+mod budget;
 mod cached;
+mod chart;
+mod constellations;
+mod document;
+mod error;
 mod fonts;
 mod handlers;
 mod limits;
 mod middleware;
-mod models;
+mod payload;
+mod pdf;
+mod request;
 mod router;
 mod state;
 mod static_site;
-mod svg_generator;
+mod svg;
 
 #[cfg(test)]
 mod golden;
