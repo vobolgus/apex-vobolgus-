@@ -3,8 +3,8 @@ import { contentBox, GUTTER_MM } from '$lib/document/geometry';
 import { DEFAULT_TABLE } from '$lib/document/table';
 import { chart } from '$lib/document/test-support';
 import { DEFAULT_TEXT_STYLE, MAX_TEXT_CHARS } from '$lib/document/text';
-import { measuredLayout } from '$lib/document/text-fonts.svelte';
 import type { DocPage, TextStyle } from '$lib/document/types';
+import { measuredLayout } from '../typeset.svelte';
 import { NEW_TEXT, newTable, newText, wordsAsText } from './new-blocks';
 
 const BOX = contentBox('portrait');

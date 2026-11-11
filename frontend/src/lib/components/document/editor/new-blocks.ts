@@ -8,7 +8,6 @@
 import { contentBox } from '$lib/document/geometry';
 import { DEFAULT_TABLE } from '$lib/document/table';
 import { MAX_TEXT_CHARS, newTextFrame, type Sheets } from '$lib/document/text';
-import { likedTableWidth, measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
 import type {
 	BlockCopy,
 	DocPage,
@@ -17,6 +16,7 @@ import type {
 	TextBlock,
 	TextStyle
 } from '$lib/document/types';
+import { likedTableWidth, measuredLayout, shownLayout } from '../typeset.svelte';
 
 /** What a new text says until it is typed over. */
 export const NEW_TEXT = 'Text';

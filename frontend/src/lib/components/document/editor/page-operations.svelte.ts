@@ -8,9 +8,9 @@
 import { tick } from 'svelte';
 import { isBlank } from '$lib/document/blocks';
 import type { LaidPage, TemplateInfo } from '$lib/document/templates';
-import { measuredLayout } from '$lib/document/text-fonts.svelte';
 import type { DocPage, PageOrientation } from '$lib/document/types';
 import type { TemplatePick } from '../templates/pick';
+import { measuredLayout } from '../typeset.svelte';
 import type { PageActions } from './actions';
 import type { BlockOperations } from './block-operations.svelte';
 import type { EditorContext } from './context.svelte';

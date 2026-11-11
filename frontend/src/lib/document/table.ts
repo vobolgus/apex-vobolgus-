@@ -37,6 +37,7 @@ import type {
 	ChartSnapshot,
 	DocPage,
 	Language,
+	TableBlock,
 	TableLook,
 	TableSource,
 	TableSpec,
@@ -220,6 +221,23 @@ export function tableContent(chart: ChartSnapshot | null, spec: TableSpec, sky: 
 			magnitudeOf(star.v_mag)
 		]);
 	return { title, header, align, rows: listed };
+}
+
+/** What of a table says what it lists, and which chart it reads. */
+type TableReader = Pick<TableBlock, 'table' | 'chartId' | 'frame' | 'rotation'>;
+
+/**
+ * What a table on `page` says: read from the chart it is bound to (`boundChart`)
+ * and from `sky`. `pages` is the document, for a table that reads a chart on
+ * another page than its own.
+ */
+export function boundTableContent(
+	page: Pick<DocPage, 'blocks'>,
+	table: TableReader,
+	sky: Sky,
+	pages?: Sheets
+): TableContent {
+	return tableContent(boundChart(page, table, pages), table.table, sky);
 }
 
 // === Laying a table out ===
@@ -434,8 +452,7 @@ export function blockLayout(
 	if (block.kind === 'text') {
 		return layoutText(shownText(page, block, pages), block.style, widthMm, measure);
 	}
-	const content = tableContent(boundChart(page, block, pages), block.table, sky);
-	return layoutTable(content, block.style, widthMm, measure);
+	return layoutTable(boundTableContent(page, block, sky, pages), block.style, widthMm, measure);
 }
 
 /**

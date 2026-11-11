@@ -18,7 +18,6 @@
 	 * lasts. On a page with two charts or more, or with charts on other pages, a block
 	 * that reads a chart says which (`ReadsRow`).
 	 */
-	import { measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
 	import { tableName } from '$lib/document/labels';
 	import { shownText } from '$lib/document/text';
 	import type { DocPage, Rect, TypesetBlock } from '$lib/document/types';
@@ -26,6 +25,7 @@
 	import type { BlockState } from '../editor/drag-view';
 	import type { Size } from '../editor-geometry';
 	import TextLines from '../TextLines.svelte';
+	import { measuredLayout, shownLayout } from '../typeset.svelte';
 	import BlockFrame from './BlockFrame.svelte';
 	import BlockToolbar from './BlockToolbar.svelte';
 	import FieldsRow from './FieldsRow.svelte';

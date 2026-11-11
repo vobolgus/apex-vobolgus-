@@ -5,9 +5,9 @@ import { contentBox, snapThresholdMm } from '$lib/document/geometry';
 import { MAX_ITEMS_PER_PAGE } from '$lib/document/page';
 import { chart, expectInside } from '$lib/document/test-support';
 import { DEFAULT_TEXT_STYLE, MIN_TEXT_WIDTH_MM } from '$lib/document/text';
-import { leastTableWidth, shownLayout } from '$lib/document/text-fonts.svelte';
 import type { ChartBlock, DocBlock, DocPage, TableBlock, TextBlock } from '$lib/document/types';
 import type { PageBox, Point } from '../editor-geometry';
+import { leastTableWidth, shownLayout } from '../typeset.svelte';
 import { holdBlock } from './block-geometry';
 import {
 	carrySession,

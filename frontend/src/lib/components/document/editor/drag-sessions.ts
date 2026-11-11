@@ -29,7 +29,6 @@ import {
 	normalizeRotation,
 	squareRotation
 } from '$lib/document/text';
-import { leastTableWidth, shownLayout } from '$lib/document/text-fonts.svelte';
 import type { DocPage, Rect } from '$lib/document/types';
 import {
 	anchorOf,
@@ -42,6 +41,7 @@ import {
 	type PageBox,
 	type Point
 } from '../editor-geometry';
+import { leastTableWidth, shownLayout } from '../typeset.svelte';
 import type { TextSide } from './actions';
 import { bearingFrom, framesOn, snapBlock, type HeldBlock } from './block-geometry';
 import type { DragView } from './drag-view';

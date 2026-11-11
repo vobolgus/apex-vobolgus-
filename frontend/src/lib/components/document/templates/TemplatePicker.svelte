@@ -32,11 +32,11 @@
 		type LaidPage,
 		type TemplateInfo
 	} from '$lib/document/templates';
-	import { measuredLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage, Language, PageOrientation, TextStyle } from '$lib/document/types';
 	import { LANGUAGES } from '$lib/document/words';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import EditorOrientation from '../EditorOrientation.svelte';
+	import { measuredLayout } from '../typeset.svelte';
 	import FinderObjects from './FinderObjects.svelte';
 	import { closeUpOf, FinderChoice } from './finder.svelte';
 	import type { PickerAnchor } from './pick';

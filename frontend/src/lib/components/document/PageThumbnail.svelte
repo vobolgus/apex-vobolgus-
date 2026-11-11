@@ -21,11 +21,11 @@
 	import { chartsOf, typesetOf } from '$lib/document/blocks';
 	import { pageSize, PRINT_MM_PER_PREVIEW_PX } from '$lib/document/geometry';
 	import { anchoredFrame } from '$lib/document/text';
-	import { shownLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage } from '$lib/document/types';
 	import { drawChartThumbnail } from '$lib/renderer/chart-thumbnail';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import TextLines from './TextLines.svelte';
+	import { shownLayout } from './typeset.svelte';
 
 	interface Props {
 		page: DocPage;
