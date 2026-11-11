@@ -272,20 +272,30 @@ export class CanvasRenderer {
 		}
 
 		if (state.starVectors.length) {
-			// Cache key for the stars layer: anything that moves stars on canvas must change this.
-			// pinholeAspectRatio / pinholeHeightFrac are intentionally omitted (stars are invariant).
-			const starsKey = this.computeStarsKey(state, width, height, visualBlend);
-			if (this.starsLayerKey !== starsKey || !this.starsLayer) {
-				this.starsLayer = this.buildStarsLayer(state, params, visualBlend, width, height);
-				this.starsLayerKey = starsKey;
-			}
-			if (this.starsLayer) {
-				ctx.drawImage(this.starsLayer, 0, 0);
-			}
+			const stars = this.starsLayerFor(state, params, visualBlend, width, height);
+			if (stars) ctx.drawImage(stars, 0, 0);
 		}
 
 		ctx.restore();
 		ctx.globalAlpha = 1;
+	}
+
+	/** The stars as one picture, drawn again only when something moved them. */
+	private starsLayerFor(
+		state: RenderState,
+		params: ProjectionFrameParams,
+		visualBlend: number,
+		width: number,
+		height: number
+	) {
+		// Cache key for the stars layer: anything that moves stars on canvas must change this.
+		// pinholeAspectRatio / pinholeHeightFrac are intentionally omitted (stars are invariant).
+		const starsKey = this.computeStarsKey(state, width, height, visualBlend);
+		if (this.starsLayerKey !== starsKey || !this.starsLayer) {
+			this.starsLayer = this.buildStarsLayer(state, params, visualBlend, width, height);
+			this.starsLayerKey = starsKey;
+		}
+		return this.starsLayer;
 	}
 
 	/** The viewport's outline at `visualBlend`: the disc, the frame, or the morph between them. */

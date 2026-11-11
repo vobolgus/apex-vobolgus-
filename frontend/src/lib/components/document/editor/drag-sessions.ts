@@ -43,6 +43,7 @@ import {
 	mmToScreen,
 	resizeRect,
 	screenToMm,
+	type Box,
 	type PageBox,
 	type Point
 } from './screen-geometry';
@@ -101,6 +102,9 @@ function inPlace(press: Press): Pick<DragView, 'kind' | 'pageId' | 'blockId' | '
  * held, which shows the lines it would snap to. Where it would come to rest is
  * worked out beside it; it only goes there when let go, on the page its centre is
  * over or nearest to. Out of reach of every page it goes back where it was.
+ *
+ * The session is a closure over the press: what is in it (`sizeOn`, `landingView`,
+ * `update`, `commit`) is each short, and together as long as what they share.
  */
 export function carrySession(store: DocumentStore, press: Press): DragSession {
 	const { pageId, block, start, scale, boxes } = press;
@@ -120,10 +124,46 @@ export function carrySession(store: DocumentStore, press: Press): DragSession {
 			: fitTextFrame(atOrigin, target.orientation, block.rotation);
 	}
 
+	/**
+	 * Over `target`, whose paper is at `box`: the block drawn on its own page (at
+	 * `home`) at the size it has there, still under the pointer, and where it would
+	 * come to rest if let go now. `carried` is where it is drawn at its own size.
+	 */
+	function landingView(
+		point: Point,
+		shift: boolean,
+		carried: Rect,
+		home: Box,
+		target: DocPage,
+		box: Box
+	): DragView {
+		const size = sizeOn(target);
+		const resized = size.w !== block.frame.w || size.h !== block.frame.h;
+		const frame = resized
+			? frameUnderPointer(screenToMm(point, home, scale), grab, block.frame, size)
+			: carried;
+		const raw = frameUnderPointer(screenToMm(point, box, scale), grab, block.frame, size);
+		const landing = snapBlock(
+			raw,
+			block.rotation,
+			framesOn(target, block.id),
+			target.orientation,
+			threshold
+		);
+		return {
+			...base,
+			kind: 'moving',
+			targetId: target.id,
+			frame,
+			landing: landing.frame,
+			guides: shift ? landing.guides : []
+		};
+	}
+
 	return {
 		update(point, shift) {
 			if (!home) return undefined;
-			let frame: Rect = {
+			const frame: Rect = {
 				...block.frame,
 				x: block.frame.x + (point.x - start.x) / scale,
 				y: block.frame.y + (point.y - start.y) / scale
@@ -136,30 +176,9 @@ export function carrySession(store: DocumentStore, press: Press): DragSession {
 			const targetId = landingPage(centre, boxes, DROP_SLACK_PX);
 			const target = targetId === null ? undefined : store.page(targetId);
 			const box = boxes.find((b) => b.id === targetId)?.box;
-			if (!target || !box) {
-				// Out of reach of every page: let go here, it goes back where it was.
-				return { ...base, kind: 'detached', targetId: null, frame, landing: null, guides: [] };
-			}
-			const size = sizeOn(target);
-			if (size.w !== block.frame.w || size.h !== block.frame.h) {
-				frame = frameUnderPointer(screenToMm(point, home, scale), grab, block.frame, size);
-			}
-			const raw = frameUnderPointer(screenToMm(point, box, scale), grab, block.frame, size);
-			const landing = snapBlock(
-				raw,
-				block.rotation,
-				framesOn(target, block.id),
-				target.orientation,
-				threshold
-			);
-			return {
-				...base,
-				kind: 'moving',
-				targetId: target.id,
-				frame,
-				landing: landing.frame,
-				guides: shift ? landing.guides : []
-			};
+			if (target && box) return landingView(point, shift, frame, home, target, box);
+			// Out of reach of every page: let go here, it goes back where it was.
+			return { ...base, kind: 'detached', targetId: null, frame, landing: null, guides: [] };
 		},
 
 		commit(view) {

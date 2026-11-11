@@ -11,7 +11,7 @@ import {
 	PINHOLE_CORNER_RADIUS,
 	STAR_COLOR
 } from '$lib/constants';
-import type { ChartSnapshot, ChartView, ChartMark } from '$lib/document/types';
+import type { ChartMark, ChartSnapshot, ChartView } from '$lib/document/types';
 import {
 	getProjectionFrameParams,
 	sampleStarMorphFrame,
@@ -164,41 +164,56 @@ export function drawChartThumbnail(
 	const scale = width / (2 * params.morphHalfWidth);
 	const limit = thumbnailMagnitudeLimit(Math.min(width, height));
 	const rotate = (x: number, y: number, z: number) => toViewSpace(x, y, z, view.orientation);
+	/** Where a point of the sky is on this canvas, px; null where it is off the chart. */
+	const place: Place = (point) => {
+		const sample = sampleStarMorphFrame(point, blend, params, rotate);
+		if (sample.visibility < 0.5) return null;
+		return { x: width / 2 + sample.px * scale, y: height / 2 + sample.py * scale };
+	};
 	ctx.fillStyle = STAR_COLOR;
 	for (const star of stars) {
 		if (star.v_mag > limit) continue;
-		const sample = sampleStarMorphFrame(star, blend, params, rotate);
-		if (sample.visibility < 0.5) continue;
+		const at = place(star);
+		if (!at) continue;
 		const r =
 			starScale * Math.max(THUMB_STAR_MIN_PX, THUMB_STAR_MAX_PX - THUMB_STAR_PER_MAG * star.v_mag);
 		ctx.beginPath();
-		ctx.arc(width / 2 + sample.px * scale, height / 2 + sample.py * scale, r, 0, Math.PI * 2);
+		ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
 		ctx.fill();
 	}
+	if (chart.marks?.length) strokeMarks(ctx, chart.marks, place, starScale);
+}
 
-	if (!chart.marks?.length) return;
+/** Where a point of the sky is drawn, px; null where it is not on the chart. */
+type Place = (point: StarVector) => { x: number; y: number } | null;
+
+/** The rings of `marks`, over the stars: each as far as it is on the chart. */
+function strokeMarks(
+	ctx: CanvasRenderingContext2D,
+	marks: readonly ChartMark[],
+	place: Place,
+	starScale: number
+): void {
 	ctx.strokeStyle = MARK_COLOR;
 	// Thinner while the drawing is shown larger, as the stars are smaller.
 	ctx.lineWidth = THUMB_MARK_PX * starScale;
 	ctx.lineJoin = 'round';
-	for (const mark of chart.marks) {
+	for (const mark of marks) {
 		ctx.beginPath();
 		// The pen is down while the ring is on the chart, and lifted where it leaves it.
 		let down = false;
 		let drawn = false;
 		for (const point of ringPoints(mark)) {
-			const sample = sampleStarMorphFrame(point, blend, params, rotate);
-			if (sample.visibility < 0.5) {
+			const at = place(point);
+			if (!at) {
 				down = false;
 				continue;
 			}
-			const x = width / 2 + sample.px * scale;
-			const y = height / 2 + sample.py * scale;
 			if (down) {
-				ctx.lineTo(x, y);
+				ctx.lineTo(at.x, at.y);
 				drawn = true;
 			} else {
-				ctx.moveTo(x, y);
+				ctx.moveTo(at.x, at.y);
 				down = true;
 			}
 		}

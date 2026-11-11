@@ -7,7 +7,7 @@ import {
 	PINHOLE_CORNER_RADIUS,
 	STAR_COLOR
 } from '$lib/constants';
-import type { ChartSnapshot, ChartMark } from '$lib/document/types';
+import type { ChartMark, ChartSnapshot } from '$lib/document/types';
 import { pointingToOrientation } from '$lib/math/pointing';
 import type { StarVector } from '$lib/math/projection';
 import { CHART_THUMB_PX, drawChartThumbnail, ringPoints, thumbnailCrop } from './chart-thumbnail';

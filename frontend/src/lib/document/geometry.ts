@@ -363,15 +363,8 @@ export function snapResize(
 			return { w, reach: Math.max(dw, dw / aspect) };
 		})
 	];
-	let width = raw;
-	let bestReach = Infinity;
-	for (const { w, reach } of candidates) {
-		if (reach > thresholdMm + EPS || w < minW - EPS || w > maxW + EPS) continue;
-		if (reach < bestReach - EPS) {
-			width = w;
-			bestReach = reach;
-		}
-	}
+	const reachable = candidates.filter(({ w }) => w >= minW - EPS && w <= maxW + EPS);
+	const width = nearestWidth(reachable, raw, thresholdMm);
 
 	const snapped = place(clamp(width, minW, maxW));
 	const edgeX = sx > 0 ? snapped.x + snapped.w : snapped.x;
@@ -381,6 +374,24 @@ export function snapResize(
 		...guidesAt('y', edgeY, movingY, snapped, ys, box)
 	];
 	return { frame: snapped, guides: mergeGuides(guides) };
+}
+
+/** The width within `thresholdMm` of reach that is nearest, the first of equals; `raw` with none. */
+function nearestWidth(
+	candidates: readonly { w: number; reach: number }[],
+	raw: number,
+	thresholdMm: number
+): number {
+	let width = raw;
+	let bestReach = Infinity;
+	for (const { w, reach } of candidates) {
+		if (reach > thresholdMm + EPS) continue;
+		if (reach < bestReach - EPS) {
+			width = w;
+			bestReach = reach;
+		}
+	}
+	return width;
 }
 
 /**

@@ -184,23 +184,28 @@ function buildVisiblePieces(
 	}
 	if (cur !== null && cur.length >= 2) pieces.push(cur);
 
-	// If the great circle wraps around the seam (samples[0] == samples[N-1]) and both are
-	// visible, the first and last pieces are halves of one continuous arc — merge them so the
-	// animation walks it as a single chord.
-	if (pieces.length >= 2 && projected[0].visible && projected[samples.length - 1].visible) {
-		const first = pieces.shift()!;
-		const last = pieces.pop()!;
-		const merged: PiecePoint[] = [...last];
-		for (let i = 1; i < first.length; i += 1) {
-			merged.push({
-				srcDeg: first[i].srcDeg + 360,
-				x: first[i].x,
-				y: first[i].y
-			});
-		}
-		pieces.unshift(merged);
-	}
+	const wraps = projected[0].visible && projected[samples.length - 1].visible;
+	return wraps ? joinedAcrossSeam(pieces) : pieces;
+}
 
+/**
+ * If the great circle wraps around the seam (samples[0] == samples[N-1]) and both are
+ * visible, the first and last pieces are halves of one continuous arc — merge them so the
+ * animation walks it as a single chord.
+ */
+function joinedAcrossSeam(pieces: PiecePoint[][]): PiecePoint[][] {
+	if (pieces.length < 2) return pieces;
+	const first = pieces.shift()!;
+	const last = pieces.pop()!;
+	const merged: PiecePoint[] = [...last];
+	for (let i = 1; i < first.length; i += 1) {
+		merged.push({
+			srcDeg: first[i].srcDeg + 360,
+			x: first[i].x,
+			y: first[i].y
+		});
+	}
+	pieces.unshift(merged);
 	return pieces;
 }
 
@@ -377,6 +382,9 @@ function subdivideGreatCircle(segment: readonly SegmentPoint[]): SegmentPoint[] 
  * One subdivided segment, stroked where it is seen: a run of seen points is one
  * stroke, and a run that leaves or enters the seen area ends or starts where it
  * crosses the edge (`findVisibilityBoundary`).
+ *
+ * One loop over the four cases of a piece (seen at both ends, at neither, leaving,
+ * entering): they share the pen, down or up, and apart each would hand it on.
  */
 function strokeVisibleRuns(
 	ctx: CanvasRenderingContext2D,

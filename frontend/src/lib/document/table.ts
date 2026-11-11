@@ -370,6 +370,38 @@ function placedColumns(
 	return { widths, starts };
 }
 
+/** Sets a cell: its words cut to its column, at `baseline`, a header's in bold. */
+type SetCell = (text: string, column: number, baseline: number, header: boolean) => TextLine;
+
+/**
+ * How a cell of `content` is set in a table `available` font sizes wide: in its
+ * column (`placedColumns`), its anchor where the column's alignment has it.
+ */
+function cellSetter(
+	content: TableContent,
+	style: TextStyle,
+	available: number,
+	measure: Measure
+): SetCell {
+	const size = style.size * MM_PER_PT;
+	const plain = (text: string) => measure(text, { ...style, bold: false });
+	const bold = (text: string) => measure(text, { ...style, bold: true });
+	const { widths, starts } = placedColumns(content, style, available, measure);
+	return (text, column, baseline, header) => {
+		const set = content.align[column];
+		const width = widths[column];
+		const offset = set === 'right' ? width : set === 'center' ? width / 2 : 0;
+		const line: TextLine = {
+			text: fitted(text, width, header ? bold : plain),
+			baseline,
+			x: starts[column] + offset * size,
+			anchor: set === 'right' ? 'end' : set === 'center' ? 'middle' : 'start'
+		};
+		if (header !== style.bold) line.bold = header;
+		return line;
+	};
+}
+
 /**
  * A table set in `style` in a column `widthMm` wide. Its title in bold in the
  * middle; under it, a table of names is its names, each in the middle of one of
@@ -389,25 +421,9 @@ export function layoutTable(
 	const lineHeight = size * LINE_HEIGHT;
 	const { ascent, descent } = FONT_METRICS[style.font];
 	const first = (lineHeight - (ascent + descent) * size) / 2 + ascent * size;
-	const plain = (text: string) => measure(text, { ...style, bold: false });
 	const bold = (text: string) => measure(text, { ...style, bold: true });
 	const available = widthMm / size;
-	const { widths, starts } = placedColumns(content, style, available, measure);
-
-	// Where a cell's anchor is in its column.
-	const cell = (text: string, column: number, baseline: number, header: boolean): TextLine => {
-		const set = content.align[column];
-		const width = widths[column];
-		const offset = set === 'right' ? width : set === 'center' ? width / 2 : 0;
-		const line: TextLine = {
-			text: fitted(text, width, header ? bold : plain),
-			baseline,
-			x: starts[column] + offset * size,
-			anchor: set === 'right' ? 'end' : set === 'center' ? 'middle' : 'start'
-		};
-		if (header !== style.bold) line.bold = header;
-		return line;
-	};
+	const cell = cellSetter(content, style, available, measure);
 
 	const title: TextLine = {
 		text: fitted(content.title, available, bold),

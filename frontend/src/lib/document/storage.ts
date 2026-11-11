@@ -31,6 +31,7 @@ import { DEFAULT_LANGUAGE, LANGUAGES } from './words';
 import type {
 	BlockCopy,
 	ChartBlock,
+	ChartMark,
 	ChartSnapshot,
 	DocPage,
 	LayoutTree,
@@ -38,7 +39,6 @@ import type {
 	PageOrientation,
 	PageTemplate,
 	Rect,
-	ChartMark,
 	TableLook,
 	TableSpec,
 	TextRole,

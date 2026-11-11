@@ -378,6 +378,10 @@ function clampOr(value: number, lo: number, hi: number, fallback: number): numbe
  * it (`resizePinholeWidthKeepStars`) and the fov limits become width limits.
  * Every bound clamps the request instead of rejecting it, so a handle stops at
  * a limit while the pointer carries on, and comes back without a jump.
+ *
+ * One function for the four gestures (square, a corner, a side, top or bottom):
+ * each is a clamp or two against the same six bounds, which apart they would all
+ * be handed.
  */
 export function resolvePinholeResize(
 	start: PinholeShape,
