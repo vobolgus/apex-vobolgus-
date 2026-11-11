@@ -12,7 +12,7 @@ import {
 	PROJECTION_TRANSITION_MS
 } from '$lib/constants';
 import { pinholeFovToStereoFov, stereoFovToPinholeFov } from '$lib/math/projection';
-import { getProjectionBlend } from '$lib/renderer/canvas-renderer';
+import { getProjectionBlend } from '$lib/renderer/projection-blend';
 import type { ProjectionAnimationState } from '$lib/renderer/types';
 import { view } from '$lib/state/view.svelte';
 
