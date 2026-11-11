@@ -19,6 +19,8 @@
  * Reading is lenient: a fragment that is not a view at all is ignored, a missing
  * or malformed value keeps what the page already has (`applySharedView`), and
  * numbers are clamped to what the controls can reach.
+ *
+ * `ViewUrl` keeps the address bar and the chart in step, both ways.
  */
 
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
@@ -36,6 +38,10 @@ import {
 import { orientationToPointing, pointingToOrientation } from '$lib/math/pointing';
 import type { Quaternion } from '$lib/math/quaternion';
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
+import { prefersReducedMotion } from '$lib/ui/motion';
+
+/** The address bar follows the view once it has been still for this long. */
+const URL_SYNC_DELAY_MS = 300;
 
 /** Layer names in the fragment, in the order they are written. */
 const LAYER_NAMES = {
@@ -179,4 +185,115 @@ export function applySharedView(view: ChartView, shared: SharedView): ChartView 
 		);
 	}
 	return next;
+}
+
+/** The address bar, as far as the view's fragment goes. */
+export interface Address {
+	/** The fragment, with its `#`. */
+	readonly hash: string;
+	/**
+	 * Put `hash` (without its `#`) in place of the fragment, replacing the history
+	 * entry rather than adding one. Throws when the browser refuses.
+	 */
+	replace(hash: string): void;
+}
+
+/** What the address's view is read into and written from. */
+export interface ViewUrlHost {
+	/** The view the chart shows now. */
+	readonly chartView: ChartView;
+	readonly layers: ChartLayers & { assign(values: ChartLayers): void };
+	/** Take a view whole: at once, or with `fly` turning and zooming the sky to it. */
+	show(next: ChartView, fly: boolean): void;
+}
+
+/**
+ * The view in the address bar, kept in step with the chart. A link (or a reload)
+ * brings its view when the page opens (`read`); a link pasted into the open tab
+ * changes only the hash, and the sky goes there (`listen`). The other way, the bar
+ * follows the view once it has been still for a moment (`follow`, from an effect).
+ */
+export class ViewUrl {
+	readonly #host: ViewUrlHost;
+	readonly #address: Address;
+	/**
+	 * The view the address bar holds, as a fragment; null until the page has read it.
+	 * The bar is written only once the view differs from this, so a plain visit keeps
+	 * a plain address.
+	 */
+	#synced: string | null = null;
+	#timer: ReturnType<typeof setTimeout> | null = null;
+
+	constructor(host: ViewUrlHost, address: Address) {
+		this.#host = host;
+		this.#address = address;
+	}
+
+	/** The view as the address bar would hold it. */
+	get hash(): string {
+		return encodeViewHash(this.#host.chartView, this.#host.layers);
+	}
+
+	/**
+	 * Take the view the address names, if it names one. On a load it is simply
+	 * there; with `fly` (a link pasted into the open tab) the sky turns and zooms
+	 * to it, when the projection stays the same: across projections the morph and
+	 * its carried field of view would fight the flight, so that is a cut.
+	 */
+	read(fly = false): void {
+		const shared = decodeViewHash(this.#address.hash);
+		if (shared) {
+			const current = this.#host.chartView;
+			const next = applySharedView(current, shared);
+			this.#host.layers.assign(shared.layers);
+			this.#host.show(
+				next,
+				fly && next.projection === current.projection && !prefersReducedMotion()
+			);
+		}
+		this.#synced = this.hash;
+	}
+
+	/**
+	 * Fly to the links pasted into the open tab, which change only the hash. Returns
+	 * the way out.
+	 */
+	listen(target: Window = window): () => void {
+		const fly = () => this.read(true);
+		target.addEventListener('hashchange', fly);
+		return () => target.removeEventListener('hashchange', fly);
+	}
+
+	/**
+	 * The view may have changed: the bar follows it once it has been still for a
+	 * moment. Called from an effect, which reading the fragment subscribes to the
+	 * view, the projection and the layers.
+	 */
+	follow(): void {
+		const hash = this.hash;
+		if (this.#synced === null || hash === this.#synced) return;
+		if (this.#timer !== null) clearTimeout(this.#timer);
+		this.#timer = setTimeout(() => this.write(), URL_SYNC_DELAY_MS);
+	}
+
+	/** Write the view to the bar now, if it is not what the bar holds. */
+	write(): void {
+		if (this.#timer !== null) clearTimeout(this.#timer);
+		this.#timer = null;
+		const hash = this.hash;
+		if (hash === this.#synced) return;
+		try {
+			// Replaced, not pushed: turning the sky must not fill the Back history.
+			this.#address.replace(hash);
+			this.#synced = hash;
+		} catch (error) {
+			// Browsers cap how often the address may change; the next change tries again.
+			console.error(error);
+		}
+	}
+
+	/** A write still waiting goes out now: the tab is going away. */
+	flush(): void {
+		if (this.#timer !== null) this.write();
+	}
 }

@@ -39,7 +39,7 @@
 	} from '$lib/shortcuts';
 	import { LayerState } from '$lib/state/layers.svelte';
 	import { ProjectionTransition } from '$lib/state/projection-transition.svelte';
-	import { applySharedView, decodeViewHash, encodeViewHash } from '$lib/state/view-url';
+	import { ViewUrl } from '$lib/state/view-url';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import { Dropdown, DropdownGroup } from '$lib/ui/dropdown.svelte';
 	import { prefersReducedMotion } from '$lib/ui/motion';
@@ -70,12 +70,16 @@
 	 * well before (an SVG in tens of ms), and a ring that flashes for a frame is noise.
 	 */
 	const EXPORT_BUSY_DELAY_MS = 350;
-	/** The address bar follows the view once it has been still for this long. */
-	const URL_SYNC_DELAY_MS = 300;
 
 	const layers = new LayerState();
 	const projection = new ProjectionTransition();
 	const stage = new StageController(layers, projection);
+	const viewUrl = new ViewUrl(stage, {
+		get hash() {
+			return window.location.hash;
+		},
+		replace: (hash) => replaceState(`#${hash}`, {})
+	});
 	const exportMenu = new Dropdown();
 	const layersMenu = new Dropdown();
 	const menus = new DropdownGroup(exportMenu, layersMenu);
@@ -126,13 +130,6 @@
 	let documentExporting = $state(false);
 	/** An SVG or PDF of the chart is on its way; a second one waits for it. */
 	let chartExporting = false;
-	/**
-	 * The view the address bar holds, as a fragment; null until the page has read it.
-	 * The bar is written only once the view differs from this, so a plain visit keeps
-	 * a plain address.
-	 */
-	let syncedHash: string | null = null;
-	let urlSyncTimer: ReturnType<typeof setTimeout> | null = null;
 	const modalOpen = $derived(aboutOpen || editorPageId !== null);
 	// On a phone the panel floats over the chart, which it may cover; on a wide screen the chart moves aside.
 	const panelReservePx = $derived(narrow ? 0 : panelFootprintPx);
@@ -165,12 +162,12 @@
 			requestAnimationFrame(() => (motionReady = true));
 		});
 		// A link (or a reload) brings its view; pasting another into this tab only changes the hash.
-		readViewFromUrl();
-		window.addEventListener('hashchange', flyToViewFromUrl);
+		viewUrl.read();
+		const stopViewUrl = viewUrl.listen();
 		// Saves are debounced: write the last one before the tab goes away.
 		const flushDocument = () => {
 			documentStore.flush();
-			if (urlSyncTimer !== null) writeViewToUrl();
+			viewUrl.flush();
 		};
 		const handleVisibilityChange = () => {
 			if (document.visibilityState === 'hidden') flushDocument();
@@ -223,7 +220,7 @@
 		window.addEventListener('blur', stage.release);
 		return () => {
 			stopMenuDismiss();
-			window.removeEventListener('hashchange', flyToViewFromUrl);
+			stopViewUrl();
 			cancelAnimationFrame(motionFrame);
 			if (exportDoneTimer !== null) clearTimeout(exportDoneTimer);
 			narrowQuery.removeEventListener('change', handleNarrowChange);
@@ -236,52 +233,7 @@
 		};
 	});
 
-	/** The view as the address bar would hold it. */
-	function viewHash(): string {
-		return encodeViewHash(stage.chartView, layers);
-	}
-
-	/**
-	 * Take the view the address names, if it names one. On a load it is simply
-	 * there; with `fly` (a link pasted into the open tab) the sky turns and zooms
-	 * to it, when the projection stays the same: across projections the morph and
-	 * its carried field of view would fight the flight, so that is a cut.
-	 */
-	function readViewFromUrl(fly = false) {
-		const shared = decodeViewHash(window.location.hash);
-		if (shared) {
-			const current = stage.chartView;
-			const next = applySharedView(current, shared);
-			layers.assign(shared.layers);
-			stage.show(next, fly && next.projection === current.projection && !prefersReducedMotion());
-		}
-		syncedHash = viewHash();
-	}
-
-	const flyToViewFromUrl = () => readViewFromUrl(true);
-
-	function writeViewToUrl() {
-		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
-		urlSyncTimer = null;
-		const hash = viewHash();
-		if (hash === syncedHash) return;
-		try {
-			// Replaced, not pushed: turning the sky must not fill the Back history.
-			replaceState(`#${hash}`, {});
-			syncedHash = hash;
-		} catch (error) {
-			// Browsers cap how often the address may change; the next change tries again.
-			console.error(error);
-		}
-	}
-
-	$effect(() => {
-		// Reading the fragment subscribes to the view, the projection and the layers.
-		const hash = viewHash();
-		if (syncedHash === null || hash === syncedHash) return;
-		if (urlSyncTimer !== null) clearTimeout(urlSyncTimer);
-		urlSyncTimer = setTimeout(writeViewToUrl, URL_SYNC_DELAY_MS);
-	});
+	$effect(() => viewUrl.follow());
 
 	/**
 	 * Run an export that may be slow and may fail. Past EXPORT_PROGRESS_DELAY_MS a held
