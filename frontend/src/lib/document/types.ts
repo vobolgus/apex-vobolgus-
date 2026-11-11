@@ -6,6 +6,7 @@
  */
 
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { TextFont } from '$lib/api/wire/request';
 
 export type PageOrientation = 'portrait' | 'landscape';
 
@@ -68,7 +69,8 @@ export interface ChartBlock extends BlockBase {
 	closeUpOf?: string;
 }
 
-export type TextFont = 'serif' | 'sans';
+/** The families a text is set in: the ones the backend has the files of. */
+export type { TextFont };
 export type TextAlign = 'left' | 'center' | 'right';
 
 export interface TextStyle {

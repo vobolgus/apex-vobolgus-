@@ -6,7 +6,7 @@
 	 * Scrolls sideways when the pages do not fit, also under a plain mouse wheel,
 	 * and keeps the current page in view.
 	 */
-	import { MAX_PAGES } from '$lib/document/document.svelte';
+	import { MAX_PAGES } from '$lib/api/wire/limits';
 	import { pageSize } from '$lib/document/geometry';
 	import { chartCountLabel } from '$lib/document/labels';
 	import { chartsOf, typesetOf } from '$lib/document/blocks';

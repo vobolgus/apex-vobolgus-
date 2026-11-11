@@ -2,9 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chartsOf, typesetOf } from './blocks';
 import { DocumentStore } from './document.svelte';
-import { MAX_ITEMS_PER_PAGE } from './page';
+import { MAX_ITEMS_PER_PAGE, MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { chart } from './test-support';
-import { DEFAULT_TEXT_STYLE, MAX_TEXTS_PER_PAGE } from './text';
+import { DEFAULT_TEXT_STYLE } from './text';
 
 afterEach(() => {
 	vi.useRealTimers();

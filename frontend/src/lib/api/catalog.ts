@@ -9,14 +9,7 @@
 
 import { raDecToUnitVector } from '$lib/math/astronomy';
 import { catalog } from '$lib/state/catalog.svelte';
-import type { CatalogStar, ConstellationData, MessierObject } from './catalog-types';
-
-/**
- * Faintest star the preview draws: the backend's default for `/api/catalog/full`,
- * which is asked for without a limit so every visitor shares one cached URL. The
- * exports send the same limit.
- */
-export const DEFAULT_MAX_MAGNITUDE = 6.5;
+import type { CatalogStar, ConstellationSegments, MessierEntry } from './wire/payload';
 
 /**
  * `fetch` + JSON decode with the loaders' shared failure handling.
@@ -48,6 +41,10 @@ function setStars(stars: CatalogStar[]) {
  * the second does not wait for the first; from the HTTP cache the full catalog is
  * there straight away and the bright one is dropped.
  *
+ * The full catalog is asked for without a limit, so every visitor shares one cached
+ * URL: the faintest star the preview draws is the backend's default, `FULL_MAX_MAG`,
+ * and the exports send the same limit.
+ *
  * `onStars` is called each time there are new stars to draw. Resolves to whether
  * the full catalog arrived.
  */
@@ -70,7 +67,7 @@ export async function loadStars(onStars: () => void = () => {}): Promise<boolean
 
 /** Load the constellation stick figures. */
 export async function loadConstellations(): Promise<boolean> {
-	const constellations = await fetchJson<ConstellationData[]>(
+	const constellations = await fetchJson<ConstellationSegments[]>(
 		'/api/constellations',
 		'constellations'
 	);
@@ -81,7 +78,7 @@ export async function loadConstellations(): Promise<boolean> {
 
 /** Load the IAU constellation boundaries. */
 export async function loadConstellationBoundaries(): Promise<boolean> {
-	const boundaries = await fetchJson<ConstellationData[]>(
+	const boundaries = await fetchJson<ConstellationSegments[]>(
 		'/api/constellation-boundaries',
 		'constellation boundaries'
 	);
@@ -97,7 +94,7 @@ let messierLoad: Promise<boolean> | null = null;
  * it came, gets the same answer. A failure is not kept, so the next call tries again.
  */
 export function loadMessier(): Promise<boolean> {
-	messierLoad ??= fetchJson<MessierObject[]>('/api/catalog/messier', 'Messier catalogue').then(
+	messierLoad ??= fetchJson<MessierEntry[]>('/api/catalog/messier', 'Messier catalogue').then(
 		(objects) => {
 			if (!objects) {
 				messierLoad = null;

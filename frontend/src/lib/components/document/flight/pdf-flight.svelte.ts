@@ -13,7 +13,8 @@
 
 import { tick } from 'svelte';
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
-import { MAX_CHARTS, MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
+import { MAX_CHARTS, MAX_PAGES } from '$lib/api/wire/limits';
+import type { DocumentStore } from '$lib/document/document.svelte';
 import { snapshotChart } from '$lib/document/render';
 import type { ChartSnapshot } from '$lib/document/types';
 import { chartThumbnail, drawChartThumbnail } from '$lib/renderer/chart-thumbnail';

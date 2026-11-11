@@ -21,7 +21,7 @@
 	 */
 	import { tick, untrack } from 'svelte';
 	import { loadMessier } from '$lib/api/catalog';
-	import type { MessierObject } from '$lib/api/catalog-types';
+	import type { MessierEntry } from '$lib/api/wire/payload';
 	import { chartsOf } from '$lib/document/blocks';
 	import { LANGUAGE_NAMES } from '$lib/document/labels';
 	import {
@@ -99,7 +99,7 @@
 		})
 	);
 
-	function layCard(object: MessierObject | null): LaidPage[] {
+	function layCard(object: MessierEntry | null): LaidPage[] {
 		return layFinder(page, laying, object ? closeUpOf(object, fovDeg) : undefined);
 	}
 
@@ -156,7 +156,7 @@
 		dialogEl?.close();
 	}
 
-	function chooseObject(object: MessierObject) {
+	function chooseObject(object: MessierEntry) {
 		const laid = layCard(object);
 		const info = TEMPLATES.find((template) => template.id === 'finder')!;
 		if (laid.length === 0 || laid.length - 1 > room) return;

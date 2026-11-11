@@ -5,7 +5,7 @@
  * rendered by the backend from a RenderConfig of the current view.
  */
 
-import type { RenderConfig } from './render-config';
+import type { RenderConfig } from './wire/request';
 
 export type ExportFormat = 'PNG' | 'SVG' | 'PDF';
 

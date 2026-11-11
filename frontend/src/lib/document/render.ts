@@ -15,16 +15,18 @@ import {
 	buildRenderConfig,
 	type ChartLayers,
 	type ChartView,
-	type RenderConfig
+	type ViewRenderConfig
 } from '$lib/api/render-config';
+import { MAX_LINE_CHARS, MAX_LINES_PER_TEXT } from '$lib/api/wire/limits';
+import type { DocumentRequest, DocumentText, DocumentTextLine } from '$lib/api/wire/request';
 import { chartsOf, typesetOf } from './blocks';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
 import { loadMessier } from '$lib/api/catalog';
 import { catalog } from '$lib/state/catalog.svelte';
 import { blockLayout, type Sky } from './table';
-import { alignAnchor, anchoredFrame, MAX_LINE_CHARS, MAX_TEXT_LINES, type Measure } from './text';
+import { alignAnchor, anchoredFrame, type Measure } from './text';
 import { loadTextFonts, measureText } from './text-fonts.svelte';
-import type { ChartBlock, ChartSnapshot, DocPage, TextFont, TypesetBlock } from './types';
+import type { ChartBlock, ChartSnapshot, DocPage, TypesetBlock } from './types';
 
 /**
  * Overrides of the preview's style for a chart on white paper. The outline is
@@ -39,49 +41,6 @@ export const PAPER_STYLE = {
 
 /** Previews kept as object URLs; the least recently used one is revoked beyond this. */
 export const PREVIEW_CACHE_LIMIT = 60;
-
-interface DocumentItemRequest {
-	x_mm: number;
-	y_mm: number;
-	width_mm: number;
-	height_mm: number;
-	config: RenderConfig;
-}
-
-/** A text, line by line: where each baseline starts (or its middle, or its end), mm. */
-interface DocumentTextRequest {
-	font: TextFont;
-	bold: boolean;
-	italic: boolean;
-	size_mm: number;
-	anchor: 'start' | 'middle' | 'end';
-	/** Degrees the lines are turned clockwise about (`cx_mm`, `cy_mm`), where they are given upright. */
-	rotation_deg: number;
-	cx_mm: number;
-	cy_mm: number;
-	/** A table's cell has an anchor and a weight of its own. */
-	lines: {
-		x_mm: number;
-		y_mm: number;
-		text: string;
-		anchor?: 'start' | 'middle' | 'end';
-		bold?: boolean;
-	}[];
-	/** A table's rules, turned with the text. */
-	rules?: { x1_mm: number; y1_mm: number; x2_mm: number; y2_mm: number; width_mm: number }[];
-}
-
-interface DocumentPageRequest {
-	width_mm: number;
-	height_mm: number;
-	items: DocumentItemRequest[];
-	texts: DocumentTextRequest[];
-}
-
-/** Body of `POST /api/export/document`. */
-interface DocumentRequest {
-	pages: DocumentPageRequest[];
-}
 
 /** How a document export went; `message` is the backend's reason for refusing it. */
 export type DocumentExportResult = { ok: true } | { ok: false; message: string | null };
@@ -117,10 +76,10 @@ export function snapshotChart(
 }
 
 /** The preview's config for the chart, sized in mm with stars fixed in mm, on paper. */
-export function chartRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): RenderConfig {
+export function chartRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): ViewRenderConfig {
 	const { chart, frame } = item;
 	const config = buildRenderConfig(chart.view, chart.layers, new Date(chart.createdAt));
-	const drawn: RenderConfig = {
+	const drawn: ViewRenderConfig = {
 		...config,
 		view: { ...config.view, width: frame.w, height: frame.h, px: PRINT_MM_PER_PREVIEW_PX },
 		style: { ...config.style, ...PAPER_STYLE }
@@ -149,7 +108,7 @@ export function textRequest(
 	measure: Measure,
 	sky: Sky = NO_SKY,
 	pages?: readonly DocPage[]
-): DocumentTextRequest {
+): DocumentText {
 	const { w, h } = pageSize(page.orientation);
 	const { style, rotation = 0 } = text;
 	const layout = blockLayout(page, text, text.frame.w, measure, sky, pages);
@@ -166,7 +125,7 @@ export function textRequest(
 	const { x, anchor } = alignAnchor(style.align, frame.w);
 	const lines = layout.lines
 		.map((line) => {
-			const sent: DocumentTextRequest['lines'][number] = {
+			const sent: DocumentTextLine = {
 				x_mm: frame.x + (line.x ?? x),
 				y_mm: frame.y + line.baseline,
 				text: Array.from(line.text).slice(0, MAX_LINE_CHARS).join('')
@@ -176,8 +135,8 @@ export function textRequest(
 			return sent;
 		})
 		.filter((line) => line.text !== '' && onPage(line.x_mm, line.y_mm))
-		.slice(0, MAX_TEXT_LINES);
-	const request: DocumentTextRequest = {
+		.slice(0, MAX_LINES_PER_TEXT);
+	const request: DocumentText = {
 		font: style.font,
 		bold: style.bold,
 		italic: style.italic,

@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { contentBox, GUTTER_MM } from './geometry';
 import { chartsOf, typesetOf } from './blocks';
-import { DocumentStore, MAX_CHARTS } from './document.svelte';
-import { MAX_ITEMS_PER_PAGE } from './page';
+import { MAX_CHARTS, MAX_ITEMS_PER_PAGE } from '$lib/api/wire/limits';
+import { DocumentStore } from './document.svelte';
 import { DOCUMENT_STORAGE_KEY } from './storage';
 import { layTemplate } from './templates';
 import { chart, expectInside, memoryStorage, saved, wordsOf } from './test-support';

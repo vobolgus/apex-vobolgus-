@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aloneFrame } from './arrange';
 import { chartsOf } from './blocks';
-import { createId, DocumentStore, MAX_CHARTS, MAX_PAGES } from './document.svelte';
-import { MAX_ITEMS_PER_PAGE } from './page';
+import { MAX_CHARTS, MAX_ITEMS_PER_PAGE, MAX_PAGES } from '$lib/api/wire/limits';
+import { createId, DocumentStore } from './document.svelte';
 import { DOCUMENT_STORAGE_KEY, type DocumentStorage } from './storage';
 import { chart, expectInside, memoryStorage, saved } from './test-support';
 import type { ChartBlock } from './types';

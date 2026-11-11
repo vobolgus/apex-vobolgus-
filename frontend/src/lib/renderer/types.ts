@@ -1,6 +1,6 @@
 import type { Quaternion } from '../math/quaternion';
 import type { StarVector } from '../math/projection';
-import type { ConstellationData } from '../api/catalog-types';
+import type { ConstellationSegments } from '../api/wire/payload';
 
 export type MorphInterpolator = (t: number) => string;
 
@@ -27,8 +27,8 @@ export interface RenderState {
 	starVectors: StarVector[];
 	projectionBlend: number;
 	referenceLines: ReferenceLinesState;
-	constellations: ConstellationData[];
-	constellationBoundaries: ConstellationData[];
+	constellations: ConstellationSegments[];
+	constellationBoundaries: ConstellationSegments[];
 }
 
 export interface ProjectionAnimationState {

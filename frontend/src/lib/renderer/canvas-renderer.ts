@@ -50,7 +50,7 @@ import {
 } from './reference-lines';
 
 import type { Quaternion } from '../math/quaternion';
-import type { ConstellationData } from '../api/catalog-types';
+import type { ConstellationSegments } from '../api/wire/payload';
 import { prefersReducedMotion } from '../ui/motion';
 import type {
 	MorphInterpolator,
@@ -79,7 +79,7 @@ type ReferenceLineLayer =
 	| {
 			key: ReferenceLineKey;
 			kind: 'constellationSet';
-			pickData: (state: RenderState) => readonly ConstellationData[];
+			pickData: (state: RenderState) => readonly ConstellationSegments[];
 			style: ReferenceLineStyle;
 	  };
 

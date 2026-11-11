@@ -49,7 +49,8 @@
 	 * do the rest. The pages get the three they may ask things of as one `actions`.
 	 */
 	import { isBlank } from '$lib/document/blocks';
-	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
+	import { MAX_PAGES } from '$lib/api/wire/limits';
+	import type { DocumentStore } from '$lib/document/document.svelte';
 	import { plural } from '$lib/document/labels';
 	import { isModShortcut } from '$lib/shortcuts';
 	import { Announcer } from '$lib/ui/announcer.svelte';

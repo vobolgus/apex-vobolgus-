@@ -8,7 +8,7 @@
 	 */
 	import { pageSize } from '$lib/document/geometry';
 	import type { DocPage, PageOrientation } from '$lib/document/types';
-	import type { MessierObject } from '$lib/api/catalog-types';
+	import type { MessierEntry } from '$lib/api/wire/payload';
 	import PageThumbnail from '../PageThumbnail.svelte';
 	import { objectName, type FinderChoice } from './finder.svelte';
 
@@ -20,7 +20,7 @@
 		orientation: PageOrientation;
 		/** The Messier catalogue could not be had. */
 		failed: boolean;
-		onchoose: (object: MessierObject) => void;
+		onchoose: (object: MessierEntry) => void;
 	}
 
 	let { finder, card, orientation, failed, onchoose }: Props = $props();

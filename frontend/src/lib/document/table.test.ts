@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pointingToOrientation } from '$lib/math/pointing';
-import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
+import type { CatalogStar, MessierEntry } from '$lib/api/wire/payload';
 import {
 	blockLayout,
 	fullTableHeight,
@@ -60,7 +60,7 @@ const object = (
 	dec_deg: number,
 	mag: number,
 	name = ''
-): MessierObject => ({ m, name, kind: 'Open Cluster', constellation: 'Tau', mag, ra_deg, dec_deg });
+): MessierEntry => ({ m, name, kind: 'Open Cluster', constellation: 'Tau', mag, ra_deg, dec_deg });
 
 const star = (raHours: number, decDeg: number, v_mag: number): CatalogStar => ({
 	ra: raHours * 15 * DEG,

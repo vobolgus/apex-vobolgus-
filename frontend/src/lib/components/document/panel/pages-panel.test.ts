@@ -2,7 +2,8 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { chartsOf } from '$lib/document/blocks';
-import { DocumentStore, MAX_PAGES } from '$lib/document/document.svelte';
+import { MAX_PAGES } from '$lib/api/wire/limits';
+import { DocumentStore } from '$lib/document/document.svelte';
 import type { ChartSnapshot, ChartBlock } from '$lib/document/types';
 import PagesPanel from './PagesPanel.svelte';
 

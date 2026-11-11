@@ -4,16 +4,16 @@
  * One for the page; the loaders of `$lib/api/catalog` fill it.
  */
 
-import type { CatalogStar, ConstellationData, MessierObject } from '$lib/api/catalog-types';
+import type { CatalogStar, ConstellationSegments, MessierEntry } from '$lib/api/wire/payload';
 import type { StarVector } from '$lib/math/projection';
 
 class CatalogState {
 	stars = $state.raw<CatalogStar[]>([]);
 	starVectors = $state.raw<StarVector[]>([]);
-	constellations = $state.raw<ConstellationData[]>([]);
-	constellationBoundaries = $state.raw<ConstellationData[]>([]);
+	constellations = $state.raw<ConstellationSegments[]>([]);
+	constellationBoundaries = $state.raw<ConstellationSegments[]>([]);
 	/** Loaded when something first asks for it (`loadMessier`): the chart does not draw it yet. */
-	messier = $state.raw<MessierObject[]>([]);
+	messier = $state.raw<MessierEntry[]>([]);
 }
 
 export const catalog = new CatalogState();

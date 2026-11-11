@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { contentBox, GUTTER_MM, overlaps, rotatedBounds } from './geometry';
 import { chartsOf, isBlank, typesetOf } from './blocks';
 import { DocumentStore } from './document.svelte';
 import { DOCUMENT_STORAGE_KEY } from './storage';
 import { chart, expectInside, memoryStorage, saved, wordsOf } from './test-support';
-import { DEFAULT_TEXT_STYLE, MAX_TEXT_CHARS, MAX_TEXTS_PER_PAGE, MIN_TEXT_WIDTH_MM } from './text';
+import { DEFAULT_TEXT_STYLE, MAX_TEXT_CHARS, MIN_TEXT_WIDTH_MM } from './text';
 import type { NewBlock, Rect, TextBlock } from './types';
 
 afterEach(() => {

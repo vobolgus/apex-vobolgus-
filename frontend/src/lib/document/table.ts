@@ -18,7 +18,7 @@
  */
 
 import { toViewSpace } from '$lib/math/projection';
-import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
+import type { CatalogStar, MessierEntry } from '$lib/api/wire/payload';
 import {
 	boundChart,
 	FONT_METRICS,
@@ -62,7 +62,7 @@ export const DEFAULT_TABLE: TableSpec = {
 
 /** What a table reads from besides its chart. */
 export interface Sky {
-	messier: readonly MessierObject[];
+	messier: readonly MessierEntry[];
 	stars: readonly CatalogStar[];
 }
 
@@ -138,7 +138,7 @@ function runs<T>(list: readonly T[], size: number): T[][] {
 }
 
 /** The Messier objects on a chart, brightest first. */
-function messierOn(chart: ChartSnapshot, sky: Sky): MessierObject[] {
+function messierOn(chart: ChartSnapshot, sky: Sky): MessierEntry[] {
 	const deg = Math.PI / 180;
 	return sky.messier
 		.filter((object) => isInChart(chart, ...unit(object.ra_deg * deg, object.dec_deg * deg)))

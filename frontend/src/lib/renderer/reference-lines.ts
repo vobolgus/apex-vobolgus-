@@ -4,7 +4,7 @@ import { clamp } from '../math/easing';
 import { sampleStarMorphFrame } from '../math/projection';
 import type { UnitVec3 } from '../math/astronomy';
 import type { ProjectionFrameParams } from '../math/projection';
-import type { ConstellationData, ConstellationSegmentPoint } from '../api/catalog-types';
+import type { ConstellationSegments, SegmentPoint } from '../api/wire/payload';
 
 // Astronomical constants and frame conversions live in ../math/astronomy.ts — this module is
 // drawing only. Re-exported here for existing consumers.
@@ -390,11 +390,9 @@ export const CONSTELLATION_BOUNDARY_STYLE: ReferenceLineStyle = {
 
 const GREAT_CIRCLE_SUBDIV_DEG = 3;
 
-function subdivideGreatCircle(
-	segment: readonly ConstellationSegmentPoint[]
-): ConstellationSegmentPoint[] {
-	if (segment.length < 2) return segment as ConstellationSegmentPoint[];
-	const result: ConstellationSegmentPoint[] = [segment[0]];
+function subdivideGreatCircle(segment: readonly SegmentPoint[]): SegmentPoint[] {
+	if (segment.length < 2) return segment as SegmentPoint[];
+	const result: SegmentPoint[] = [segment[0]];
 	for (let i = 0; i < segment.length - 1; i += 1) {
 		const a = segment[i];
 		const b = segment[i + 1];
@@ -429,7 +427,7 @@ function strokeVisibleRuns(
 	ctx: CanvasRenderingContext2D,
 	cx: number,
 	cy: number,
-	pts: readonly ConstellationSegmentPoint[],
+	pts: readonly SegmentPoint[],
 	projected: readonly ProjectedSample[],
 	visualBlend: number,
 	params: ProjectionFrameParams,
@@ -500,7 +498,7 @@ export function drawConstellationLines(
 	ctx: CanvasRenderingContext2D,
 	cx: number,
 	cy: number,
-	constellations: readonly ConstellationData[],
+	constellations: readonly ConstellationSegments[],
 	progress: number,
 	visualBlend: number,
 	params: ProjectionFrameParams,

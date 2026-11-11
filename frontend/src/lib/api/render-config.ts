@@ -7,7 +7,6 @@
  * is pinned to `backend/assets/golden/view-projection.json`.
  */
 
-import { DEFAULT_MAX_MAGNITUDE } from '$lib/api/catalog';
 import {
 	CHART_CANVAS_BACKING_PX,
 	CHART_PAGE_COLOR,
@@ -15,9 +14,11 @@ import {
 	CHART_SKY_COLOR,
 	STAR_COLOR
 } from '$lib/constants';
-import { viewBasis, type ProjectionMode, type Vec3Tuple } from '$lib/math/projection';
+import { viewBasis, type ProjectionMode } from '$lib/math/projection';
 import type { Quaternion } from '$lib/math/quaternion';
 import { CONSTELLATION_LINE_STYLE, REFERENCE_LINE_STYLES } from '$lib/renderer/reference-lines';
+import { FULL_MAX_MAG } from './wire/payload';
+import type { RenderConfig, ViewConfig } from './wire/request';
 
 /** The preview state an export depends on. */
 export interface ChartView {
@@ -38,51 +39,11 @@ export interface ChartLayers {
 	planets: boolean;
 }
 
-export interface RenderConfig {
-	projection: 'stereo' | 'pinhole';
-	datetime: string;
-	magnitude_limit: number;
-	fov_deg: number;
-	view: {
-		right: Vec3Tuple;
-		up: Vec3Tuple;
-		forward: Vec3Tuple;
-		width: number;
-		height: number;
-		/**
-		 * Length of one preview px in view units (backend default 1). The PDF document
-		 * sends the size in mm and mm per preview px, so stars keep their size in mm.
-		 */
-		px?: number;
-	};
-	layers: {
-		ecliptic: boolean;
-		equator: boolean;
-		galactic_equator: boolean;
-		planets: boolean;
-		horizontal_grid: boolean;
-		equatorial_grid: boolean;
-		constellations: boolean;
-		constellation_boundaries: boolean;
-		constellation_names: boolean;
-		zenith: boolean;
-		poles: boolean;
-	};
-	style: {
-		star_color: string;
-		constellation_line_color: string;
-		grid_color: string;
-		background_color: string;
-		chart_color: string;
-		/** Stroke colour of the sky's edge, 1 preview px wide; none when absent. */
-		chart_outline?: string;
-		font_family: string;
-		magnitude_scale: number;
-	};
-	/** Places ringed on the chart; left out when there are none. */
-	marks?: { ra_deg: number; dec_deg: number; radius_deg: number }[];
-	print_info: boolean;
-}
+/**
+ * A RenderConfig as this page sends it: of all the backend takes (`wire/request`),
+ * always the one drawn with the preview's own camera.
+ */
+export type ViewRenderConfig = RenderConfig & { view: ViewConfig };
 
 /** Chart size in canvas px: the disc's diameter, or the pinhole frame. */
 export function chartSizePx(view: ChartView): { width: number; height: number } {
@@ -93,12 +54,17 @@ export function chartSizePx(view: ChartView): { width: number; height: number } 
 }
 
 /** `now` places the planets; the chart has no time of its own yet. */
-export function buildRenderConfig(view: ChartView, layers: ChartLayers, now: Date): RenderConfig {
+export function buildRenderConfig(
+	view: ChartView,
+	layers: ChartLayers,
+	now: Date
+): ViewRenderConfig {
 	const stereo = view.projection === 'stereographic';
 	return {
 		projection: stereo ? 'stereo' : 'pinhole',
 		datetime: now.toISOString(),
-		magnitude_limit: DEFAULT_MAX_MAGNITUDE,
+		// What the preview draws: the stars of `/api/catalog/full`, asked for without a limit.
+		magnitude_limit: FULL_MAX_MAG,
 		fov_deg: stereo ? view.stereoFovDeg : view.pinholeFovDeg,
 		view: { ...viewBasis(view.orientation), ...chartSizePx(view) },
 		layers: {

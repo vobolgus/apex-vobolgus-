@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CatalogStar } from '$lib/api/catalog-types';
+import type { CatalogStar } from '$lib/api/wire/payload';
 import { constellationName, starName } from './index';
 
 const DEG = Math.PI / 180;

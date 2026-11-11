@@ -7,15 +7,15 @@
 import type { CloseUp } from '$lib/document/templates';
 import { isOnChart } from '$lib/document/templates';
 import type { ChartSnapshot } from '$lib/document/types';
-import type { MessierObject } from '$lib/api/catalog-types';
+import type { MessierEntry } from '$lib/api/wire/payload';
 
 /** "M 42 · Orion Nebula", or "M 40" for one with no name. */
-export function objectName(object: MessierObject): string {
+export function objectName(object: MessierEntry): string {
 	return object.name ? `M ${object.m} · ${object.name}` : `M ${object.m}`;
 }
 
 /** What a search may match: "m 42", "m42", the name, the kind, the constellation. */
-function objectWords(object: MessierObject): string {
+function objectWords(object: MessierEntry): string {
 	const { m, name, kind, constellation } = object;
 	return `m ${m} m${m} ${name} ${kind} ${constellation}`.toLowerCase();
 }
@@ -23,8 +23,8 @@ function objectWords(object: MessierObject): string {
 /** The objects of `catalogue` on `sky`, brightest first. */
 export function objectsOn(
 	sky: ChartSnapshot | undefined,
-	catalogue: readonly MessierObject[]
-): MessierObject[] {
+	catalogue: readonly MessierEntry[]
+): MessierEntry[] {
 	return sky
 		? catalogue
 				.filter((object) => isOnChart(sky, object.ra_deg, object.dec_deg))
@@ -33,14 +33,14 @@ export function objectsOn(
 }
 
 /** `objects` narrowed to those `query` is found in, all of them for an empty one. */
-export function matching(objects: MessierObject[], query: string): MessierObject[] {
+export function matching(objects: MessierEntry[], query: string): MessierEntry[] {
 	const words = query.trim().toLowerCase().replace(/\s+/g, ' ');
 	if (words === '') return objects;
 	return objects.filter((object) => objectWords(object).includes(words));
 }
 
 /** A close-up of `object`, `fovDeg` across. */
-export function closeUpOf(object: MessierObject, fovDeg: number): CloseUp {
+export function closeUpOf(object: MessierEntry, fovDeg: number): CloseUp {
 	return { name: objectName(object), raDeg: object.ra_deg, decDeg: object.dec_deg, fovDeg };
 }
 
@@ -50,16 +50,16 @@ export class FinderChoice {
 	/** The number of the object the card is drawn for: the one under the pointer or the focus. */
 	shownNumber = $state<number | null>(null);
 	/** The Messier objects on the sky, brightest first. */
-	readonly objects: MessierObject[];
+	readonly objects: MessierEntry[];
 	/** Those of them the search finds. */
-	readonly listed: MessierObject[];
+	readonly listed: MessierEntry[];
 	/** The object the card is drawn for. */
-	readonly shown: MessierObject | null;
+	readonly shown: MessierEntry | null;
 	/** The catalogue has come: until it does, the list is still loading (or failed to). */
 	readonly loaded: boolean;
 
 	/** `sky`: the chart the card would be made of; `catalogue`: the Messier objects, once loaded. */
-	constructor(sky: () => ChartSnapshot | undefined, catalogue: () => readonly MessierObject[]) {
+	constructor(sky: () => ChartSnapshot | undefined, catalogue: () => readonly MessierEntry[]) {
 		this.loaded = $derived(catalogue().length > 0);
 		this.objects = $derived(objectsOn(sky(), catalogue()));
 		this.listed = $derived(matching(this.objects, this.query));

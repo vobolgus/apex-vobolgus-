@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import { MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { chartsOf, typesetOf } from './blocks';
 import { DocumentStore } from './document.svelte';
 import { GUTTER_MM, MIN_CHART_SIDE_MM, overlaps } from './geometry';
@@ -12,7 +13,7 @@ import {
 } from './storage';
 import { layTemplate } from './templates';
 import { chart, expectInside, memoryStorage, saved, wordsOf } from './test-support';
-import { DEFAULT_TEXT_STYLE, MAX_TEXTS_PER_PAGE } from './text';
+import { DEFAULT_TEXT_STYLE } from './text';
 import type { DocPage, Rect } from './types';
 
 const style = { ...DEFAULT_TEXT_STYLE };

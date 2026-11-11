@@ -15,6 +15,7 @@
  * is put under.
  */
 
+import type { TextAnchor } from '$lib/api/wire/request';
 import { viewBasis } from '$lib/math/projection';
 import { freeRects } from './arrange';
 import { blockBounds, chartsOf } from './blocks';
@@ -38,11 +39,8 @@ export const LINE_HEIGHT = 1.35;
 export const MIN_TEXT_WIDTH_MM = 20;
 /** A free place narrower than this is no place for a new text. */
 const MIN_NEW_TEXT_WIDTH_MM = 40;
-/** The backend's limits (backend/src/handlers/document.rs), and room to type. */
-export const MAX_TEXTS_PER_PAGE = 50;
+/** Room to type: the most characters one text holds. */
 export const MAX_TEXT_CHARS = 4000;
-export const MAX_TEXT_LINES = 400;
-export const MAX_LINE_CHARS = 400;
 
 /** The sizes the − and + of a text step through, pt. */
 export const TEXT_SIZES: readonly number[] = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
@@ -84,7 +82,7 @@ export interface TextLine {
 	 * is set by the text's own alignment and weight.
 	 */
 	x?: number;
-	anchor?: 'start' | 'middle' | 'end';
+	anchor?: TextAnchor;
 	bold?: boolean;
 }
 
@@ -361,10 +359,7 @@ export function layoutText(
 }
 
 /** Where a line's anchor is across a block `width` wide, and SVG's name for it. */
-export function alignAnchor(
-	align: TextAlign,
-	width: number
-): { x: number; anchor: 'start' | 'middle' | 'end' } {
+export function alignAnchor(align: TextAlign, width: number): { x: number; anchor: TextAnchor } {
 	if (align === 'center') return { x: width / 2, anchor: 'middle' };
 	if (align === 'right') return { x: width, anchor: 'end' };
 	return { x: 0, anchor: 'start' };

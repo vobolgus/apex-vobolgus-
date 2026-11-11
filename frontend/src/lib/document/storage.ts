@@ -14,6 +14,7 @@
  * first's copy is taken away, the browser having no room to keep both for long.
  */
 
+import { MAX_MARKS, MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import { PROJECTION_MODES, type ProjectionMode } from '$lib/math/projection';
 import { chartsOf, layered, typesetOf } from './blocks';
 import { keptFrame } from './geometry';
@@ -22,7 +23,6 @@ import { TEMPLATES, TEXT_ROLES } from './templates';
 import {
 	fitTextFrame,
 	MAX_TEXT_CHARS,
-	MAX_TEXTS_PER_PAGE,
 	normalizeRotation,
 	TEXT_ALIGNS,
 	TEXT_FONTS,
@@ -57,8 +57,6 @@ export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v2';
 export const FIRST_SHAPE_STORAGE_KEY = 'skycharts.document.v1';
 /** Thumbnails are saved while their total stays under this many chars (≈ bytes). */
 export const THUMB_BUDGET_CHARS = 2_000_000;
-/** Rings on one chart, as the backend takes them (backend/src/handlers/export.rs). */
-const MAX_MARKS = 16;
 
 export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 

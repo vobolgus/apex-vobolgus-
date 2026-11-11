@@ -12,12 +12,8 @@
 
 import { tick } from 'svelte';
 import { exportChart, type ExportFormat } from '$lib/api/export';
-import {
-	buildRenderConfig,
-	type ChartLayers,
-	type ChartView,
-	type RenderConfig
-} from '$lib/api/render-config';
+import { buildRenderConfig, type ChartLayers, type ChartView } from '$lib/api/render-config';
+import type { RenderConfig } from '$lib/api/wire/request';
 import type { DocumentStore } from '$lib/document/document.svelte';
 import { plural } from '$lib/document/labels';
 import { exportDocument } from '$lib/document/render';

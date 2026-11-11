@@ -31,6 +31,7 @@
  * text says and how it is set do not.
  */
 
+import { MAX_CHARTS, MAX_ITEMS_PER_PAGE, MAX_PAGES } from '$lib/api/wire/limits';
 import { chartKind, planAdd, turnLayout } from './arrange';
 import { chartsOf, findBlock, insertBlock, layerIndex, typesetOf } from './blocks';
 import { fitFrame, keptFrame, sameFrame } from './geometry';
@@ -38,7 +39,6 @@ import {
 	fittedFrame,
 	hasRoom,
 	laidPages,
-	MAX_ITEMS_PER_PAGE,
 	pageState,
 	pastePlace,
 	placeCharts,
@@ -71,12 +71,6 @@ import type {
 	TextStyle
 } from './types';
 
-/**
- * The backend's limits (backend/src/handlers/document.rs): a document past them
- * cannot be exported, so the editor does not build one.
- */
-export const MAX_PAGES = 100;
-export const MAX_CHARTS = 200;
 const SAVE_DELAY_MS = 250;
 
 /** What `updateTypeset` changes of a text or a table; a field left out stays as it is. */

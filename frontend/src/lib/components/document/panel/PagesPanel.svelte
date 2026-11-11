@@ -11,7 +11,8 @@
 	 * page coming and going, is its controller's (`PagesList`).
 	 */
 	import { untrack } from 'svelte';
-	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
+	import { MAX_PAGES } from '$lib/api/wire/limits';
+	import type { DocumentStore } from '$lib/document/document.svelte';
 	import type { Box, Landing, LandingTarget } from '../flight/flight';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 	import type { TemplatePick } from '../templates/pick';

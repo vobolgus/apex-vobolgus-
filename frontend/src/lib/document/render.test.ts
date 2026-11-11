@@ -236,10 +236,10 @@ describe('textRequest', () => {
 			y: 100 + lineHeight / 2 - (3.5 * size) / 2
 		};
 		// The top-left corner of the lines, turned about the centre sent, is where it was.
-		const dx = turned.lines[0].x_mm - turned.cx_mm;
-		const dy = turned.lines[0].y_mm - first - turned.cy_mm;
-		expect(turned.cx_mm - dy).toBeCloseTo(corner.x);
-		expect(turned.cy_mm + dx).toBeCloseTo(corner.y);
+		const dx = turned.lines[0].x_mm - turned.cx_mm!;
+		const dy = turned.lines[0].y_mm - first - turned.cy_mm!;
+		expect(turned.cx_mm! - dy).toBeCloseTo(corner.x);
+		expect(turned.cy_mm! + dx).toBeCloseTo(corner.y);
 	});
 
 	it('keeps the lines a turn brings onto the page, and leaves out those it takes off', () => {
@@ -366,7 +366,7 @@ describe('a table in the request', () => {
 			'FOV 350°'
 		);
 		const whole = documentRequest([{ ...elsewhere, blocks: [told] }, page()], measure, sky);
-		expect(whole.pages[0].texts[0].lines[0].text).toBe('FOV 350°');
+		expect(whole.pages[0].texts![0].lines[0].text).toBe('FOV 350°');
 		const hello: TextBlock = { kind: 'text', id, style, frame, text: 'Hello' };
 		const words = textRequest(page(), hello, measure, sky);
 		expect(words).not.toHaveProperty('rules');
@@ -378,7 +378,7 @@ describe('a table in the request', () => {
 			measure,
 			sky
 		).pages;
-		expect(sent.texts[0].lines).toHaveLength(11);
+		expect(sent.texts![0].lines).toHaveLength(11);
 	});
 });
 

@@ -5,6 +5,7 @@
  * it reads or changes.
  */
 
+import { MAX_ITEMS_PER_PAGE, MAX_TEXTS_PER_PAGE } from '$lib/api/wire/limits';
 import type { PlacedChart } from './arrange';
 import { blockBounds, chartsOf, typesetOf } from './blocks';
 import {
@@ -17,7 +18,7 @@ import {
 	sameFrame
 } from './geometry';
 import type { LaidPage } from './templates';
-import { fitTextFrame, MAX_TEXTS_PER_PAGE, normalizeRotation } from './text';
+import { fitTextFrame, normalizeRotation } from './text';
 import type {
 	BlockKind,
 	ChartBlock,
@@ -30,8 +31,6 @@ import type {
 	TypesetBlock
 } from './types';
 
-/** Charts on one page, as the backend takes them (backend/src/handlers/document.rs). */
-export const MAX_ITEMS_PER_PAGE = 50;
 /** How far a copy pasted with no room and no pointer stands off what is in its place, mm down and right. */
 const PASTE_OFFSET_MM = 5;
 

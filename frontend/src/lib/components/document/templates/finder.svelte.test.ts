@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { isOnChart } from '$lib/document/templates';
 import { chart } from '$lib/document/test-support';
 import { orientationToPointing } from '$lib/math/pointing';
-import type { MessierObject } from '$lib/api/catalog-types';
+import type { MessierEntry } from '$lib/api/wire/payload';
 import { closeUpOf, FinderChoice, matching, objectName, objectsOn } from './finder.svelte';
 
-function object(m: number, over: Partial<MessierObject> = {}): MessierObject {
+function object(m: number, over: Partial<MessierEntry> = {}): MessierEntry {
 	return {
 		m,
 		name: '',
@@ -15,7 +15,7 @@ function object(m: number, over: Partial<MessierObject> = {}): MessierObject {
 		ra_deg: 83.8,
 		dec_deg: -5.4,
 		...over
-	} as MessierObject;
+	} as MessierEntry;
 }
 
 const ORION = object(42, { name: 'Orion Nebula', kind: 'Nebula', mag: 4 });
