@@ -3,7 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::ProjectionError;
+use super::{Project, ProjectionError};
+use crate::coords::Direction;
 
 /// The frame of a pinhole camera: its size and focal length in px.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -145,13 +146,18 @@ impl PinholeProjection {
             camera,
         })
     }
+}
 
+impl Project for PinholeProjection {
     /// Position in px of a direction of the equatorial frame, origin at the frame's
     /// top-left, y down. `None` behind the camera, or outside the frame grown by a
     /// sixteenth of its size on every side.
-    #[must_use]
-    pub fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)> {
-        let star = [f64::from(x), f64::from(y), f64::from(z)];
+    fn project(&self, direction: Direction) -> Option<(f32, f32)> {
+        let star = [
+            f64::from(direction.x),
+            f64::from(direction.y),
+            f64::from(direction.z),
+        ];
         let (x_axis_rot, y_axis_rot, z_axis) = (self.x_axis, self.y_axis, self.z_axis);
         let camera_config = &self.camera;
 
@@ -203,7 +209,7 @@ mod tests {
         let tilt_deg = 0.0;
         let camera = PinholeProjection::new(center_direction, tilt_deg, camera_config).unwrap();
 
-        let proj = camera.project(1.0, 0.0, 0.0);
+        let proj = camera.project(Direction::new(1.0, 0.0, 0.0));
 
         assert!(proj.is_some());
         let (x_pix, y_pix) = proj.unwrap();
@@ -223,11 +229,11 @@ mod tests {
         let camera = PinholeProjection::new(center_direction, tilt_deg, camera_config).unwrap();
 
         // Звезда за спиной камеры (в ECI: [-1, 0, 0] при взгляде на [1, 0, 0])
-        let proj_behind = camera.project(-1.0, 0.0, 0.0);
+        let proj_behind = camera.project(Direction::new(-1.0, 0.0, 0.0));
         assert!(proj_behind.is_none());
 
         // Звезда слишком сильно в стороне (вне границ с учетом 1/16 gap)
-        let proj_far_side = camera.project(0.0, 1.0, 0.0); // ECI перпендикулярно взгляду
+        let proj_far_side = camera.project(Direction::new(0.0, 1.0, 0.0)); // ECI перпендикулярно взгляду
         assert!(proj_far_side.is_none());
     }
 

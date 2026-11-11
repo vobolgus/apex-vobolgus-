@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::CatalogError;
+use crate::coords::Direction;
 
 /// The table compiled into the crate: 8870 stars to V 6.5, brightest first.
 const EMBEDDED: &[u8] = include_bytes!("hip_data.bin");
@@ -24,6 +25,13 @@ pub struct Star {
     pub y: f32,
     /// Towards the north celestial pole.
     pub z: f32,
+}
+
+impl From<&Star> for Direction {
+    /// The star's unit vector.
+    fn from(star: &Star) -> Self {
+        Self::new(star.x, star.y, star.z)
+    }
 }
 
 /// The stars of the Hipparcos catalogue, in the order of their table.

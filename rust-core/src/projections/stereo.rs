@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::coords::Direction;
 use crate::time::{DateTime, vernal_equinox_hour_angle};
 
 /// Points further than this from the zenith, about 94.7°, do not project: a little
@@ -56,17 +57,17 @@ impl StereoProjection {
         }
     }
 
-    /// Projects a direction given in the equatorial frame (`x` to RA 0h, `z` to the
-    /// north celestial pole). `None` for a point more than about 94.7° from the zenith.
+    /// Projects a direction of the equatorial frame. `None` for a point more than
+    /// about 94.7° from the zenith.
     #[must_use]
-    pub fn project(&self, x: f32, y: f32, z: f32) -> Option<StereoPoint> {
+    pub fn project(&self, direction: Direction) -> Option<StereoPoint> {
         let (sl, cl) = (self.sin_latitude, self.cos_latitude);
         let (st, ct) = (self.sin_sidereal, self.cos_sidereal);
 
         // Умножение матрицы поворота на ECI координаты звезды (x, y, z)
-        let x = f64::from(x);
-        let y = f64::from(y);
-        let z = f64::from(z);
+        let x = f64::from(direction.x);
+        let y = f64::from(direction.y);
+        let z = f64::from(direction.z);
 
         // Новые координаты в горизонтальной декартовой системе
         let x_hor = st * x - ct * y;
@@ -124,7 +125,7 @@ mod tests {
 
         // Наблюдатель на Северном Полюсе
         let north_pole = StereoProjection::new(90.0, 0.0, dt);
-        let proj = north_pole.project(star_x, star_y, star_z);
+        let proj = north_pole.project(Direction::new(star_x, star_y, star_z));
 
         assert!(proj.is_some());
         let res = proj.unwrap();
@@ -136,7 +137,7 @@ mod tests {
         assert!(res.y.abs() < 0.1);
 
         // Звезда сзади наблюдателя (на Южном полюсе) при наблюдении с Севера
-        let proj_invisible = north_pole.project(0.0, 0.0, -1.0);
+        let proj_invisible = north_pole.project(Direction::new(0.0, 0.0, -1.0));
         // Должно быть отфильтровано ограничением zenith > pi / 1.9
         assert!(proj_invisible.is_none());
     }

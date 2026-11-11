@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use rust_core::catalog::Star;
-use rust_core::coords::ra_dec_to_unit_vector;
+use rust_core::coords::{Direction, ra_dec_to_unit_vector};
+use rust_core::projections::Project;
 
 use super::polyline::{self, PolylineStyle, great_circle_points};
-use super::scene::{Project, Scene, SkyPoint};
+use super::scene::Scene;
 use crate::constellations::{boundaries, figures, localized_name};
 use crate::svg::SvgWriter;
 
@@ -35,7 +36,7 @@ pub(super) fn draw_boundaries(svg: &mut SvgWriter, scene: &Scene<'_>) {
 
     for (_, polygons) in chosen(scene.config.constellation.as_ref(), boundaries()) {
         for polygon in polygons {
-            let vertices: Vec<SkyPoint> = polygon
+            let vertices: Vec<Direction> = polygon
                 .iter()
                 .map(|&[ra_deg, dec_deg]| {
                     ra_dec_to_unit_vector(ra_deg.to_radians(), dec_deg.to_radians())
@@ -68,11 +69,11 @@ pub(super) fn draw_figures(svg: &mut SvgWriter, scene: &Scene<'_>, stars: &[&Sta
     for (_, figure) in chosen(scene.config.constellation.as_ref(), figures()) {
         for line in &figure.lines {
             for pair in line.windows(2) {
-                if let (Some(s1), Some(s2)) = (stars.get(&pair[0]), stars.get(&pair[1])) {
+                if let (Some(&s1), Some(&s2)) = (stars.get(&pair[0]), stars.get(&pair[1])) {
                     // A great-circle arc, cut where it leaves the chart, as in the preview.
                     polyline::draw(
                         svg,
-                        great_circle_points((s1.x, s1.y, s1.z), (s2.x, s2.y, s2.z)),
+                        great_circle_points(s1.into(), s2.into()),
                         scene,
                         &style,
                     );
@@ -91,9 +92,7 @@ pub(super) fn draw_names(svg: &mut SvgWriter, scene: &Scene<'_>) {
     let font_family = &scene.config.style.font_family;
 
     for (abbr, figure) in chosen(scene.config.constellation.as_ref(), figures()) {
-        let [cx, cy, cz] = figure.center;
-
-        if let Some((x, y)) = scene.project(cx, cy, cz) {
+        if let Some((x, y)) = scene.project(figure.center.into()) {
             let ru_name = localized_name(abbr, &figure.name);
             write!(
                 svg,

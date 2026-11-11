@@ -1,10 +1,10 @@
 //! The coordinate grid and the reference lines: the celestial equator, the ecliptic
 //! and the galactic equator.
 
-use rust_core::coords::ra_dec_to_unit_vector;
+use rust_core::coords::{Direction, ra_dec_to_unit_vector};
 
 use super::polyline::{self, PolylineStyle, circle_angles};
-use super::scene::{Scene, SkyPoint};
+use super::scene::Scene;
 use crate::svg::SvgWriter;
 
 /// Mean obliquity of the ecliptic at J2000, in degrees.
@@ -31,15 +31,15 @@ const GAL_TO_EQ: [[f64; 2]; 3] = [
 // ---------------------------------------------------------------------------
 
 /// Unit vector on the celestial equator (Dec = 0) at the given right ascension.
-fn equator_point(ra_rad: f32) -> SkyPoint {
+fn equator_point(ra_rad: f32) -> Direction {
     ra_dec_to_unit_vector(ra_rad, 0.0)
 }
 
 /// Unit vector on the ecliptic at the given ecliptic longitude, in the equatorial frame.
-fn ecliptic_point(lambda_rad: f32) -> SkyPoint {
+fn ecliptic_point(lambda_rad: f32) -> Direction {
     let epsilon = OBLIQUITY_DEG.to_radians();
     let sin_lambda = lambda_rad.sin();
-    (
+    Direction::new(
         lambda_rad.cos(),
         sin_lambda * epsilon.cos(),
         sin_lambda * epsilon.sin(),
@@ -48,12 +48,13 @@ fn ecliptic_point(lambda_rad: f32) -> SkyPoint {
 
 /// Unit vector on the galactic equator (b = 0) at galactic longitude `l`, in the
 /// equatorial frame.
-fn galactic_equator_point(l_rad: f32) -> SkyPoint {
+fn galactic_equator_point(l_rad: f32) -> Direction {
     let l = f64::from(l_rad);
     let cos_l = l.cos();
     let sin_l = l.sin();
-    let [x, y, z] = GAL_TO_EQ.map(|[m0, m1]| (m0 * cos_l + m1 * sin_l) as f32);
-    (x, y, z)
+    GAL_TO_EQ
+        .map(|[m0, m1]| (m0 * cos_l + m1 * sin_l) as f32)
+        .into()
 }
 
 // ---------------------------------------------------------------------------
@@ -166,11 +167,11 @@ mod tests {
         })
     }
 
-    fn assert_matches(actual: SkyPoint, expected: [f64; 3], tol: f64, what: &str, deg: f64) {
+    fn assert_matches(actual: Direction, expected: [f64; 3], tol: f64, what: &str, deg: f64) {
         let actual = [
-            f64::from(actual.0),
-            f64::from(actual.1),
-            f64::from(actual.2),
+            f64::from(actual.x),
+            f64::from(actual.y),
+            f64::from(actual.z),
         ];
         for axis in 0..3 {
             let delta = (actual[axis] - expected[axis]).abs();
@@ -244,7 +245,7 @@ mod tests {
     #[test]
     fn generated_points_are_unit_vectors() {
         for angle in circle_angles() {
-            for (what, (x, y, z)) in [
+            for (what, Direction { x, y, z }) in [
                 ("equator", equator_point(angle)),
                 ("ecliptic", ecliptic_point(angle)),
                 ("galactic equator", galactic_equator_point(angle)),

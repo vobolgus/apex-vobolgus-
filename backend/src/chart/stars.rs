@@ -1,8 +1,9 @@
 //! The stars: a disc each, the brighter the larger.
 
 use rust_core::catalog::Star;
+use rust_core::projections::Project;
 
-use super::scene::{Project, Scene};
+use super::scene::Scene;
 use crate::svg::SvgWriter;
 
 /// Star radius of the generator preview, in its px: `frontend/src/lib/constants.ts`
@@ -26,8 +27,8 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, stars: &[&Star]) {
     let star_color = &scene.config.style.star_color;
     let mag_scale = scene.config.style.magnitude_scale;
 
-    for star in stars {
-        if let Some((cx, cy)) = scene.project(star.x, star.y, star.z) {
+    for &star in stars {
+        if let Some((cx, cy)) = scene.project(star.into()) {
             let r = if scene.has_view {
                 preview_star_radius(star.v_mag) * mag_scale
             } else {

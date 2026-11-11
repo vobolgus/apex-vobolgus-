@@ -1,16 +1,15 @@
 //! What a chart's layers are drawn on: the canvas, and the way the sky falls on it.
 
-use rust_core::projections::{CameraConfig, PinholeProjection, StereoProjection, ViewProjection};
+use rust_core::coords::Direction;
+use rust_core::projections::{
+    CameraConfig, PinholeProjection, Project, StereoProjection, ViewProjection,
+};
 use rust_core::time::DateTime;
 
 use super::time::{DEFAULT_TIME, parse_datetime};
 use super::{Chart, Projection};
 use crate::constellations;
 use crate::request::RenderConfig;
-
-/// A direction on the sky: a unit vector in the J2000 equatorial frame (x to RA 0h,
-/// z to the north pole).
-pub(super) type SkyPoint = (f32, f32, f32);
 
 /// Side of the observer's horizon chart, and height of the observer's camera chart,
 /// in px.
@@ -20,19 +19,6 @@ const HORIZON_RADIUS_PX: f32 = 380.0;
 /// What the horizon chart's stereographic plane is stretched by: the horizon, at 2
 /// on that plane, lands on the disc's edge.
 const HORIZON_SCALE: f32 = 190.0;
-
-/// Where a direction on the sky lands on a chart, if it lands at all.
-pub(super) trait Project {
-    /// The canvas position of the direction `(x, y, z)`; `None` when the chart does
-    /// not show it (behind the camera, below the horizon, ...).
-    fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)>;
-}
-
-impl<F: Fn(f32, f32, f32) -> Option<(f32, f32)>> Project for F {
-    fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)> {
-        self(x, y, z)
-    }
-}
 
 /// The three ways a chart looks at the sky.
 enum Projector {
@@ -168,16 +154,18 @@ impl<'a> Scene<'a> {
 
 // Вспомогательная функция для проецирования звезды/точки ECI
 impl Project for Scene<'_> {
-    fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)> {
+    /// The canvas position of `direction`, in chart units; `None` when the chart does
+    /// not show it (behind the camera, below the horizon, ...).
+    fn project(&self, direction: Direction) -> Option<(f32, f32)> {
         match &self.projector {
-            Projector::View(view) => view.project(x, y, z),
+            Projector::View(view) => view.project(direction),
             Projector::Horizon { stereo, center } => {
-                let point = stereo.project(x, y, z)?;
+                let point = stereo.project(direction)?;
                 let svg_x = center.0 + point.x * HORIZON_SCALE;
                 let svg_y = center.1 - point.y * HORIZON_SCALE;
                 Some((svg_x, svg_y))
             }
-            Projector::Camera(camera) => camera.as_ref()?.project(x, y, z),
+            Projector::Camera(camera) => camera.as_ref()?.project(direction),
         }
     }
 }

@@ -21,7 +21,9 @@
 /// The only lines that know the crate's own names; all else goes through them.
 mod subject {
     pub use rust_core::catalog::{HipCatalog, MessierCatalog, MessierKind, MessierObject, Star};
+    use rust_core::coords::Direction;
     pub use rust_core::planets::{Body, all_positions};
+    use rust_core::projections::Project;
     pub use rust_core::projections::{
         CameraConfig, PinholeProjection, ProjectionError, StereoPoint, StereoProjection, ViewKind,
         ViewProjection,
@@ -36,7 +38,8 @@ mod subject {
 
     /// The unit vector of a right ascension and a declination, in radians.
     pub fn unit_vector(ra: f32, dec: f32) -> Point {
-        rust_core::coords::ra_dec_to_unit_vector(ra, dec)
+        let Direction { x, y, z } = rust_core::coords::ra_dec_to_unit_vector(ra, dec);
+        (x, y, z)
     }
 
     /// The stars with `min_mag <= v_mag <= max_mag`, no lower bound with `None`.
@@ -58,13 +61,13 @@ mod subject {
     }
 
     /// Where the observer's sky puts a point.
-    pub fn stereo_project(stereo: &StereoProjection, (x, y, z): Point) -> Option<StereoPoint> {
-        stereo.project(x, y, z)
+    pub fn stereo_project(stereo: &StereoProjection, point: Point) -> Option<StereoPoint> {
+        stereo.project(point.into())
     }
 
     /// Where the pinhole camera puts a point, in px.
-    pub fn pinhole_project(pinhole: &PinholeProjection, (x, y, z): Point) -> Option<(f32, f32)> {
-        pinhole.project(x, y, z)
+    pub fn pinhole_project(pinhole: &PinholeProjection, point: Point) -> Option<(f32, f32)> {
+        pinhole.project(point.into())
     }
 
     /// The preview camera of a `View`, or why there is none.
@@ -80,8 +83,8 @@ mod subject {
     }
 
     /// Where the preview camera puts a point, in px.
-    pub fn view_project(view: &ViewProjection, (x, y, z): Point) -> Option<(f32, f32)> {
-        view.project(x, y, z)
+    pub fn view_project(view: &ViewProjection, point: Point) -> Option<(f32, f32)> {
+        view.project(point.into())
     }
 }
 

@@ -11,7 +11,8 @@
 //! The basis is taken as given, `right` included, so whichever way round the
 //! preview draws the sky (east left or east right), the export follows it.
 
-use super::ProjectionError;
+use super::{Project, ProjectionError};
+use crate::coords::Direction;
 
 /// Below this the projection divides by (nearly) zero: the point is behind the camera.
 const FINITE_EPSILON: f64 = 1e-4;
@@ -155,17 +156,6 @@ impl ViewProjection {
         Some((nx, ny))
     }
 
-    /// Position in px, origin top-left, y down, where [`Self::normalized`] has one.
-    #[must_use]
-    pub fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)> {
-        let (nx, ny) = self.normalized(f64::from(x), f64::from(y), f64::from(z))?;
-        let (half_w, half_h) = self.half_extent();
-        Some((
-            (self.width * 0.5 + nx * half_w) as f32,
-            (self.height * 0.5 - ny * half_h) as f32,
-        ))
-    }
-
     /// Whether a disc of `radius` px at `(px, py)` reaches into the chart.
     #[must_use]
     pub fn touches_chart(&self, px: f32, py: f32, radius: f32) -> bool {
@@ -177,6 +167,23 @@ impl ViewProjection {
             ViewKind::Stereo => dx.hypot(dy) <= half_w + radius,
             ViewKind::Pinhole => dx.abs() <= half_w + radius && dy.abs() <= half_h + radius,
         }
+    }
+}
+
+impl Project for ViewProjection {
+    /// Position in px, origin top-left, y down, where [`ViewProjection::normalized`]
+    /// has one.
+    fn project(&self, direction: Direction) -> Option<(f32, f32)> {
+        let (nx, ny) = self.normalized(
+            f64::from(direction.x),
+            f64::from(direction.y),
+            f64::from(direction.z),
+        )?;
+        let (half_w, half_h) = self.half_extent();
+        Some((
+            (self.width * 0.5 + nx * half_w) as f32,
+            (self.height * 0.5 - ny * half_h) as f32,
+        ))
     }
 }
 
@@ -200,9 +207,9 @@ mod tests {
     const UP: [f64; 3] = [0.0, 1.0, 0.0];
     const FORWARD: [f64; 3] = [0.0, 0.0, 1.0];
 
-    fn unit_at(angle_deg: f64, towards: [f64; 3]) -> (f32, f32, f32) {
+    fn unit_at(angle_deg: f64, towards: [f64; 3]) -> Direction {
         let a = angle_deg.to_radians();
-        (
+        Direction::new(
             (towards[0] * a.sin() + FORWARD[0] * a.cos()) as f32,
             (towards[1] * a.sin() + FORWARD[1] * a.cos()) as f32,
             (towards[2] * a.sin() + FORWARD[2] * a.cos()) as f32,
@@ -213,13 +220,13 @@ mod tests {
     fn stereo_puts_the_fov_edge_on_the_disc_edge() {
         let view = ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 120.0, 1000.0, 1000.0)
             .unwrap();
-        let (x, y, z) = unit_at(0.0, RIGHT);
-        assert_eq!(view.project(x, y, z), Some((500.0, 500.0)));
-        let (x, y, z) = unit_at(60.0, RIGHT);
-        let (px, py) = view.project(x, y, z).unwrap();
+        let point = unit_at(0.0, RIGHT);
+        assert_eq!(view.project(point), Some((500.0, 500.0)));
+        let point = unit_at(60.0, RIGHT);
+        let (px, py) = view.project(point).unwrap();
         assert!((px - 1000.0).abs() < 1e-3 && (py - 500.0).abs() < 1e-3);
-        let (x, y, z) = unit_at(60.0, UP);
-        let (px, py) = view.project(x, y, z).unwrap();
+        let point = unit_at(60.0, UP);
+        let (px, py) = view.project(point).unwrap();
         assert!(
             (px - 500.0).abs() < 1e-3 && py.abs() < 1e-3,
             "up is towards y = 0"
@@ -230,13 +237,13 @@ mod tests {
     fn pinhole_fov_is_horizontal_and_the_vertical_follows_the_aspect() {
         let view = ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 90.0, 1600.0, 900.0)
             .unwrap();
-        let (x, y, z) = unit_at(45.0, RIGHT);
-        let (px, _) = view.project(x, y, z).unwrap();
+        let point = unit_at(45.0, RIGHT);
+        let (px, _) = view.project(point).unwrap();
         assert!((px - 1600.0).abs() < 1e-2);
         // tan(vfov/2) = tan(45°) · 9/16.
         let vertical = (9.0f64 / 16.0).atan().to_degrees();
-        let (x, y, z) = unit_at(vertical, UP);
-        let (_, py) = view.project(x, y, z).unwrap();
+        let point = unit_at(vertical, UP);
+        let (_, py) = view.project(point).unwrap();
         assert!(py.abs() < 1e-2);
     }
 
@@ -253,8 +260,8 @@ mod tests {
             1000.0,
         )
         .unwrap();
-        let (x, y, z) = unit_at(20.0, RIGHT);
-        let (px, _) = view.project(x, y, z).unwrap();
+        let point = unit_at(20.0, RIGHT);
+        let (px, _) = view.project(point).unwrap();
         assert!(px < 500.0);
     }
 
@@ -263,13 +270,13 @@ mod tests {
         let pinhole =
             ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 60.0, 1000.0, 1000.0)
                 .unwrap();
-        assert_eq!(pinhole.project(0.0, 0.0, -1.0), None);
-        let (x, y, z) = unit_at(89.0, RIGHT);
-        assert_eq!(pinhole.project(x, y, z), None);
+        assert_eq!(pinhole.project(Direction::new(0.0, 0.0, -1.0)), None);
+        let point = unit_at(89.0, RIGHT);
+        assert_eq!(pinhole.project(point), None);
         let stereo =
             ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 180.0, 1000.0, 1000.0)
                 .unwrap();
-        assert_eq!(stereo.project(0.0, 0.0, -1.0), None);
+        assert_eq!(stereo.project(Direction::new(0.0, 0.0, -1.0)), None);
     }
 
     #[test]

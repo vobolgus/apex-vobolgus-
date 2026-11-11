@@ -1,9 +1,10 @@
 //! The Sun, the Moon and the planets where they are at the chart's instant.
 
 use rust_core::planets::{Body, PlanetPosition, all_positions};
+use rust_core::projections::Project;
 use rust_core::time::julian_date;
 
-use super::scene::{Project, Scene};
+use super::scene::Scene;
 use crate::svg::SvgWriter;
 
 /// How a body is written into a chart.
@@ -67,8 +68,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, mag_limit: f32) {
             continue;
         }
 
-        let [x, y, z] = planet.unit_vector;
-        if let Some((cx, cy)) = scene.project(x as f32, y as f32, z as f32) {
+        if let Some((cx, cy)) = scene.project(planet.unit_vector.into()) {
             let Marker { slug, label, color } = marker(planet.body);
             let r = planet_radius(&planet, mag_scale) * px;
             if !scene.shows(cx, cy, r) {

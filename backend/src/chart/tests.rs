@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use rust_core::catalog::{HipCatalog, Star};
 use rust_core::planets::{Body, all_positions};
-use rust_core::projections::{ViewKind, ViewProjection};
+use rust_core::projections::{Project, ViewKind, ViewProjection};
 use rust_core::time::julian_date;
 
 use super::*;
@@ -262,20 +262,16 @@ fn view_follows_the_basis_it_is_given() {
     let (betelgeuse, rigel) = (find(27989), find(24436));
     let cfg = view_config("pinhole");
     let view = view_of(&cfg);
-    let b = view
-        .project(betelgeuse.x, betelgeuse.y, betelgeuse.z)
-        .unwrap();
-    let r = view.project(rigel.x, rigel.y, rigel.z).unwrap();
+    let b = view.project((*betelgeuse).into()).unwrap();
+    let r = view.project((*rigel).into()).unwrap();
     assert!(b.0 > r.0 && b.1 < r.1, "Betelgeuse upper right of Rigel");
 
     let mut mirrored = cfg.clone();
     let basis = mirrored.view.as_mut().unwrap();
     basis.right = basis.right.map(|c| -c);
     let view = view_of(&mirrored);
-    let b = view
-        .project(betelgeuse.x, betelgeuse.y, betelgeuse.z)
-        .unwrap();
-    let r = view.project(rigel.x, rigel.y, rigel.z).unwrap();
+    let b = view.project((*betelgeuse).into()).unwrap();
+    let r = view.project((*rigel).into()).unwrap();
     assert!(b.0 < r.0, "a flipped right flips the chart");
 }
 

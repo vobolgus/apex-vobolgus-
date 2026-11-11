@@ -3,7 +3,9 @@
 
 use std::fmt::Write;
 
-use super::scene::{Project, SkyPoint};
+use rust_core::coords::Direction;
+use rust_core::projections::Project;
+
 use crate::svg::SvgWriter;
 
 /// Every traced circle is sampled in 1° steps, i.e. 361 points for a full turn, as
@@ -35,8 +37,8 @@ pub(super) fn circle_angles() -> impl Iterator<Item = f32> {
 
 /// The points of the shorter great-circle arc from `a` to `b`, both ends included,
 /// at most `GREAT_CIRCLE_STEP_DEG` apart. Projected, a stereo arc stays curved.
-pub(super) fn great_circle_points(a: SkyPoint, b: SkyPoint) -> impl Iterator<Item = SkyPoint> {
-    let dot = (a.0 * b.0 + a.1 * b.1 + a.2 * b.2).clamp(-1.0, 1.0);
+pub(super) fn great_circle_points(a: Direction, b: Direction) -> impl Iterator<Item = Direction> {
+    let dot = (a.x * b.x + a.y * b.y + a.z * b.z).clamp(-1.0, 1.0);
     let angle = dot.acos();
     let steps = ((angle.to_degrees() / GREAT_CIRCLE_STEP_DEG).ceil() as u32).max(1);
     let sin_angle = angle.sin();
@@ -47,10 +49,10 @@ pub(super) fn great_circle_points(a: SkyPoint, b: SkyPoint) -> impl Iterator<Ite
         let t = step as f32 / steps as f32;
         let wa = ((1.0 - t) * angle).sin() / sin_angle;
         let wb = (t * angle).sin() / sin_angle;
-        (
-            wa * a.0 + wb * b.0,
-            wa * a.1 + wb * b.1,
-            wa * a.2 + wb * b.2,
+        Direction::new(
+            wa * a.x + wb * b.x,
+            wa * a.y + wb * b.y,
+            wa * a.z + wb * b.z,
         )
     })
 }
@@ -59,12 +61,12 @@ pub(super) fn great_circle_points(a: SkyPoint, b: SkyPoint) -> impl Iterator<Ite
 ///
 /// A point that fails to project (behind the camera, outside the frame, ...) breaks
 /// the polyline, so the next visible point starts a fresh `M` sub-path.
-fn trace(points: impl Iterator<Item = SkyPoint>, projector: &impl Project) -> String {
+fn trace(points: impl Iterator<Item = Direction>, projector: &impl Project) -> String {
     let mut path = String::with_capacity(4096);
     let mut first = true;
 
-    for (x, y, z) in points {
-        match projector.project(x, y, z) {
+    for point in points {
+        match projector.project(point) {
             Some((px, py)) => {
                 // Writing to a String cannot fail.
                 let _ = if first {
@@ -84,7 +86,7 @@ fn trace(points: impl Iterator<Item = SkyPoint>, projector: &impl Project) -> St
 /// Traces `points` and, if anything was visible, appends the styled `<path>` element.
 pub(super) fn draw(
     svg: &mut SvgWriter,
-    points: impl Iterator<Item = SkyPoint>,
+    points: impl Iterator<Item = Direction>,
     projector: &impl Project,
     style: &PolylineStyle<'_>,
 ) {
@@ -102,25 +104,39 @@ pub(super) fn draw(
 mod tests {
     use super::*;
 
+    /// Puts a direction at its `(x, y)`, but for the one at `x = 2`, which it hides.
+    struct HidingTwo;
+
+    impl Project for HidingTwo {
+        fn project(&self, direction: Direction) -> Option<(f32, f32)> {
+            (direction.x != 2.0).then_some((direction.x, direction.y))
+        }
+    }
+
+    /// Shows nothing at all.
+    struct Blind;
+
+    impl Project for Blind {
+        fn project(&self, _direction: Direction) -> Option<(f32, f32)> {
+            None
+        }
+    }
+
     #[test]
     fn trace_breaks_the_path_on_invisible_points() {
         // Hide the middle point: the polyline must restart with a fresh `M`.
-        let project = |x: f32, y: f32, _z: f32| -> Option<(f32, f32)> {
-            if x == 2.0 { None } else { Some((x, y)) }
-        };
         let points = [
             (1.0, 1.0, 0.0),
             (2.0, 2.0, 0.0),
             (3.0, 3.0, 0.0),
             (4.0, 4.0, 0.0),
         ];
-        let path = trace(points.into_iter(), &project);
+        let path = trace(points.into_iter().map(Direction::from), &HidingTwo);
         assert_eq!(path, "M 1 1M 3 3 L 4 4");
     }
 
     #[test]
     fn nothing_visible_emits_no_path_element() {
-        let project = |_x: f32, _y: f32, _z: f32| -> Option<(f32, f32)> { None };
         let style = PolylineStyle {
             stroke: "#B58CFF",
             width: 1.0,
@@ -129,8 +145,8 @@ mod tests {
         let mut svg = SvgWriter::new();
         draw(
             &mut svg,
-            circle_angles().map(|a| (a, a, a)),
-            &project,
+            circle_angles().map(|a| Direction::new(a, a, a)),
+            &Blind,
             &style,
         );
         assert!(svg.is_empty(), "no visible points must emit no <path>");
@@ -138,8 +154,8 @@ mod tests {
 
     #[test]
     fn a_great_circle_arc_keeps_its_ends_and_steps_at_most_three_degrees() {
-        let (a, b) = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0));
-        let points: Vec<SkyPoint> = great_circle_points(a, b).collect();
+        let (a, b) = (Direction::new(1.0, 0.0, 0.0), Direction::new(0.0, 1.0, 0.0));
+        let points: Vec<Direction> = great_circle_points(a, b).collect();
         assert_eq!(points.len(), 31, "90° in 3° steps");
         assert_eq!((points[0], points[30]), (a, b));
         // The same point twice is one step from itself to itself.

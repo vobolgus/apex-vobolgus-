@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use rust_core::catalog::{HipCatalog, MessierCatalog, Star};
-use rust_core::coords::ra_dec_to_unit_vector;
+use rust_core::coords::{Direction, ra_dec_to_unit_vector};
 use serde::Serialize;
 
 use crate::constellations;
@@ -104,8 +104,8 @@ pub(crate) struct SegmentPoint {
     z: f32,
 }
 
-impl From<(f32, f32, f32)> for SegmentPoint {
-    fn from((x, y, z): (f32, f32, f32)) -> Self {
+impl From<Direction> for SegmentPoint {
+    fn from(Direction { x, y, z }: Direction) -> Self {
         Self { x, y, z }
     }
 }
@@ -166,7 +166,7 @@ pub(crate) fn constellation_figures(catalog: &HipCatalog) -> Vec<ConstellationSe
                     let points: Vec<SegmentPoint> = line
                         .iter()
                         .filter_map(|hip_id| stars.get(hip_id))
-                        .map(|star| SegmentPoint::from((star.x, star.y, star.z)))
+                        .map(|&star| Direction::from(star).into())
                         .collect();
                     (points.len() >= 2).then_some(points)
                 })
