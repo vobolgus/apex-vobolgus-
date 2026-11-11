@@ -9,6 +9,7 @@
 /// `ra_rad` is the right ascension and `dec_rad` the declination, both in radians.
 /// In the returned frame `x` points at (RA 0h, Dec 0°), `y` at (RA 6h, Dec 0°) and
 /// `z` at the north celestial pole.
+#[must_use]
 pub fn ra_dec_to_unit_vector(ra_rad: f32, dec_rad: f32) -> (f32, f32, f32) {
     let cos_dec = dec_rad.cos();
     (
@@ -27,9 +28,7 @@ mod tests {
             (actual.0 - expected.0).abs() < 1e-6
                 && (actual.1 - expected.1).abs() < 1e-6
                 && (actual.2 - expected.2).abs() < 1e-6,
-            "expected {:?}, got {:?}",
-            expected,
-            actual
+            "expected {expected:?}, got {actual:?}"
         );
     }
 
@@ -60,10 +59,7 @@ mod tests {
                 let norm = (x * x + y * y + z * z).sqrt();
                 assert!(
                     (norm - 1.0).abs() < 1e-6,
-                    "ra={} dec={} produced norm {}",
-                    ra_deg,
-                    dec_deg,
-                    norm
+                    "ra={ra_deg} dec={dec_deg} produced norm {norm}"
                 );
             }
         }
