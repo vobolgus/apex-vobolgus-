@@ -36,6 +36,7 @@ export function memoryStorage(limit = Infinity) {
 		data,
 		writes: 0,
 		getItem: (key: string) => data.get(key) ?? null,
+		removeItem: (key: string) => void data.delete(key),
 		setItem(key: string, value: string) {
 			storage.writes += 1;
 			if (value.length > limit) throw new DOMException('Quota exceeded', 'QuotaExceededError');

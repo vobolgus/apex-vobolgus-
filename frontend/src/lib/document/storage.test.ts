@@ -5,8 +5,9 @@ import { DocumentStore } from './document.svelte';
 import { GUTTER_MM, MIN_CHART_SIDE_MM, overlaps } from './geometry';
 import {
 	DOCUMENT_STORAGE_KEY,
-	DOCUMENT_VERSION,
+	FIRST_SHAPE_STORAGE_KEY,
 	parseDocument,
+	parseFirstShape,
 	THUMB_BUDGET_CHARS
 } from './storage';
 import { layTemplate } from './templates';
@@ -46,12 +47,14 @@ describe('the saved document', () => {
 	});
 
 	it('ignores data that is not a document', () => {
-		for (const raw of ['not json', 'null', '[]', '{"pages": 3}', '"x"']) {
-			const storage = memoryStorage();
-			storage.data.set(DOCUMENT_STORAGE_KEY, raw);
-			const doc = new DocumentStore(storage);
-			expect(doc.load()).toBe(false);
-			expect(doc.pages).toEqual([]);
+		for (const key of [DOCUMENT_STORAGE_KEY, FIRST_SHAPE_STORAGE_KEY]) {
+			for (const raw of ['not json', 'null', '[]', '{"pages": 3}', '"x"']) {
+				const storage = memoryStorage();
+				storage.data.set(key, raw);
+				const doc = new DocumentStore(storage);
+				expect(doc.load()).toBe(false);
+				expect(doc.pages).toEqual([]);
+			}
 		}
 		expect(new DocumentStore(memoryStorage()).load()).toBe(false);
 	});
@@ -98,7 +101,7 @@ describe('the saved document', () => {
 			]
 		};
 		const storage = memoryStorage();
-		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(document));
+		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(document));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		expect(doc.pages.map((p) => p.id)).toEqual(['p1', 'p4']);
@@ -195,7 +198,7 @@ describe('the saved document', () => {
 			})
 		];
 		const storage = memoryStorage();
-		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages }));
+		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify({ pages }));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		const [ok, ...rest] = doc.pages;
@@ -271,7 +274,8 @@ describe('the saved document', () => {
 		});
 		const page = (texts: unknown) => ({ id: 'p', orientation: 'portrait', items: [], texts });
 		const load = (texts: unknown) => {
-			storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ pages: [page(texts)] }));
+			storage.data.delete(DOCUMENT_STORAGE_KEY);
+			storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify({ pages: [page(texts)] }));
 			const store = new DocumentStore(storage);
 			expect(store.load()).toBe(true);
 			return store.pages[0];
@@ -448,7 +452,7 @@ describe('the shape it is saved in', () => {
 		};
 	}
 
-	it('writes a version and, to a page, one list of blocks', () => {
+	it('writes under a key of its own and, to a page, one list of blocks', () => {
 		const storage = memoryStorage();
 		const doc = new DocumentStore(storage);
 		const { pageId } = doc.addChart(chart());
@@ -460,10 +464,11 @@ describe('the shape it is saved in', () => {
 			frame: { x: 100, y: 250, w: 80, h: 20 }
 		});
 		doc.flush();
+		expect(DOCUMENT_STORAGE_KEY).toBe('skycharts.document.v2');
+		expect(FIRST_SHAPE_STORAGE_KEY).toBe('skycharts.document.v1');
+		expect([...storage.data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
 		const raw = JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
-		expect(raw.version).toBe(DOCUMENT_VERSION);
-		expect(DOCUMENT_VERSION).toBe(2);
-		expect(Object.keys(raw)).toEqual(['version', 'pages']);
+		expect(Object.keys(raw)).toEqual(['pages']);
 		const [page] = raw.pages;
 		expect(page).not.toHaveProperty('items');
 		expect(page).not.toHaveProperty('texts');
@@ -477,7 +482,7 @@ describe('the shape it is saved in', () => {
 	});
 
 	it('reads a document saved in the first shape as the same pages', () => {
-		const pages = parseDocument(first())!;
+		const pages = parseFirstShape(first())!;
 		expect(pages.map((page) => page.id)).toEqual(['turned', 'card', 'bare']);
 		const [turned, card, bare] = pages;
 		const saved = first().pages;
@@ -535,21 +540,23 @@ describe('the shape it is saved in', () => {
 	});
 
 	it('reads the same pages from either shape, and from what it writes itself', () => {
-		const pages = parseDocument(first())!;
+		const pages = parseFirstShape(first())!;
 		const storage = memoryStorage();
-		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(first()));
+		storage.data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(first()));
 		const doc = new DocumentStore(storage);
 		expect(doc.load()).toBe(true);
 		expect(doc.pages).toEqual(pages);
-		// Nothing is written by reading: the first shape stays until the document changes.
+		// Nothing is written by reading: the first shape stays as it is until the document changes.
 		expect(storage.writes).toBe(0);
+		expect([...storage.data.keys()]).toEqual([FIRST_SHAPE_STORAGE_KEY]);
 
+		// Changed, it is saved in the shape of now, and the first's copy goes.
 		doc.selectedPageId = 'card';
 		const added = doc.addPage();
 		doc.removePage(added);
 		doc.flush();
+		expect([...storage.data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
 		const raw = JSON.parse(storage.data.get(DOCUMENT_STORAGE_KEY)!);
-		expect(raw.version).toBe(DOCUMENT_VERSION);
 		expect(raw.pages.every((page: object) => 'blocks' in page && !('items' in page))).toBe(true);
 		expect(parseDocument(raw)).toEqual(pages);
 		const again = new DocumentStore(storage);
@@ -557,17 +564,65 @@ describe('the shape it is saved in', () => {
 		expect(again.pages).toEqual(pages);
 	});
 
-	it('takes the first shape with or without its number, and no shape it does not know', () => {
+	it('reads the first shape only where nothing newer is, and each shape only under its own key', () => {
 		const { pages } = first();
-		expect(parseDocument({ version: 1, pages })).toEqual(parseDocument({ pages }));
-		for (const version of [0, 3, '2', null]) {
-			expect(parseDocument({ version, pages }), String(version)).toBeNull();
+		const now = { pages: parseFirstShape({ pages })!.slice(0, 1) };
+		const load = (entries: Record<string, unknown>) => {
 			const storage = memoryStorage();
-			storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify({ version, pages }));
-			expect(new DocumentStore(storage).load(), String(version)).toBe(false);
-		}
-		// A page of the first shape under the second's number is no page: it has no blocks.
-		expect(parseDocument({ version: DOCUMENT_VERSION, pages })).toEqual([]);
+			for (const [key, value] of Object.entries(entries)) {
+				storage.data.set(key, JSON.stringify(value));
+			}
+			const doc = new DocumentStore(storage);
+			return doc.load() ? doc.pages.map((page) => page.id) : null;
+		};
+		// Both there (an older build wrote again since): the newer shape is the document.
+		expect(load({ [DOCUMENT_STORAGE_KEY]: now, [FIRST_SHAPE_STORAGE_KEY]: { pages } })).toEqual([
+			'turned'
+		]);
+		// What is under the newer key is no document: the first shape's copy is.
+		expect(
+			load({ [DOCUMENT_STORAGE_KEY]: 'nonsense', [FIRST_SHAPE_STORAGE_KEY]: { pages } })
+		).toEqual(['turned', 'card', 'bare']);
+		// A page of one shape is no page of the other: it has no blocks, or no items.
+		expect(load({ [DOCUMENT_STORAGE_KEY]: { pages } })).toEqual([]);
+		expect(load({ [FIRST_SHAPE_STORAGE_KEY]: now })).toEqual([]);
+		expect(parseDocument({ pages })).toEqual([]);
+		expect(parseFirstShape(now)).toEqual([]);
+		expect(parseFirstShape({ pages: 3 })).toBeNull();
+	});
+
+	it("makes room for the document by taking the first shape's copy away before its thumbnails", () => {
+		// Room for one copy with its thumbnail, not for two.
+		const data = new Map<string, string>();
+		const used = () => [...data.values()].reduce((sum, value) => sum + value.length, 0);
+		const storage = {
+			getItem: (key: string) => data.get(key) ?? null,
+			removeItem: (key: string) => void data.delete(key),
+			setItem(key: string, value: string) {
+				const others = used() - (data.get(key)?.length ?? 0);
+				if (others + value.length > 9000) throw new DOMException('Quota', 'QuotaExceededError');
+				data.set(key, value);
+			}
+		};
+		const thumb = `data:image/png;base64,${'A'.repeat(5000)}`;
+		const old = {
+			pages: [
+				{
+					id: 'p',
+					orientation: 'portrait',
+					items: [{ ...disc('a', { x: 12, y: 55.5, w: 186, h: 186 }), thumb }]
+				}
+			]
+		};
+		data.set(FIRST_SHAPE_STORAGE_KEY, JSON.stringify(old));
+		const doc = new DocumentStore(storage);
+		expect(doc.load()).toBe(true);
+		doc.addPage();
+		doc.flush();
+		expect([...data.keys()]).toEqual([DOCUMENT_STORAGE_KEY]);
+		const again = new DocumentStore(storage);
+		again.load();
+		expect(chartsOf(again.pages[0])[0].thumb).toBe(thumb);
 	});
 
 	it('keeps charts under the type whatever order they were saved in, and drops what is of no kind', () => {
@@ -575,10 +630,7 @@ describe('the shape it is saved in', () => {
 		const frame = { x: 12, y: 12, w: 90, h: 90 };
 		const type = { style, frame: { x: 12, y: 200, w: 90, h: 6 } };
 		const page = (blocks: unknown[]) =>
-			parseDocument({
-				version: DOCUMENT_VERSION,
-				pages: [{ id: 'p', orientation: 'portrait', blocks }]
-			})![0];
+			parseDocument({ pages: [{ id: 'p', orientation: 'portrait', blocks }] })![0];
 		const read = page([
 			block('text', 't1', { ...type, text: 'one' }),
 			block('chart', 'c1', { chart: chart(), frame }),
@@ -605,7 +657,7 @@ describe('the shape it is saved in', () => {
 		const many = Array.from({ length: MAX_TEXTS_PER_PAGE + 5 }, (_, i) =>
 			i % 2 ? list(`l${i}`, { source: 'stars', rows: 3 }) : words(`t${i}`)
 		);
-		const old = parseDocument({
+		const old = parseFirstShape({
 			pages: [{ id: 'p', orientation: 'portrait', items: [], texts: many }]
 		})!;
 		expect(typesetOf(old[0])).toHaveLength(MAX_TEXTS_PER_PAGE);
@@ -614,13 +666,9 @@ describe('the shape it is saved in', () => {
 				.map((it) => it.kind)
 				.slice(0, 2)
 		).toEqual(['text', 'table']);
-		const now = parseDocument(
-			JSON.parse(JSON.stringify({ version: DOCUMENT_VERSION, pages: old }))
-		)!;
+		const now = parseDocument(JSON.parse(JSON.stringify({ pages: old })))!;
 		expect(now).toEqual(old);
 		const page: DocPage = { ...old[0], blocks: [...old[0].blocks, ...old[0].blocks] };
-		expect(typesetOf(parseDocument({ version: DOCUMENT_VERSION, pages: [page] })![0])).toHaveLength(
-			MAX_TEXTS_PER_PAGE
-		);
+		expect(typesetOf(parseDocument({ pages: [page] })![0])).toHaveLength(MAX_TEXTS_PER_PAGE);
 	});
 });

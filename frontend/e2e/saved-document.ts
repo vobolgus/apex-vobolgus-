@@ -3,13 +3,15 @@ import type { Page } from '@playwright/test';
 /**
  * The document as the browser keeps it, for the specs to seed and to read back.
  *
- * It is saved in a shape with a number (`src/lib/document/storage.ts`): a page's
- * `blocks`, each of a `kind`. The shape before had none: a page's charts in `items`,
- * its texts in `texts`, a table a text with a spec and no words. A spec that seeds
- * that first shape has the app bring it over as it loads.
+ * It is saved in a shape with a number, under a key that carries it
+ * (`src/lib/document/storage.ts`): a page's `blocks`, each of a `kind`. The shape
+ * before, under its own key: a page's charts in `items`, its texts in `texts`, a
+ * table a text with a spec and no words. A spec that seeds that first shape
+ * (`seedFirstShape`) has the app bring it over as it loads.
  */
 
-export const STORAGE_KEY = 'skycharts.document.v1';
+export const STORAGE_KEY = 'skycharts.document.v2';
+export const FIRST_SHAPE_STORAGE_KEY = 'skycharts.document.v1';
 
 export interface Frame {
 	x: number;
@@ -51,15 +53,14 @@ export interface SavedPage {
 }
 
 /** `pages` as a document in the shape the app writes now. */
-export function documentOf(pages: readonly unknown[]) {
-	return { version: 2, pages };
+export function documentOf<P>(pages: readonly P[]): { pages: readonly P[] } {
+	return { pages };
 }
 
-/** Put `document` in storage, in whichever shape it is, and load the app with it. */
-export async function seedDocument(page: Page, document: unknown): Promise<void> {
+async function seed(page: Page, key: string, document: unknown): Promise<void> {
 	await page.goto('/');
-	await page.evaluate(([key, doc]) => localStorage.setItem(key as string, JSON.stringify(doc)), [
-		STORAGE_KEY,
+	await page.evaluate(([at, doc]) => localStorage.setItem(at as string, JSON.stringify(doc)), [
+		key,
 		document
 	] as const);
 	await page.reload();
@@ -67,12 +68,36 @@ export async function seedDocument(page: Page, document: unknown): Promise<void>
 	await page.waitForLoadState('networkidle').catch(() => undefined);
 }
 
-/** What is in storage, as it is: null when nothing is. */
-export async function savedDocument(page: Page): Promise<Record<string, unknown> | null> {
-	return page.evaluate((key) => {
-		const raw = localStorage.getItem(key);
-		return raw ? JSON.parse(raw) : null;
-	}, STORAGE_KEY);
+/** Put `document` in storage, in the shape written now, and load the app with it. */
+export function seedDocument(page: Page, document: unknown): Promise<void> {
+	return seed(page, STORAGE_KEY, document);
+}
+
+/** Put `document` in storage as the first shape was kept, and load the app with it. */
+export function seedFirstShape(page: Page, document: unknown): Promise<void> {
+	return seed(page, FIRST_SHAPE_STORAGE_KEY, document);
+}
+
+/** What is in storage under each shape's key, as it is: null where nothing is. */
+export async function savedDocuments(
+	page: Page
+): Promise<{ now: { pages: SavedPage[] } | null; first: { pages: FirstShapePage[] } | null }> {
+	return page.evaluate(
+		([now, first]) => {
+			const read = (key: string) => {
+				const raw = localStorage.getItem(key);
+				return raw ? JSON.parse(raw) : null;
+			};
+			return { now: read(now), first: read(first) };
+		},
+		[STORAGE_KEY, FIRST_SHAPE_STORAGE_KEY] as const
+	);
+}
+
+/** A page as the first shape kept it. */
+interface FirstShapePage extends Omit<SavedPage, 'blocks'> {
+	items: object[];
+	texts?: object[];
 }
 
 /**
@@ -81,21 +106,17 @@ export async function savedDocument(page: Page): Promise<Record<string, unknown>
  * same, so a spec reads one shape.
  */
 export async function savedPages(page: Page): Promise<SavedPage[]> {
-	const saved = await savedDocument(page);
-	const pages = (saved?.pages ?? []) as (SavedPage & { items?: object[]; texts?: object[] })[];
-	return pages.map(({ items, texts, ...rest }) =>
-		items === undefined
-			? (rest as SavedPage)
-			: {
-					...rest,
-					blocks: [
-						...items.map((item) => ({ ...item, kind: 'chart' }) as SavedChart),
-						...(texts ?? []).map(
-							(text) => ({ ...text, kind: 'table' in text ? 'table' : 'text' }) as SavedType
-						)
-					]
-				}
-	);
+	const { now, first } = await savedDocuments(page);
+	if (now) return now.pages;
+	return (first?.pages ?? []).map(({ items, texts, ...rest }) => ({
+		...rest,
+		blocks: [
+			...items.map((item) => ({ ...item, kind: 'chart' }) as SavedChart),
+			...(texts ?? []).map(
+				(text) => ({ ...text, kind: 'table' in text ? 'table' : 'text' }) as SavedType
+			)
+		]
+	}));
 }
 
 export function chartsOf(saved: SavedPage): SavedChart[] {

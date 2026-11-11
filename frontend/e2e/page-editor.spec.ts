@@ -3,7 +3,7 @@ import { contentBox, gridLines } from '../src/lib/document/geometry';
 import {
 	chartsOf,
 	savedPages as savedDocumentPages,
-	seedDocument,
+	seedFirstShape,
 	type SavedChart
 } from './saved-document';
 
@@ -37,8 +37,8 @@ const STEREO = {
 
 /**
  * Two portrait pages: two discs on the first, none on the second. In the shape the
- * document was first saved in (`items`, no `blocks`, no version): every test here
- * begins with the app bringing it over.
+ * document was first saved in (`items`, no `blocks`, under the first key): every test
+ * here begins with the app bringing it over.
  */
 const DOCUMENT = {
 	pages: [
@@ -57,7 +57,7 @@ const DOCUMENT = {
 type SavedItem = SavedChart;
 
 async function seedAndOpen(page: Page) {
-	await seedDocument(page, DOCUMENT);
+	await seedFirstShape(page, DOCUMENT);
 	await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -360,7 +360,7 @@ test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ doe
 	});
 	const page = await context.newPage();
 	try {
-		await seedDocument(page, DOCUMENT);
+		await seedFirstShape(page, DOCUMENT);
 		// Collapsed on a phone: open the panel, then the page.
 		await page.getByRole('button', { name: /^PDF pages/ }).click();
 		await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();

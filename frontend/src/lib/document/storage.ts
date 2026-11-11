@@ -5,13 +5,13 @@
  * anybody's. A broken page or block is dropped and the rest kept; every frame is
  * put back inside its page. The clipboard is read the same way (`parseBlockCopy`).
  *
- * The saved shape has a number (`version`). The first had none: a page kept its
- * charts in `items` and its texts in `texts`, a table being a text with a `table`
- * and no words. The second, written now, is the model's own: a page's `blocks`, each
- * of a `kind`. A document saved in the first is brought to the second as it is read
- * (`fromFirstShape`), and saved in the second from then on. Both live under the one
- * key, whose name is from before the shapes were numbered: a second key would have
- * the browser hold the document twice, thumbnails and all, until the old one went.
+ * The saved shape has a number, and the key it is kept under carries it, so that
+ * no build writes over a shape it does not know. In the first (`…v1`) a page kept
+ * its charts in `items` and its texts in `texts`, a table being a text with a `table`
+ * and no words. The second (`…v2`), written now, is the model's own: a page's
+ * `blocks`, each of a `kind`. A document found only in the first is brought to the
+ * second as it is read (`parseFirstShape`); once it is saved in the second, the
+ * first's copy is taken away, the browser having no room to keep both for long.
  */
 
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
@@ -50,15 +50,16 @@ import type {
 	TypesetBlock
 } from './types';
 
-export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v1';
-/** The shape written now; see the top of the file. */
-export const DOCUMENT_VERSION = 2;
+/** Where the document is kept, in the shape written now. */
+export const DOCUMENT_STORAGE_KEY = 'skycharts.document.v2';
+/** Where it was kept in the first shape, and is still read from when nothing newer is there. */
+export const FIRST_SHAPE_STORAGE_KEY = 'skycharts.document.v1';
 /** Thumbnails are saved while their total stays under this many chars (≈ bytes). */
 export const THUMB_BUDGET_CHARS = 2_000_000;
 /** Rings on one chart, as the backend takes them (backend/src/handlers/export.rs). */
 const MAX_MARKS = 16;
 
-export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem'>;
+export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 export function browserStorage(): DocumentStorage | null {
 	try {
@@ -69,38 +70,54 @@ export function browserStorage(): DocumentStorage | null {
 }
 
 /**
- * The saved document's pages; null when there is none, or what is there is no
- * document, or the storage cannot be read.
+ * The saved document's pages, from the shape written now or else from the first;
+ * null when there is none, or what is there is no document, or the storage cannot
+ * be read.
  */
 export function readDocument(storage: DocumentStorage | null): DocPage[] | null {
-	let raw: string | null;
-	try {
-		raw = storage?.getItem(DOCUMENT_STORAGE_KEY) ?? null;
-	} catch {
-		return null;
-	}
-	if (raw === null) return null;
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		return null;
-	}
-	return parseDocument(parsed);
+	if (!storage) return null;
+	return (
+		parseDocument(readJson(storage, DOCUMENT_STORAGE_KEY)) ??
+		parseFirstShape(readJson(storage, FIRST_SHAPE_STORAGE_KEY))
+	);
 }
 
-/** Save `pages` (plain data, no proxies): with their thumbnails while the storage has room. */
-export function writeDocument(storage: DocumentStorage, pages: DocPage[]): void {
+/** What is under `key`, read as JSON; undefined for nothing, or nothing that reads. */
+function readJson(storage: DocumentStorage, key: string): unknown {
 	try {
-		storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, THUMB_BUDGET_CHARS));
+		const raw = storage.getItem(key);
+		return raw === null ? undefined : JSON.parse(raw);
 	} catch {
-		// Over the quota with thumbnails: the charts matter more.
-		try {
-			storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, 0));
-		} catch {
-			// Storage is unavailable; the document lives for this session only.
-		}
+		return undefined;
 	}
+}
+
+/**
+ * Save `pages` (plain data, no proxies), with their thumbnails while the storage has
+ * room. Saved, the document needs its copy in the first shape no more.
+ */
+export function writeDocument(storage: DocumentStorage, pages: DocPage[]): void {
+	const write = (budget: number): boolean => {
+		try {
+			storage.setItem(DOCUMENT_STORAGE_KEY, serialize(pages, budget));
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const forgetFirstShape = () => {
+		try {
+			storage.removeItem(FIRST_SHAPE_STORAGE_KEY);
+		} catch {
+			// It stays, and is read only while there is nothing newer.
+		}
+	};
+	if (write(THUMB_BUDGET_CHARS)) return forgetFirstShape();
+	// Over the quota: the first shape's copy goes, to make room, then the thumbnails. The
+	// charts matter more. If that fails too, storage is unavailable; the document lives
+	// for this session only.
+	forgetFirstShape();
+	if (!write(THUMB_BUDGET_CHARS)) write(0);
 }
 
 /** The saved form: thumbnails kept in document order while they fit `budget`. */
@@ -116,7 +133,7 @@ function serialize(pages: DocPage[], budget: number): string {
 			return { ...chart, thumb };
 		})
 	}));
-	return JSON.stringify({ version: DOCUMENT_VERSION, pages: saved });
+	return JSON.stringify({ pages: saved });
 }
 
 const PROJECTIONS: readonly ProjectionMode[] = ['stereographic', 'pinhole'];
@@ -143,20 +160,22 @@ function isPositive(value: unknown): value is number {
 	return isFiniteNumber(value) && value > 0;
 }
 
-/**
- * The pages of a document as it was saved, in either shape; null for what is no
- * document, or one in a shape this build does not know.
- */
+/** The pages of a document as it is saved now; null for what is no document. */
 export function parseDocument(value: unknown): DocPage[] | null {
 	if (!isRecord(value) || !Array.isArray(value.pages)) return null;
-	const { version = 1 } = value;
-	if (version !== 1 && version !== DOCUMENT_VERSION) return null;
-	const saved = version === 1 ? value.pages.map(fromFirstShape) : value.pages;
 	const ids = new Set<string>();
-	return saved.map((page) => parsePage(page, ids)).filter((page): page is DocPage => page !== null);
+	return value.pages
+		.map((page) => parsePage(page, ids))
+		.filter((page): page is DocPage => page !== null);
 }
 
 // === The first shape ===
+
+/** The pages of a document as the first shape saved it; null for what is no document. */
+export function parseFirstShape(value: unknown): DocPage[] | null {
+	if (!isRecord(value) || !Array.isArray(value.pages)) return null;
+	return parseDocument({ pages: value.pages.map(fromFirstShape) });
+}
 
 /**
  * A page saved in the first shape, in the second: its charts, then its texts, one

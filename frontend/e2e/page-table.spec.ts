@@ -1,9 +1,10 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
 	documentOf,
-	savedDocument,
+	savedDocuments,
 	savedPages,
 	seedDocument,
+	seedFirstShape,
 	typesetOf,
 	type SavedType
 } from './saved-document';
@@ -50,8 +51,8 @@ const DOCUMENT = documentOf([
 	{ id: 'e2e-page-2', orientation: 'portrait', blocks: [] }
 ]);
 
-async function seedAndOpen(page: Page, document: unknown = DOCUMENT) {
-	await seedDocument(page, document);
+async function seedAndOpen(page: Page, seeded = seedDocument(page, DOCUMENT)) {
+	await seeded;
 	await page.getByRole('button', { name: /^Page 1,/ }).click();
 	const editor = page.getByRole('dialog', { name: 'PDF document' });
 	await expect(editor).toBeVisible();
@@ -351,7 +352,7 @@ test('a document saved before a page had blocks loads as it was, and is saved in
 			}
 		]
 	};
-	const editor = await seedAndOpen(page, first);
+	const editor = await seedAndOpen(page, seedFirstShape(page, first));
 
 	// Each is what it was: a text reading its chart, and a table of that chart's stars.
 	await expect(editor.getByRole('button', { name: /^Chart 1 of 1/ })).toBeVisible();
@@ -359,15 +360,16 @@ test('a document saved before a page had blocks loads as it was, and is saved in
 	const table = editor.getByRole('button', { name: 'Table 2 of 2: Stars, names, 3 rows' });
 	await expect.poll(async () => (await cells(table))[0]).toBe('Stars');
 
-	// Changed, it is saved in the shape of now: a version, and one list of blocks to a page.
+	// Changed, it is saved in the shape of now, under that shape's key: one list of blocks to
+	// a page; and the copy in the first shape is gone.
 	await table.click();
 	await page.keyboard.press('ArrowDown');
 	await expect.poll(async () => (await savedTexts(page))[1]?.frame.y).toBe(13);
-	const saved = (await savedDocument(page)) as { version: number; pages: object[] };
-	expect(saved.version).toBe(2);
-	expect(saved.pages[0]).not.toHaveProperty('items');
-	expect(saved.pages[0]).not.toHaveProperty('texts');
-	const [now] = await savedPages(page);
+	const saved = await savedDocuments(page);
+	expect(saved.first).toBeNull();
+	expect(saved.now!.pages[0]).not.toHaveProperty('items');
+	expect(saved.now!.pages[0]).not.toHaveProperty('texts');
+	const [now] = saved.now!.pages;
 	expect(now.blocks.map((block) => [block.kind, block.id])).toEqual([
 		['chart', 'e2e-a'],
 		['text', 'e2e-words'],

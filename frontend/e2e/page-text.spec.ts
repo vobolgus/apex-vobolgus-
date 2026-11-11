@@ -5,6 +5,7 @@ import {
 	documentOf,
 	savedPages,
 	seedDocument,
+	seedFirstShape,
 	typesetOf,
 	type SavedType
 } from './saved-document';
@@ -321,7 +322,7 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		style: STYLE,
 		frame: { x: 112, y: 80, w: 86, h: 6 }
 	};
-	await seedDocument(page, {
+	await seedFirstShape(page, {
 		pages: [
 			{
 				id: 'e2e-page-1',
