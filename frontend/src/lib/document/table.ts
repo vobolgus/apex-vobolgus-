@@ -189,12 +189,16 @@ function messierOn(chart: ChartSnapshot, sky: Sky): MessierObject[] {
 }
 
 /** The stars on a chart, brightest first, each with its name if it has one. */
-function starsOn(chart: ChartSnapshot, sky: Sky): { star: CatalogStar; name: string | null }[] {
+function starsOn(
+	chart: ChartSnapshot,
+	sky: Sky,
+	language: Language
+): { star: CatalogStar; name: string | null }[] {
 	const taken = new Set<string>();
 	return sky.stars
 		.filter((star) => isInChart(chart, ...unit(star.ra, star.dec)))
 		.sort((a, b) => a.v_mag - b.v_mag)
-		.map((star) => ({ star, name: starName(star.ra, star.dec, taken) }));
+		.map((star) => ({ star, name: starName(star.ra, star.dec, taken, language) }));
 }
 
 /**
@@ -239,7 +243,7 @@ export function tableContent(chart: ChartSnapshot | null, spec: TableSpec, sky: 
 		return { title, header, align, rows: listed };
 	}
 
-	const stars = starsOn(chart, sky);
+	const stars = starsOn(chart, sky, language);
 	if (names) {
 		const listed = stars.flatMap(({ name }) => (name ? [name] : [])).slice(0, rows * NAMES_PER_ROW);
 		if (listed.length === 0) {

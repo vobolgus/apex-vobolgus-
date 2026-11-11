@@ -117,6 +117,13 @@ describe('names', () => {
 		// Polaris, where right ascension means little.
 		const polaris = star(2.53, 89.264, 1.97);
 		expect(starName(polaris.ra + 0.2, polaris.dec, new Set())).toBe('Polaris');
+		// In Russian, by the name it goes by there; taken all the same, whatever it was called.
+		const again = new Set<string>();
+		expect(starName(vega.ra, vega.dec, again, 'ru')).toBe('Вега');
+		expect(starName(vega.ra, vega.dec, again)).toBeNull();
+		expect(
+			starName(star(14.66, -60.834, -0.01).ra, star(14.66, -60.834, -0.01).dec, again, 'ru')
+		).toBe('Альфа Центавра');
 	});
 });
 
@@ -203,8 +210,8 @@ describe('tableContent', () => {
 	it('sets its words in Russian when told to: title, header, kinds and constellations', () => {
 		const names = tableContent(sheet, { source: 'stars', rows: 5, language: 'ru' }, sky);
 		expect(names.title).toBe('Звёзды');
-		// A star's name is the same in any language.
-		expect(names.rows).toEqual([['Sirius', 'Rigel', 'Betelgeuse']]);
+		// The stars by the names they go by in Russian.
+		expect(names.rows).toEqual([['Сириус', 'Ригель', 'Бетельгейзе']]);
 		const details = tableContent(
 			sheet,
 			{ source: 'messier', look: 'details', rows: 1, language: 'ru' },
