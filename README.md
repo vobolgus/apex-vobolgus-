@@ -170,22 +170,34 @@ rust-core/                 astronomy core library
   src/catalog/             HIP and Messier catalogs (*_data.bin)
   src/coords.rs, time.rs   coordinate conversions, Julian date, sidereal time
   src/projections/         stereographic and pinhole
-  src/planets.rs           Sun, Moon and planet positions
-backend/                   Axum server
-  src/handlers/            catalog.rs, export.rs, document.rs (the PDF document)
-  src/svg_generator/       SVG map renderer behind /api/export and the document
-  src/cached.rs            catalog responses, serialized and gzipped once
-  src/limits.rs            the export budget (per client and for the server)
+  src/planets/             Sun, Moon and planet positions
+  tests/golden.rs          the public API's numbers, pinned
+backend/                   Axum server: a library (lib.rs) under a main that is only main
+  src/router.rs, state.rs  the routes, and what every request shares
+  src/handlers/            catalog.rs, export.rs, document.rs: thin, one per route
+  src/request.rs           what a request may say (the wire types)
+  src/chart/               a request read into a chart, drawn as SVG layer by layer
+  src/document/, pdf.rs    a request read into the pages of a document, then the PDF
+  src/error.rs             the one error type, and the response each error becomes
+  src/payload.rs, cached.rs  catalog responses, serialized and gzipped once
+  src/limits.rs, budget.rs the limits' numbers, and the export budget that holds them
   src/static_site.rs       serving the frontend's static build
+  src/golden.rs            what the server sends, pinned (tests)
+  src/wire.rs              writes frontend/src/lib/api/wire from the Rust types (tests)
   assets/constellations/   constellation figures and boundaries (JSON)
   assets/golden/           reference-geometry fixture shared by Rust and TS tests
   API.md                   HTTP API reference
 frontend/                  SvelteKit app, built to static files
-  src/routes/+page.svelte  the generator page
+  src/routes/+page.svelte  the generator page: composition only
   vite.config.ts           the dev proxy of /api to the backend
-  src/lib/                 renderer, math, state, components, API clients
-  src/lib/document/        the PDF document: layout engine, store, render configs
-  e2e/                     Playwright visual regression tests
+  src/lib/math/            projections and geometry, pure
+  src/lib/renderer/        drawing on canvas
+  src/lib/state/           the view, the layers, the catalog, the address bar
+  src/lib/api/             API clients; wire/ is generated from the backend's types
+  src/lib/document/        the PDF document's model: blocks, layout, storage, words
+  src/lib/components/      stage/ (the chart), header/, dock/, document/ (the editor:
+                           blocks/, editor/ controllers, panel/, templates/, flight/)
+  e2e/                     Playwright tests, visual regression among them
 legacy/                    archived features, reference only (see legacy/README.md)
 SPEC.md                    product specification (generator only)
 CHANGELOG.md               release notes
