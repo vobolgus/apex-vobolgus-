@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
+use rust_core::catalog::{HipCatalog, MessierCatalog, Star};
 use rust_core::coords::ra_dec_to_unit_vector;
-use rust_core::{HipCatalog, MessierCatalog, Star};
 use serde::Serialize;
 
 use crate::constellations;

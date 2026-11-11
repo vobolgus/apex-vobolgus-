@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use rust_core::Star;
+use rust_core::catalog::Star;
 use rust_core::coords::ra_dec_to_unit_vector;
 
 use super::polyline::{self, PolylineStyle, great_circle_points};

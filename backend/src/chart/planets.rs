@@ -1,7 +1,7 @@
 //! The Sun, the Moon and the planets where they are at the chart's instant.
 
-use rust_core::julian_date;
 use rust_core::planets::{Body, PlanetPosition, all_positions};
+use rust_core::time::julian_date;
 
 use super::scene::{Project, Scene};
 use crate::svg::SvgWriter;

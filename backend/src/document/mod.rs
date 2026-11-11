@@ -11,7 +11,7 @@ mod svg;
 #[cfg(test)]
 mod tests;
 
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 use thiserror::Error;
 
 use crate::chart::{Chart, ChartError, Placement};

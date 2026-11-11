@@ -20,12 +20,13 @@
 
 /// The only lines that know the crate's own names; all else goes through them.
 mod subject {
+    pub use rust_core::catalog::{HipCatalog, MessierCatalog, MessierKind, MessierObject, Star};
     pub use rust_core::planets::{Body, all_positions};
-    pub use rust_core::{
-        CameraConfig, DateTime, HipCatalog, MessierCatalog, MessierKind, MessierObject,
-        PinholeProjection, ProjectionError, Star, StereoPoint, StereoProjection, ViewKind,
-        ViewProjection, julian_date, sidereal_time, vernal_equinox_hour_angle,
+    pub use rust_core::projections::{
+        CameraConfig, PinholeProjection, ProjectionError, StereoPoint, StereoProjection, ViewKind,
+        ViewProjection,
     };
+    pub use rust_core::time::{DateTime, julian_date, sidereal_time, vernal_equinox_hour_angle};
 
     /// A direction of the equatorial frame as the cases write it: `(x, y, z)`.
     pub type Point = (f32, f32, f32);
@@ -35,7 +36,7 @@ mod subject {
 
     /// The unit vector of a right ascension and a declination, in radians.
     pub fn unit_vector(ra: f32, dec: f32) -> Point {
-        rust_core::ra_dec_to_unit_vector(ra, dec)
+        rust_core::coords::ra_dec_to_unit_vector(ra, dec)
     }
 
     /// The stars with `min_mag <= v_mag <= max_mag`, no lower bound with `None`.

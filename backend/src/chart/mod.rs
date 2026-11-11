@@ -37,7 +37,8 @@ mod tests;
 
 use std::str::FromStr;
 
-use rust_core::{HipCatalog, Star, ViewKind, ViewProjection};
+use rust_core::catalog::{HipCatalog, Star};
+use rust_core::projections::{ViewKind, ViewProjection};
 use thiserror::Error;
 
 use self::scene::Scene;

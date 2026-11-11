@@ -1,6 +1,7 @@
 //! What a chart's layers are drawn on: the canvas, and the way the sky falls on it.
 
-use rust_core::{CameraConfig, DateTime, PinholeProjection, StereoProjection, ViewProjection};
+use rust_core::projections::{CameraConfig, PinholeProjection, StereoProjection, ViewProjection};
+use rust_core::time::DateTime;
 
 use super::time::{DEFAULT_TIME, parse_datetime};
 use super::{Chart, Projection};

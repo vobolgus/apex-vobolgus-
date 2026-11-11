@@ -1,6 +1,6 @@
 //! The stars: a disc each, the brighter the larger.
 
-use rust_core::Star;
+use rust_core::catalog::Star;
 
 use super::scene::{Project, Scene};
 use crate::svg::SvgWriter;

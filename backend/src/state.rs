@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 
 use crate::budget::ExportBudget;
 use crate::cached::CatalogCache;

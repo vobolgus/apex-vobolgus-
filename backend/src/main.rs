@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use backend::AppState;
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

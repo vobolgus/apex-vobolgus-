@@ -1,7 +1,7 @@
 //! The instant a chart is drawn for.
 
 use chrono::{Datelike, Timelike};
-use rust_core::DateTime;
+use rust_core::time::DateTime;
 
 /// The instant of a chart that names none, or none that can be read.
 pub(super) const DEFAULT_TIME: DateTime = DateTime::new(2024, 6, 14, 6, 10, 0);

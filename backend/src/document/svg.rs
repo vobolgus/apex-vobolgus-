@@ -1,6 +1,6 @@
 //! A page of a document as SVG: its charts, and its text over them.
 
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 
 use super::Page;
 use crate::fonts;

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use rust_core::catalog::{HipCatalog, Star};
 use rust_core::planets::{Body, all_positions};
-use rust_core::{HipCatalog, Star, ViewKind, ViewProjection, julian_date};
+use rust_core::projections::{ViewKind, ViewProjection};
+use rust_core::time::julian_date;
 
 use super::*;
 use crate::request::{LayersConfig, RenderConfig, SkyMark, StyleConfig, ViewConfig};

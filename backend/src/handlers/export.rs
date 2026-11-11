@@ -8,7 +8,7 @@ use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use flate2::{Compression, write::GzEncoder};
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 use serde::Deserialize;
 use tokio::sync::Semaphore;
 

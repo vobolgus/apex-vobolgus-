@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use rust_core::HipCatalog;
+use rust_core::catalog::HipCatalog;
 use serde_json::json;
 
 use super::*;
