@@ -7,39 +7,14 @@ pub mod time;
 pub use catalog::{HipCatalog, MessierCatalog, MessierObject, Star};
 pub use coords::ra_dec_to_unit_vector;
 pub use projections::{
-    CameraConfig, PinholeProjection, PinholeProjectionResult, StereoProjection,
-    StereoProjectionResult, ViewKind, ViewProjection,
+    CameraConfig, PinholeProjection, ProjectionError, StereoPoint, StereoProjection, ViewKind,
+    ViewProjection,
 };
-pub use time::{DateTime, get_sidereal_time, julian_date, vequinox_hour_angle};
+pub use time::{DateTime, julian_date, sidereal_time, vernal_equinox_hour_angle};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_julian_date() {
-        // Проверяем известную юлианскую дату
-        // 2000-01-01 12:00:00 UTC имеет JD = 2451545.0
-        // Наша функция julian_date рассчитывает JD на начало дня (00:00:00),
-        // поэтому julian_date(2000, 1, 1) вернет 2451544.5.
-        let jd = julian_date(2000, 1, 1);
-        assert_eq!(jd, 2451544.5);
-
-        // Еще один тест: 1970-01-01
-        let jd_epoch = julian_date(1970, 1, 1);
-        assert_eq!(jd_epoch, 2440587.5);
-    }
-
-    #[test]
-    fn test_sidereal_time_longitude_ignored() {
-        // Убеждаемся, что LST возвращает одинаковое значение независимо от longitude,
-        // сохраняя зафиксированный баг совместимости с Python.
-        let dt = DateTime::new(2024, 5, 20, 22, 0, 0);
-        let lst1 = get_sidereal_time(10.0, dt);
-        let lst2 = get_sidereal_time(100.0, dt);
-        assert_eq!(lst1, lst2);
-        assert!((0.0..24.0).contains(&lst1));
-    }
 
     #[test]
     fn test_hip_catalog_loading() {
@@ -95,88 +70,5 @@ mod tests {
         for obj in bright_messier {
             assert!(obj.v_mag >= 0.0 && obj.v_mag <= 6.0);
         }
-    }
-
-    #[test]
-    fn test_stereo_projection() {
-        // Полярная звезда имеет dec близкую к 90 градусам.
-        // При наблюдении с Северного полюса (latitude = 90.0) в зените (zenith = 0.0),
-        // она должна проецироваться близко к центру (0.0, 0.0).
-        let dt = DateTime::new(2024, 1, 1, 0, 0, 0);
-
-        // Примерная звезда рядом с Северным полюсом мира (ra=0, dec=89)
-        // ECI: x = cos(89)*cos(0), y = cos(89)*sin(0), z = sin(89)
-        let dec_rad = 89.0f32.to_radians();
-        let star_x = dec_rad.cos();
-        let star_y = 0.0;
-        let star_z = dec_rad.sin();
-
-        let proj = StereoProjection::project(
-            star_x, star_y, star_z,
-            90.0, // Наблюдатель на Северном Полюсе
-            0.0, dt,
-        );
-
-        assert!(proj.is_some());
-        let res = proj.unwrap();
-        // Зенит должен быть около 1 градуса (90 - 89) = 0.0175 рад
-        assert!((res.zenith - 1.0f32.to_radians()).abs() < 1e-4);
-        assert!(res.radius > 0.0);
-        // Координаты на плоскости должны быть очень близки к центру
-        assert!(res.x.abs() < 0.1);
-        assert!(res.y.abs() < 0.1);
-
-        // Звезда сзади наблюдателя (на Южном полюсе) при наблюдении с Севера
-        let south_star_x = 0.0;
-        let south_star_y = 0.0;
-        let south_star_z = -1.0;
-        let proj_invisible =
-            StereoProjection::project(south_star_x, south_star_y, south_star_z, 90.0, 0.0, dt);
-        // Должно быть отфильтровано ограничением zenith > pi / 1.9
-        assert!(proj_invisible.is_none());
-    }
-
-    #[test]
-    fn test_pinhole_projection_center() {
-        // Идеальный случай: камера смотрит прямо на звезду (1, 0, 0).
-        // Звезда должна проецироваться ровно в центр кадра.
-        let camera_config = CameraConfig::from_fov_and_aspect(60.0, 1.5, 800);
-        let center_direction = [1.0, 0.0, 0.0];
-        let tilt_deg = 0.0;
-
-        let proj =
-            PinholeProjection::project(1.0, 0.0, 0.0, center_direction, tilt_deg, &camera_config);
-
-        assert!(proj.is_some());
-        let res = proj.unwrap();
-
-        let expected_x = camera_config.width as f32 / 2.0;
-        let expected_y = camera_config.height as f32 / 2.0;
-
-        assert!((res.x_pix - expected_x).abs() < 1e-4);
-        assert!((res.y_pix - expected_y).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_pinhole_projection_bounds() {
-        let camera_config = CameraConfig::from_fov_and_aspect(60.0, 1.5, 800);
-        let center_direction = [1.0, 0.0, 0.0];
-        let tilt_deg = 0.0;
-
-        // Звезда за спиной камеры (в ECI: [-1, 0, 0] при взгляде на [1, 0, 0])
-        let proj_behind =
-            PinholeProjection::project(-1.0, 0.0, 0.0, center_direction, tilt_deg, &camera_config);
-        assert!(proj_behind.is_none());
-
-        // Звезда слишком сильно в стороне (вне границ с учетом 1/16 gap)
-        let proj_far_side = PinholeProjection::project(
-            0.0,
-            1.0,
-            0.0, // ECI перпендикулярно взгляду
-            center_direction,
-            tilt_deg,
-            &camera_config,
-        );
-        assert!(proj_far_side.is_none());
     }
 }

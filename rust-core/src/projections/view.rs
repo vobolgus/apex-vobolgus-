@@ -1,6 +1,6 @@
 //! The generator preview's camera, so an export can show exactly what the preview shows.
 //!
-//! The SvelteKit preview turns the sky with a free rotation and projects it in view
+//! The `SvelteKit` preview turns the sky with a free rotation and projects it in view
 //! space, whose axes are the screen's `right` and `up` and the chart centre,
 //! `forward`. The export receives that basis in the equatorial frame and projects
 //! with the same formulas. The other copy of them is
@@ -11,6 +11,8 @@
 //! The basis is taken as given, `right` included, so whichever way round the
 //! preview draws the sky (east left or east right), the export follows it.
 
+use super::ProjectionError;
+
 /// Below this the projection divides by (nearly) zero: the point is behind the camera.
 const FINITE_EPSILON: f64 = 1e-4;
 
@@ -18,6 +20,7 @@ const FINITE_EPSILON: f64 = 1e-4;
 /// there instead of running off towards infinity; the chart itself spans -1..1.
 const NORM_LIMIT: f64 = 4.0;
 
+/// Which projection the preview draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewKind {
     /// Stereographic disc, as wide as the shorter side of the chart.
@@ -26,6 +29,8 @@ pub enum ViewKind {
     Pinhole,
 }
 
+/// The preview's camera: a basis of the equatorial frame (`x` to RA 0h, `z` to the
+/// north celestial pole), a projection, a field of view and the chart's size in px.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewProjection {
     kind: ViewKind,
@@ -43,8 +48,14 @@ pub struct ViewProjection {
 impl ViewProjection {
     /// `fov_deg` is the field of view across the disc for `Stereo` (180° shows a
     /// hemisphere) and the horizontal one for `Pinhole`. `width` and `height` are the
-    /// chart size in px. Returns `None` for a degenerate basis vector, a size that is
-    /// not positive or a field of view the projection cannot show.
+    /// chart size in px. The basis vectors may be of any length.
+    ///
+    /// # Errors
+    ///
+    /// [`ProjectionError::DegenerateDirection`] for a basis vector of (nearly) zero
+    /// or no finite length, [`ProjectionError::InvalidSize`] for a size that is not
+    /// positive and finite, [`ProjectionError::InvalidFieldOfView`] for a field of
+    /// view the projection cannot show.
     pub fn new(
         kind: ViewKind,
         right: [f64; 3],
@@ -53,19 +64,19 @@ impl ViewProjection {
         fov_deg: f64,
         width: f64,
         height: f64,
-    ) -> Option<Self> {
-        let right = normalize(right)?;
-        let up = normalize(up)?;
-        let forward = normalize(forward)?;
+    ) -> Result<Self, ProjectionError> {
+        let right = normalize(right).ok_or(ProjectionError::DegenerateDirection)?;
+        let up = normalize(up).ok_or(ProjectionError::DegenerateDirection)?;
+        let forward = normalize(forward).ok_or(ProjectionError::DegenerateDirection)?;
         if !(width > 0.0 && height > 0.0 && width.is_finite() && height.is_finite()) {
-            return None;
+            return Err(ProjectionError::InvalidSize);
         }
         let max_fov = match kind {
             ViewKind::Stereo => 360.0,
             ViewKind::Pinhole => 180.0,
         };
         if !(fov_deg > 0.0 && fov_deg < max_fov) {
-            return None;
+            return Err(ProjectionError::InvalidFieldOfView);
         }
         let (scale_x, scale_y) = match kind {
             ViewKind::Stereo => {
@@ -78,7 +89,7 @@ impl ViewProjection {
                 (1.0 / tan_half_h, 1.0 / tan_half_v)
             }
         };
-        Some(Self {
+        Ok(Self {
             kind,
             right,
             up,
@@ -90,19 +101,26 @@ impl ViewProjection {
         })
     }
 
-    pub fn kind(&self) -> ViewKind {
+    /// The projection drawn.
+    #[must_use]
+    pub const fn kind(&self) -> ViewKind {
         self.kind
     }
 
-    pub fn width(&self) -> f64 {
+    /// Chart width, px.
+    #[must_use]
+    pub const fn width(&self) -> f64 {
         self.width
     }
 
-    pub fn height(&self) -> f64 {
+    /// Chart height, px.
+    #[must_use]
+    pub const fn height(&self) -> f64 {
         self.height
     }
 
     /// Half-sizes of the chart in px: the disc radius twice for `Stereo`.
+    #[must_use]
     pub fn half_extent(&self) -> (f64, f64) {
         match self.kind {
             ViewKind::Stereo => {
@@ -114,7 +132,9 @@ impl ViewProjection {
     }
 
     /// Chart-normalised position, y up: the chart edge is at 1 (the disc's radius
-    /// for `Stereo`, either side of the frame for `Pinhole`).
+    /// for `Stereo`, either side of the frame for `Pinhole`). `None` behind the
+    /// camera or more than four half-sizes out.
+    #[must_use]
     pub fn normalized(&self, x: f64, y: f64, z: f64) -> Option<(f64, f64)> {
         let point = [x, y, z];
         let vx = dot(self.right, point);
@@ -135,9 +155,10 @@ impl ViewProjection {
         Some((nx, ny))
     }
 
-    /// Position in px, origin top-left, y down.
+    /// Position in px, origin top-left, y down, where [`Self::normalized`] has one.
+    #[must_use]
     pub fn project(&self, x: f32, y: f32, z: f32) -> Option<(f32, f32)> {
-        let (nx, ny) = self.normalized(x as f64, y as f64, z as f64)?;
+        let (nx, ny) = self.normalized(f64::from(x), f64::from(y), f64::from(z))?;
         let (half_w, half_h) = self.half_extent();
         Some((
             (self.width * 0.5 + nx * half_w) as f32,
@@ -146,8 +167,9 @@ impl ViewProjection {
     }
 
     /// Whether a disc of `radius` px at `(px, py)` reaches into the chart.
+    #[must_use]
     pub fn touches_chart(&self, px: f32, py: f32, radius: f32) -> bool {
-        let (px, py, radius) = (px as f64, py as f64, radius as f64);
+        let (px, py, radius) = (f64::from(px), f64::from(py), f64::from(radius));
         let dx = px - self.width * 0.5;
         let dy = py - self.height * 0.5;
         let (half_w, half_h) = self.half_extent();
@@ -253,14 +275,18 @@ mod tests {
     #[test]
     fn rejects_a_degenerate_view() {
         let zero = [0.0, 0.0, 0.0];
-        assert!(
-            ViewProjection::new(ViewKind::Stereo, zero, UP, FORWARD, 90.0, 10.0, 10.0).is_none()
+        assert_eq!(
+            ViewProjection::new(ViewKind::Stereo, zero, UP, FORWARD, 90.0, 10.0, 10.0).unwrap_err(),
+            ProjectionError::DegenerateDirection
         );
-        assert!(
-            ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 180.0, 10.0, 10.0).is_none()
+        assert_eq!(
+            ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 180.0, 10.0, 10.0)
+                .unwrap_err(),
+            ProjectionError::InvalidFieldOfView
         );
-        assert!(
-            ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 90.0, 0.0, 10.0).is_none()
+        assert_eq!(
+            ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 90.0, 0.0, 10.0).unwrap_err(),
+            ProjectionError::InvalidSize
         );
     }
 }

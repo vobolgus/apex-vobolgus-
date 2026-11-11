@@ -8,9 +8,9 @@
 
 use rust_core::planets::{Body, all_positions};
 use rust_core::{
-    CameraConfig, DateTime, HipCatalog, MessierCatalog, PinholeProjection, StereoProjection,
-    ViewKind, ViewProjection, get_sidereal_time, julian_date, ra_dec_to_unit_vector,
-    vequinox_hour_angle,
+    CameraConfig, DateTime, HipCatalog, MessierCatalog, PinholeProjection, ProjectionError,
+    StereoProjection, ViewKind, ViewProjection, julian_date, ra_dec_to_unit_vector, sidereal_time,
+    vernal_equinox_hour_angle,
 };
 
 /// FNV-1a over the bits of what it is fed: the same values in the same order give
@@ -150,12 +150,12 @@ fn sidereal_times_and_hour_angles() {
     for ((year, month, day, hour, minute, second), hours, radians) in PINNED {
         let at = DateTime::new(year, month, day, hour, minute, second);
         for longitude in [0.0, 1.234, -2.5] {
-            let lst = get_sidereal_time(longitude, at);
+            let lst = sidereal_time(longitude, at);
             assert!(
                 same_f64(lst, hours),
                 "sidereal time at {at:?}, longitude {longitude} = {lst:?}, pinned {hours:?}"
             );
-            let angle = vequinox_hour_angle(longitude, at);
+            let angle = vernal_equinox_hour_angle(longitude, at);
             assert!(
                 same_f64(angle, radians),
                 "hour angle at {at:?}, longitude {longitude} = {angle:?}, pinned {radians:?}"
@@ -329,8 +329,9 @@ fn stereo_projection_sweep() {
     let mut digest = Digest::new();
     let mut visible = 0;
     for (latitude, longitude, at) in observers {
+        let stereo = StereoProjection::new(latitude, longitude, at);
         for &(x, y, z) in &points {
-            match StereoProjection::project(x, y, z, latitude, longitude, at) {
+            match stereo.project(x, y, z) {
                 Some(p) => {
                     visible += 1;
                     digest.some();
@@ -355,15 +356,9 @@ fn stereo_projection_sweep() {
 
     // Vega over Moscow on the backend's default date.
     let vega = (0.125_096_47, -0.769_413_1, 0.626_381_93);
-    let p = StereoProjection::project(
-        vega.0,
-        vega.1,
-        vega.2,
-        55.75,
-        37.62,
-        DateTime::new(2024, 6, 14, 6, 10, 0),
-    )
-    .expect("Vega is up");
+    let p = StereoProjection::new(55.75, 37.62, DateTime::new(2024, 6, 14, 6, 10, 0))
+        .project(vega.0, vega.1, vega.2)
+        .expect("Vega is up");
     let pinned: [f32; 5] = [-0.24660607, 0.93404615, 0.9660522, 1.8289254, 0.899953];
     let actual = [p.x, p.y, p.radius, p.angle, p.zenith];
     assert_eq!(
@@ -423,13 +418,15 @@ fn pinhole_projection_sweep() {
         digest.f64(camera.focal_length);
         for direction in directions {
             for tilt in tilts {
+                // A camera that cannot be set up sees nothing.
+                let pinhole = PinholeProjection::new(direction, tilt, *camera).ok();
                 for &(x, y, z) in &points {
-                    match PinholeProjection::project(x, y, z, direction, tilt, camera) {
-                        Some(p) => {
+                    match pinhole.and_then(|pinhole| pinhole.project(x, y, z)) {
+                        Some((px, py)) => {
                             visible += 1;
                             digest.some();
-                            digest.f32(p.x_pix);
-                            digest.f32(p.y_pix);
+                            digest.f32(px);
+                            digest.f32(py);
                         }
                         None => digest.none(),
                     }
@@ -446,80 +443,52 @@ fn pinhole_projection_sweep() {
 
     // Betelgeuse in a 60° frame on Orion, tilted.
     let camera = CameraConfig::from_fov_and_aspect(60.0, 1.5, 800);
-    let p = PinholeProjection::project(
-        0.020_889_85,
-        0.991_435_2,
-        0.128_917_84,
-        [0.08, 0.99, 0.05],
-        12.5,
-        &camera,
-    )
-    .expect("Betelgeuse is in the frame");
+    let (px, py) = PinholeProjection::new([0.08, 0.99, 0.05], 12.5, camera)
+        .expect("a valid camera")
+        .project(0.020_889_85, 0.991_435_2, 0.128_917_84)
+        .expect("Betelgeuse is in the frame");
     assert_eq!(
-        [p.x_pix, p.y_pix].map(f32::to_bits),
+        [px, py].map(f32::to_bits),
         [549.1191f32, 287.177].map(f32::to_bits),
-        "Betelgeuse: {p:?}"
+        "Betelgeuse: {:?}",
+        (px, py)
     );
+}
+
+/// A preview camera: projection, right, up, forward, field of view, width, height.
+type View = (ViewKind, [f64; 3], [f64; 3], [f64; 3], f64, f64, f64);
+
+const X: [f64; 3] = [1.0, 0.0, 0.0];
+const Y: [f64; 3] = [0.0, 1.0, 0.0];
+const Z: [f64; 3] = [0.0, 0.0, 1.0];
+
+fn make_view((kind, right, up, forward, fov, width, height): View) -> ViewProjection {
+    ViewProjection::new(kind, right, up, forward, fov, width, height).expect("a valid view")
 }
 
 #[test]
 fn view_projection_sweep() {
-    let tilted = |a: f64| {
-        let (s, c) = a.to_radians().sin_cos();
-        (
-            [c, s, 0.0],
-            [-s * 0.6, c * 0.6, 0.8],
-            [s * 0.8, -c * 0.8, 0.6],
-        )
-    };
-    let (right, up, forward) = tilted(37.0);
-    let views = [
-        (
-            ViewKind::Stereo,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            180.0,
-            1000.0,
-            1000.0,
-        ),
+    let (s, c) = 37.0f64.to_radians().sin_cos();
+    let (right, up, forward) = (
+        [c, s, 0.0],
+        [-s * 0.6, c * 0.6, 0.8],
+        [s * 0.8, -c * 0.8, 0.6],
+    );
+    #[rustfmt::skip]
+    let views: [View; 6] = [
+        (ViewKind::Stereo, X, Y, Z, 180.0, 1000.0, 1000.0),
         (ViewKind::Stereo, right, up, forward, 90.0, 1600.0, 900.0),
-        (
-            ViewKind::Stereo,
-            [-1.0, 0.0, 0.0],
-            [0.0, 0.0, 2.0],
-            [0.0, -3.0, 0.0],
-            300.0,
-            640.0,
-            1280.0,
-        ),
+        (ViewKind::Stereo, [-1.0, 0.0, 0.0], [0.0, 0.0, 2.0], [0.0, -3.0, 0.0], 300.0, 640.0, 1280.0),
         (ViewKind::Pinhole, right, up, forward, 60.0, 1200.0, 800.0),
-        (
-            ViewKind::Pinhole,
-            [-1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            120.0,
-            800.0,
-            1200.0,
-        ),
-        (
-            ViewKind::Pinhole,
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [1.0, 0.0, 0.0],
-            10.5,
-            333.0,
-            777.0,
-        ),
+        (ViewKind::Pinhole, [-1.0, 0.0, 0.0], Y, Z, 120.0, 800.0, 1200.0),
+        (ViewKind::Pinhole, Y, Z, X, 10.5, 333.0, 777.0),
     ];
     let points = sweep_points();
     let mut digest = Digest::new();
     let mut visible = 0;
-    for (kind, right, up, forward, fov, width, height) in views {
-        let view = ViewProjection::new(kind, right, up, forward, fov, width, height)
-            .expect("a valid view");
-        assert_eq!(view.kind(), kind);
+    for spec in views {
+        let view = make_view(spec);
+        assert_eq!(view.kind(), spec.0);
         digest.f64(view.width());
         digest.f64(view.height());
         let (half_w, half_h) = view.half_extent();
@@ -548,10 +517,8 @@ fn view_projection_sweep() {
         }
         for step in -10..=10 {
             let offset = step as f32 * 0.07;
-            let (px, py) = (
-                width as f32 * (0.5 + offset),
-                height as f32 * (0.5 - offset * 1.3),
-            );
+            let px = view.width() as f32 * (0.5 + offset);
+            let py = view.height() as f32 * (0.5 - offset * 1.3);
             for radius in [0.0, 2.0, 40.0] {
                 digest.bytes(&[u8::from(view.touches_chart(px, py, radius))]);
             }
@@ -563,76 +530,25 @@ fn view_projection_sweep() {
         "view digest moved: {:#018x}",
         digest.0
     );
+}
 
-    let rejected = [
-        (
-            ViewKind::Stereo,
-            [0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            90.0,
-            10.0,
-            10.0,
-        ),
-        (
-            ViewKind::Stereo,
-            [1.0, 0.0, 0.0],
-            [0.0, f64::NAN, 0.0],
-            [0.0, 0.0, 1.0],
-            90.0,
-            10.0,
-            10.0,
-        ),
-        (
-            ViewKind::Pinhole,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            180.0,
-            10.0,
-            10.0,
-        ),
-        (
-            ViewKind::Stereo,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            360.0,
-            10.0,
-            10.0,
-        ),
-        (
-            ViewKind::Stereo,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            0.0,
-            10.0,
-            10.0,
-        ),
-        (
-            ViewKind::Stereo,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            90.0,
-            0.0,
-            10.0,
-        ),
-        (
-            ViewKind::Pinhole,
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            90.0,
-            10.0,
-            f64::INFINITY,
-        ),
+#[test]
+fn degenerate_views_are_refused() {
+    #[rustfmt::skip]
+    let refused: [(View, ProjectionError); 7] = [
+        ((ViewKind::Stereo, [0.0; 3], Y, Z, 90.0, 10.0, 10.0), ProjectionError::DegenerateDirection),
+        ((ViewKind::Stereo, X, [0.0, f64::NAN, 0.0], Z, 90.0, 10.0, 10.0), ProjectionError::DegenerateDirection),
+        ((ViewKind::Pinhole, X, Y, Z, 180.0, 10.0, 10.0), ProjectionError::InvalidFieldOfView),
+        ((ViewKind::Stereo, X, Y, Z, 360.0, 10.0, 10.0), ProjectionError::InvalidFieldOfView),
+        ((ViewKind::Stereo, X, Y, Z, 0.0, 10.0, 10.0), ProjectionError::InvalidFieldOfView),
+        ((ViewKind::Stereo, X, Y, Z, 90.0, 0.0, 10.0), ProjectionError::InvalidSize),
+        ((ViewKind::Pinhole, X, Y, Z, 90.0, 10.0, f64::INFINITY), ProjectionError::InvalidSize),
     ];
-    for (kind, right, up, forward, fov, width, height) in rejected {
-        assert!(
-            ViewProjection::new(kind, right, up, forward, fov, width, height).is_none(),
-            "{kind:?} {right:?} {up:?} {forward:?} {fov} {width}x{height} should not make a view"
+    for ((kind, right, up, forward, fov, width, height), error) in refused {
+        assert_eq!(
+            ViewProjection::new(kind, right, up, forward, fov, width, height).map(|_| ()),
+            Err(error),
+            "{kind:?} {right:?} {up:?} {forward:?} {fov} {width}x{height}"
         );
     }
 }

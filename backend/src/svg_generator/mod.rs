@@ -237,6 +237,7 @@ impl SvgGenerator {
             view.width,
             view.height,
         )
+        .ok()
     }
 
     /// The chart as a standalone SVG document.
@@ -392,21 +393,23 @@ impl SvgGenerator {
         // The handler requires the observer when there is no view; the view ignores it.
         let latitude = config.latitude.unwrap_or(0.0);
         let longitude = config.longitude.unwrap_or(0.0);
+        let stereo = StereoProjection::new(latitude, longitude, dt);
+        // A camera that cannot be set up sees nothing.
+        let pinhole = camera_config
+            .and_then(|camera| PinholeProjection::new(center_dir, tilt_angle, camera).ok());
 
         // Вспомогательная функция для проецирования звезды/точки ECI
         let project_point = |x: f32, y: f32, z: f32| -> Option<(f32, f32)> {
             if let Some(ref view) = view {
                 view.project(x, y, z)
             } else if is_stereo {
-                let res = StereoProjection::project(x, y, z, latitude, longitude, dt)?;
+                let res = stereo.project(x, y, z)?;
                 let scale = 190.0;
                 let svg_x = center_x + res.x * scale;
                 let svg_y = center_y - res.y * scale;
                 Some((svg_x, svg_y))
             } else {
-                let camera = camera_config.as_ref()?;
-                let res = PinholeProjection::project(x, y, z, center_dir, tilt_angle, camera)?;
-                Some((res.x_pix, res.y_pix))
+                pinhole.as_ref()?.project(x, y, z)
             }
         };
         // Stars and planets only go into the file when they reach the chart.
@@ -1275,7 +1278,7 @@ mod tests {
                 case["width"].as_f64().unwrap(),
                 case["height"].as_f64().unwrap(),
             )
-            .unwrap_or_else(|| panic!("{name}: the golden camera must be valid"));
+            .unwrap_or_else(|_| panic!("{name}: the golden camera must be valid"));
             let (half_w, half_h) = view.half_extent();
             for point in case["points"].as_array().unwrap() {
                 let [x, y, z] = vec3(&point["sky"]);
