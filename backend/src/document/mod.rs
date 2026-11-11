@@ -130,14 +130,18 @@ pub(crate) enum TextError {
 /// A document that can be made: every page, chart and text has passed its checks.
 #[derive(Debug, Clone)]
 pub(crate) struct Document {
+    /// The pages, in order; at least one.
     pages: Vec<Page>,
 }
 
 /// One page of a document, in mm. An empty page is a blank page.
 #[derive(Debug, Clone)]
 pub(crate) struct Page {
+    /// The page's width, mm.
     width_mm: f64,
+    /// The page's height, mm.
     height_mm: f64,
+    /// The charts, each in its box.
     charts: Vec<PlacedChart>,
     /// Drawn over the charts.
     texts: Vec<DocumentText>,
@@ -146,7 +150,9 @@ pub(crate) struct Page {
 /// A chart and its box on the page, mm from the page's top-left, y down.
 #[derive(Debug, Clone)]
 struct PlacedChart {
+    /// The chart's box on the page.
     placement: Placement,
+    /// What is drawn in it.
     chart: Chart,
 }
 
@@ -173,6 +179,7 @@ impl TryFrom<DocumentRequest> for Document {
     }
 }
 
+/// A length a page or a chart may have for a side.
 fn valid_side(mm: f64) -> bool {
     mm.is_finite() && mm > 0.0 && mm <= MAX_SIDE_MM
 }

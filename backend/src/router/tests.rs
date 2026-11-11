@@ -9,14 +9,14 @@ use tower::ServiceExt;
 use super::*;
 use crate::cached;
 
-async fn test_app() -> Router {
+fn test_app() -> Router {
     let state = AppState::new(Arc::new(rust_core::catalog::HipCatalog::new()));
     router(state, None)
 }
 
 #[tokio::test]
 async fn smoke_health_endpoint() {
-    let app = test_app().await;
+    let app = test_app();
     let response = app
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
         .await
@@ -27,7 +27,7 @@ async fn smoke_health_endpoint() {
 
 #[tokio::test]
 async fn smoke_catalog_layered_loading_contract() {
-    let app = test_app().await;
+    let app = test_app();
 
     let bright_response = app
         .clone()
@@ -48,8 +48,7 @@ async fn smoke_catalog_layered_loading_contract() {
     assert!(bright_stars.iter().all(|s| {
         s.get("v_mag")
             .and_then(Value::as_f64)
-            .map(|v| v <= 4.0)
-            .unwrap_or(false)
+            .is_some_and(|v| v <= 4.0)
     }));
 
     let full_response = app
@@ -105,7 +104,7 @@ async fn get(
 async fn catalog_endpoints_are_cacheable_and_compressed() {
     use std::io::Read;
 
-    let app = test_app().await;
+    let app = test_app();
     for uri in [
         "/api/catalog/bright",
         "/api/catalog/full",
@@ -148,7 +147,7 @@ async fn catalog_endpoints_are_cacheable_and_compressed() {
 
 #[tokio::test]
 async fn a_custom_catalog_slice_is_computed_and_not_cached() {
-    let app = test_app().await;
+    let app = test_app();
     let (status, headers, body) = get(&app, "/api/catalog/full?max_mag=2.0", &[]).await;
     assert_eq!(status, StatusCode::OK);
     assert!(!headers.contains_key(header::CACHE_CONTROL));
@@ -223,7 +222,9 @@ async fn the_static_build_is_served_with_the_api_beside_it() {
         let (status, headers, _) = get(&app, uri, &[]).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
         assert_ne!(
-            headers.get(header::CACHE_CONTROL).map(|v| v.as_bytes()),
+            headers
+                .get(header::CACHE_CONTROL)
+                .map(axum::http::HeaderValue::as_bytes),
             Some("public, max-age=31536000, immutable".as_bytes()),
             "{uri}"
         );
@@ -300,7 +301,7 @@ async fn post(
 async fn an_svg_export_is_gzipped_for_a_client_that_takes_gzip() {
     use std::io::Read;
 
-    let app = test_app().await;
+    let app = test_app();
     let uri = "/api/export?format=svg";
     let (status, headers, plain) = post(&app, uri, &[], &view_chart()).await;
     assert_eq!(status, StatusCode::OK);
@@ -328,7 +329,7 @@ async fn an_svg_export_is_gzipped_for_a_client_that_takes_gzip() {
 
 #[tokio::test]
 async fn exports_past_the_budget_are_refused_until_it_refills() {
-    let app = test_app().await;
+    let app = test_app();
     let client = [(header::HeaderName::from_static("x-real-ip"), "203.0.113.9")];
     // 400 charts at four units each: the whole of a client's burst, taken before
     // anything is looked at (the document itself is then refused as too large).
@@ -357,7 +358,7 @@ async fn exports_past_the_budget_are_refused_until_it_refills() {
 
 #[tokio::test]
 async fn smoke_export_validation_errors() {
-    let app = test_app().await;
+    let app = test_app();
     let base_payload = json!({
         "projection": "stereo",
         "datetime": "2026-05-20T12:00:00Z",
@@ -426,7 +427,7 @@ async fn smoke_export_validation_errors() {
 
 #[tokio::test]
 async fn smoke_export_document_route() {
-    let app = test_app().await;
+    let app = test_app();
     let post = |body: Value| {
         Request::builder()
             .method("POST")

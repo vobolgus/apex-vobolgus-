@@ -39,7 +39,9 @@ enum Projector {
     View(ViewProjection),
     /// The whole sky over an observer, the zenith at `center`.
     Horizon {
+        /// The observer's sky at the chart's instant.
         stereo: StereoProjection,
+        /// Where the zenith is drawn, chart units.
         center: (f32, f32),
     },
     /// A camera aimed at a direction. One that cannot be set up sees nothing.
@@ -72,6 +74,7 @@ pub(super) struct Scene<'a> {
     pub(super) time: DateTime,
     /// The chart is seen through the preview's camera.
     pub(super) has_view: bool,
+    /// How the chart looks at the sky; asked through `Project`.
     projector: Projector,
 }
 

@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 
 use svg2pdf::usvg::fontdb;
 
+/// The bytes of one font file of the frontend's static folder.
 macro_rules! face {
     ($file:literal) => {
         include_bytes!(concat!("../../frontend/static/fonts/", $file)).as_slice()
@@ -30,13 +31,13 @@ const FACES: [&[u8]; 8] = [
 ];
 
 /// `font-family` of the bundled serif.
-pub const SERIF: &str = "PT Serif";
+pub(crate) const SERIF: &str = "PT Serif";
 /// `font-family` of the bundled sans.
-pub const SANS: &str = "PT Sans";
+pub(crate) const SANS: &str = "PT Sans";
 
 /// The system fonts and the bundled faces, found once: scanning the font
 /// directories on every export was a seventh of a PDF's CPU.
-pub fn database() -> Arc<fontdb::Database> {
+pub(crate) fn database() -> Arc<fontdb::Database> {
     static FONTS: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
     FONTS
         .get_or_init(|| {

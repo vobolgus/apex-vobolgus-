@@ -251,15 +251,15 @@ fn page_svg_is_in_mm_and_nests_each_chart_at_its_box() {
     let document = two_page_document();
     let svg = page_svg(&document.pages[0], 0, hip_catalog());
     assert!(svg.starts_with(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 297" width="210mm" height="297mm">"##
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210 297" width="210mm" height="297mm">"#
     ));
-    assert!(svg.contains(r##"<svg x="12" y="12" width="90" height="90" viewBox="0 0 90 90">"##));
-    assert!(svg.contains(r##"<svg x="108" y="12" width="90" height="60" viewBox="0 0 90 60">"##));
+    assert!(svg.contains(r#"<svg x="12" y="12" width="90" height="90" viewBox="0 0 90 90">"#));
+    assert!(svg.contains(r#"<svg x="108" y="12" width="90" height="60" viewBox="0 0 90 60">"#));
     assert_eq!(svg.matches("<svg").count(), 3, "the page and two charts");
     assert_eq!(svg.matches("</svg>").count(), 3);
     assert!(svg.ends_with("</svg></svg>"));
     // Paper styling: no background rect, the sky filled white and outlined.
-    assert!(!svg.contains(r##"fill="none" />"##));
+    assert!(!svg.contains(r#"fill="none" />"#));
     assert!(svg.contains(r##"fill="#ffffff""##));
     assert_eq!(svg.matches(r##"stroke="#c9ced6""##).count(), 2);
 
@@ -301,7 +301,7 @@ fn an_empty_page_is_a_blank_page() {
     let svg = page_svg(&a4(true, vec![]), 0, hip_catalog());
     assert_eq!(
         svg,
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 297 210" width="297mm" height="210mm"></svg>"##
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 297 210" width="297mm" height="210mm"></svg>"#
     );
 }
 
@@ -404,6 +404,22 @@ fn rejects_text_out_of_bounds() {
 
 #[test]
 fn text_is_set_line_by_line_over_the_charts_in_a_bundled_font() {
+    /// The glyph count of every text under `group`, in order.
+    fn texts(group: &usvg::Group, glyphs: &mut Vec<usize>) {
+        for node in group.children() {
+            match node {
+                usvg::Node::Group(group) => texts(group, glyphs),
+                usvg::Node::Text(text) => glyphs.push(
+                    text.layouted()
+                        .iter()
+                        .map(|span| span.positioned_glyphs.len())
+                        .sum(),
+                ),
+                _ => {}
+            }
+        }
+    }
+
     let mut page = a4(false, vec![item(12.0, 30.0, 90.0, 90.0, "stereo")]);
     page.texts.push(DocumentText {
         font: TextFont::Sans,
@@ -425,9 +441,7 @@ fn text_is_set_line_by_line_over_the_charts_in_a_bundled_font() {
     let group = r##"<g font-family="PT Sans" font-size="4.5" font-weight="700" font-style="italic" text-anchor="middle" fill="#000000">"##;
     assert!(svg.contains(group), "{}", &svg[svg.len() - 400..]);
     assert!(
-        svg.contains(
-            r##"<text x="105" y="18" xml:space="preserve">φ &lt; 56° &amp; "LST"</text>"##
-        )
+        svg.contains(r#"<text x="105" y="18" xml:space="preserve">φ &lt; 56° &amp; "LST"</text>"#)
     );
     // A blank line is not drawn; a control character is a space.
     assert_eq!(svg.matches("<text x=\"105\"").count(), 2);
@@ -438,20 +452,6 @@ fn text_is_set_line_by_line_over_the_charts_in_a_bundled_font() {
 
     let tree = usvg::Tree::from_str(&svg, &svg_options()).unwrap();
     let mut glyphs = Vec::new();
-    fn texts(group: &usvg::Group, glyphs: &mut Vec<usize>) {
-        for node in group.children() {
-            match node {
-                usvg::Node::Group(group) => texts(group, glyphs),
-                usvg::Node::Text(text) => glyphs.push(
-                    text.layouted()
-                        .iter()
-                        .map(|span| span.positioned_glyphs.len())
-                        .sum(),
-                ),
-                _ => {}
-            }
-        }
-    }
     texts(tree.root(), &mut glyphs);
     // Laid out: the font was found, or the lines would have no glyphs.
     assert_eq!(glyphs.len(), 2, "two lines drawn");
@@ -528,21 +528,19 @@ fn a_table_is_cells_with_their_own_anchor_and_weight_and_its_rules() {
     assert_eq!(validate_document(&document), Ok(()));
     let svg = page_svg(&document.pages[0], 0, hip_catalog());
     assert!(
-        svg.contains(
-            r##"<text x="12" y="100" font-weight="700" xml:space="preserve">Name</text>"##
-        )
+        svg.contains(r#"<text x="12" y="100" font-weight="700" xml:space="preserve">Name</text>"#)
     );
     assert!(svg.contains(
-        r##"<text x="90" y="100" text-anchor="end" font-weight="700" xml:space="preserve">Mag</text>"##
+        r#"<text x="90" y="100" text-anchor="end" font-weight="700" xml:space="preserve">Mag</text>"#
     ));
-    assert!(svg.contains(r##"<text x="12" y="106" xml:space="preserve">Orion Nebula</text>"##));
+    assert!(svg.contains(r#"<text x="12" y="106" xml:space="preserve">Orion Nebula</text>"#));
     assert!(
-        svg.contains(r##"<text x="90" y="106" text-anchor="end" xml:space="preserve">4.0</text>"##)
+        svg.contains(r#"<text x="90" y="106" text-anchor="end" xml:space="preserve">4.0</text>"#)
     );
     // The rule is in the text's own group, so it turns with the text.
     let rule =
         r##"<line x1="12" y1="101.5" x2="90" y2="101.5" stroke="#000000" stroke-width="0.2" />"##;
-    let group = svg.find(r##"transform="rotate(90 51 103)">"##).unwrap();
+    let group = svg.find(r#"transform="rotate(90 51 103)">"#).unwrap();
     assert!(svg.find(rule).unwrap() > group);
     assert!(svg.find(rule).unwrap() < svg.rfind("</g>").unwrap());
 

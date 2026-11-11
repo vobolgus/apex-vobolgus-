@@ -1,0 +1,3 @@
+# Names the docs use as they are written, which clippy would otherwise want in
+# backticks as if they were code.
+doc-valid-idents = ["ETag", "ParaType", "SvelteKit", ".."]

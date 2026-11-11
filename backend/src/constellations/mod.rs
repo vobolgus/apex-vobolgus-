@@ -28,6 +28,7 @@ pub(crate) struct Figure {
 /// A closed boundary polygon: `[ra_deg, dec_deg]` vertices, J2000.
 pub(crate) type Polygon = Vec<[f32; 2]>;
 
+/// The stick figures, read on first use.
 // Загружаем созвездия из JSON один раз
 static FIGURES: LazyLock<HashMap<String, Figure>> = LazyLock::new(|| {
     let json_str = include_str!("../../assets/constellations/constellations_data.json");
@@ -35,6 +36,7 @@ static FIGURES: LazyLock<HashMap<String, Figure>> = LazyLock::new(|| {
         .expect("invariant violation: embedded backend/assets/constellations/constellations_data.json is malformed; this indicates checked-in data corruption")
 });
 
+/// The boundaries, read on first use.
 static BOUNDARIES: LazyLock<HashMap<String, Vec<Polygon>>> = LazyLock::new(|| {
     let json_str = include_str!("../../assets/constellations/constellation_boundaries.json");
     serde_json::from_str(json_str)

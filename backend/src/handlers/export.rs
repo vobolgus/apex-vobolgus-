@@ -22,6 +22,7 @@ use crate::pdf;
 use crate::request::RenderConfig;
 use crate::state::AppState;
 
+/// A permit a chart being drawn.
 static CHART_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_CHARTS);
 
 /// The query of `/api/export`.
@@ -41,6 +42,7 @@ enum Format {
 }
 
 impl ExportQuery {
+    /// What the query asks the chart to be sent as.
     fn format(&self) -> Format {
         match self.format.as_deref() {
             Some("svg") => Format::Svg,
@@ -93,6 +95,7 @@ async fn draw_off_the_runtime(
     .map_err(ApiError::ChartLost)?
 }
 
+/// Draws `chart` and packs it as `format` asks: the file and the headers it goes out with.
 fn draw_chart(
     chart: &Chart,
     hip_catalog: &HipCatalog,

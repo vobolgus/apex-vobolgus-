@@ -218,11 +218,11 @@ fn view_config(projection: &str) -> RenderConfig {
 #[test]
 fn view_sizes_the_chart_and_fills_the_disc() {
     let svg = render(&view_config("stereo"));
-    assert!(svg.contains(r##"viewBox="0 0 1104 1104""##));
+    assert!(svg.contains(r#"viewBox="0 0 1104 1104""#));
     assert!(svg.contains(r##"<circle cx="552" cy="552" r="552" fill="#ffffff" />"##));
     // No horizon in a view: no compass letters and no horizon ring.
     assert!(!svg.contains(">N</text>"));
-    assert!(!svg.contains(r##"stroke-width="2.5""##));
+    assert!(!svg.contains(r#"stroke-width="2.5""#));
 }
 
 #[test]
@@ -392,14 +392,13 @@ fn view_px_scales_star_radii_and_line_widths_in_place() {
     assert!(base_stars.len() > 100);
     let view = view_of(&cfg);
     for (position, r) in &doubled_stars {
-        match base_stars.get(position) {
+        if let Some(base_r) = base_stars.get(position) {
             // Radii are printed to 0.01.
-            Some(base_r) => assert!((r - 2.0 * base_r).abs() <= 0.015, "{position:?}"),
-            None => {
-                let x: f32 = position.0.parse().unwrap();
-                let y: f32 = position.1.parse().unwrap();
-                assert!(!view.touches_chart(x, y, r / 2.0 - 0.02), "{position:?}");
-            }
+            assert!((r - 2.0 * base_r).abs() <= 0.015, "{position:?}");
+        } else {
+            let x: f32 = position.0.parse().unwrap();
+            let y: f32 = position.1.parse().unwrap();
+            assert!(!view.touches_chart(x, y, r / 2.0 - 0.02), "{position:?}");
         }
     }
     assert!(base_stars.keys().all(|p| doubled_stars.contains_key(p)));
@@ -451,6 +450,13 @@ fn view_px_scales_star_radii_and_line_widths_in_place() {
 
 #[test]
 fn view_px_scales_text_sizes_and_label_offsets() {
+    fn texts<'a>(svg: &[&'a str]) -> Vec<&'a str> {
+        svg.iter()
+            .copied()
+            .filter(|e| e.starts_with("text "))
+            .collect()
+    }
+
     let mut cfg = view_config("stereo");
     cfg.layers.constellations = true;
     cfg.layers.constellation_names = true;
@@ -466,12 +472,6 @@ fn view_px_scales_text_sizes_and_label_offsets() {
     };
     let (base, doubled) = (with_px(None), with_px(Some(2.0)));
     let (base, doubled) = (elements(&base), elements(&doubled));
-    fn texts<'a>(svg: &[&'a str]) -> Vec<&'a str> {
-        svg.iter()
-            .copied()
-            .filter(|e| e.starts_with("text "))
-            .collect()
-    }
     let planet = |svg: &[&str], slug: &str| -> (f32, f32) {
         let circle = svg
             .iter()
@@ -498,7 +498,7 @@ fn view_px_scales_text_sizes_and_label_offsets() {
         } else if text.contains(r##"fill="#A0A0A0""##) || text.contains(r##"fill="#606060""##) {
             // The info lines and the footer: their distance from the bottom edge doubles.
             assert!(close(1104.0 - y2, 2.0 * (1104.0 - y)), "{text}");
-            let centred = text.contains(r##"text-anchor="middle""##);
+            let centred = text.contains(r#"text-anchor="middle""#);
             assert!(close(x2, if centred { x } else { 2.0 * x }), "{text}");
             info += 1;
         } else {
@@ -546,7 +546,7 @@ fn background_none_paints_nothing_behind_the_chart() {
     let svg = render(&cfg);
     assert!(!svg.contains("fill=\"none\" />"), "no background rect");
     assert_eq!(
-        svg.matches(r##"<rect width="100%" height="100%""##).count(),
+        svg.matches(r#"<rect width="100%" height="100%""#).count(),
         1,
         "only the sky's own fill"
     );
@@ -574,9 +574,8 @@ fn render_chart_prefixes_every_id_and_nests_at_the_placement() {
     );
     let nested = String::from(nested);
     assert!(
-        nested.starts_with(
-            r##"<svg x="12" y="20.5" width="90" height="90" viewBox="0 0 1104 1104">"##
-        )
+        nested
+            .starts_with(r#"<svg x="12" y="20.5" width="90" height="90" viewBox="0 0 1104 1104">"#)
     );
 
     let ids = |svg: &str| -> Vec<String> {
@@ -593,7 +592,7 @@ fn render_chart_prefixes_every_id_and_nests_at_the_placement() {
         .map(|id| format!("p1c2-{id}"))
         .collect();
     assert_eq!(ids(&nested), prefixed);
-    assert!(nested.contains(r##"clip-path="url(#p1c2-sky-mask)""##));
+    assert!(nested.contains(r#"clip-path="url(#p1c2-sky-mask)""#));
     assert!(!nested.contains("url(#sky-mask)"));
 }
 

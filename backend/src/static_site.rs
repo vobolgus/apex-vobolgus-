@@ -18,7 +18,9 @@ use axum::response::Response;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
+/// `Cache-Control` of a file whose name changes when its content does.
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+/// `Cache-Control` of a file that is asked about on every visit.
 const REVALIDATE: &str = "no-cache";
 
 /// `Cache-Control: value` on the responses that carry (or confirm) a file. A 404
@@ -34,7 +36,7 @@ fn cache_control<B>(
 }
 
 /// Routes that serve the static build in `dir`, to be the app's fallback.
-pub fn router<S: Clone + Send + Sync + 'static>(dir: &Path) -> Router<S> {
+pub(crate) fn router<S: Clone + Send + Sync + 'static>(dir: &Path) -> Router<S> {
     let packed = |dir: &Path| ServeDir::new(dir).precompressed_br().precompressed_gzip();
     let immutable = packed(&dir.join("_app/immutable"));
     let site = packed(dir).not_found_service(ServeFile::new(dir.join("404.html")));

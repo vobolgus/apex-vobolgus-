@@ -6,7 +6,7 @@ use super::scene::{Project, Scene};
 use crate::svg::SvgWriter;
 
 /// Star radius of the generator preview, in its px: `frontend/src/lib/constants.ts`
-/// (STAR_BASE_RADIUS_PX, STAR_MAG_COEFF, STAR_MIN_RADIUS_PX). A `view` is sized in
+/// (`STAR_BASE_RADIUS_PX`, `STAR_MAG_COEFF`, `STAR_MIN_RADIUS_PX`). A `view` is sized in
 /// those px, so the exported stars come out as large as on screen.
 fn preview_star_radius(v_mag: f32) -> f32 {
     const BASE_RADIUS_PX: f32 = 4.0;

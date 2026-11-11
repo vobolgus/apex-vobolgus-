@@ -105,6 +105,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>) {
     }
 }
 
+/// The equatorial grid: thin lines of declination and of right ascension.
 fn draw_equatorial_grid(svg: &mut SvgWriter, scene: &Scene<'_>, grid_color: &str, px: f32) {
     let style = PolylineStyle {
         stroke: grid_color,

@@ -19,17 +19,22 @@ use crate::payload::{self, BRIGHT_MAX_MAG, FULL_MAX_MAG};
 
 /// Fresh for a day, and for a week after that the stale copy is shown while a new
 /// one is fetched behind it: the catalogs only change with a deploy.
-pub const CATALOG_CACHE_CONTROL: &str = "public, max-age=86400, stale-while-revalidate=604800";
+pub(crate) const CATALOG_CACHE_CONTROL: &str =
+    "public, max-age=86400, stale-while-revalidate=604800";
 
 /// A JSON body serialized and compressed once.
-pub struct CachedJson {
+pub(crate) struct CachedJson {
+    /// The JSON as it is.
     body: Bytes,
+    /// The same JSON, gzipped.
     gzip: Bytes,
+    /// What names this body to a client that may already hold it.
     etag: HeaderValue,
 }
 
 impl CachedJson {
-    pub fn new<T: Serialize + ?Sized>(value: &T) -> Self {
+    /// `value` as JSON, with its gzip and its tag.
+    pub(crate) fn new<T: Serialize + ?Sized>(value: &T) -> Self {
         let body = serde_json::to_vec(value).expect("catalog data serializes to JSON");
         let mut encoder = GzEncoder::new(Vec::with_capacity(body.len() / 3), Compression::best());
         encoder
@@ -48,7 +53,7 @@ impl CachedJson {
 
     /// The response for a request with these headers: a 304 when the client
     /// already holds this body, else the body, gzipped when the client takes gzip.
-    pub fn response(&self, request: &HeaderMap) -> Response {
+    pub(crate) fn response(&self, request: &HeaderMap) -> Response {
         let caching = [
             (header::ETAG, self.etag.clone()),
             (
@@ -121,41 +126,52 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// The catalog endpoints' default answers, each built on first use (`warm` builds
 /// them all at startup, so no visitor waits for it).
 #[derive(Default)]
-pub struct CatalogCache {
+pub(crate) struct CatalogCache {
+    /// `/api/catalog/bright`.
     bright: OnceLock<CachedJson>,
+    /// `/api/catalog/full`.
     full: OnceLock<CachedJson>,
+    /// `/api/constellations`.
     constellations: OnceLock<CachedJson>,
+    /// `/api/constellation-boundaries`.
     constellation_boundaries: OnceLock<CachedJson>,
+    /// `/api/catalog/messier`.
     messier: OnceLock<CachedJson>,
 }
 
 impl CatalogCache {
-    pub fn bright(&self, catalog: &HipCatalog) -> &CachedJson {
+    /// The stars of `/api/catalog/bright`, to its default limit.
+    pub(crate) fn bright(&self, catalog: &HipCatalog) -> &CachedJson {
         self.bright
             .get_or_init(|| CachedJson::new(&payload::stars(catalog, BRIGHT_MAX_MAG, None)))
     }
 
-    pub fn full(&self, catalog: &HipCatalog) -> &CachedJson {
+    /// The stars of `/api/catalog/full`, to its default limit.
+    pub(crate) fn full(&self, catalog: &HipCatalog) -> &CachedJson {
         self.full
             .get_or_init(|| CachedJson::new(&payload::stars(catalog, FULL_MAX_MAG, None)))
     }
 
-    pub fn constellations(&self, catalog: &HipCatalog) -> &CachedJson {
+    /// The stick figures of `/api/constellations`.
+    pub(crate) fn constellations(&self, catalog: &HipCatalog) -> &CachedJson {
         self.constellations
             .get_or_init(|| CachedJson::new(&payload::constellation_figures(catalog)))
     }
 
-    pub fn constellation_boundaries(&self) -> &CachedJson {
+    /// The boundaries of `/api/constellation-boundaries`.
+    pub(crate) fn constellation_boundaries(&self) -> &CachedJson {
         self.constellation_boundaries
             .get_or_init(|| CachedJson::new(&payload::constellation_boundaries()))
     }
 
-    pub fn messier(&self) -> &CachedJson {
+    /// The objects of `/api/catalog/messier`.
+    pub(crate) fn messier(&self) -> &CachedJson {
         self.messier
             .get_or_init(|| CachedJson::new(&payload::messier()))
     }
 
-    pub fn warm(&self, catalog: &HipCatalog) {
+    /// Builds every answer now.
+    pub(crate) fn warm(&self, catalog: &HipCatalog) {
         self.bright(catalog);
         self.full(catalog);
         self.constellations(catalog);

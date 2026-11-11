@@ -160,7 +160,7 @@ async fn a_view_needs_no_observer_and_exports_svg_and_pdf() {
     assert!(
         String::from_utf8(body)
             .unwrap()
-            .contains(r##"viewBox="0 0 1104 1104""##)
+            .contains(r#"viewBox="0 0 1104 1104""#)
     );
 
     let (_, pdf) = export(view_payload(), None).await.unwrap();

@@ -53,6 +53,8 @@ pub(crate) struct RenderConfig {
 }
 
 /// A ring on the sky: every point `radius_deg` from (`ra_deg`, `dec_deg`).
+// The unit is part of every field's name on the wire.
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SkyMark {
     /// Right ascension of the ring's centre, degrees, J2000.

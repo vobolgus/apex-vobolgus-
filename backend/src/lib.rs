@@ -5,9 +5,6 @@
 //! The crate is the binary's library: [`router`] is the whole app and [`AppState`]
 //! what it runs on; `main` only reads the environment and listens.
 
-// The workspace's pedantic lints and missing docs: lifted in the backend step.
-#![allow(clippy::pedantic, missing_docs)]
-
 mod budget;
 mod cached;
 mod chart;
@@ -26,7 +23,15 @@ mod state;
 mod static_site;
 mod svg;
 
+// The pins are tables of cases, some a few hundred lines long, with small helpers
+// that take a fixture whole: written to be read down, and not to be reshaped.
 #[cfg(test)]
+#[allow(
+    clippy::format_push_string,
+    clippy::needless_pass_by_value,
+    clippy::needless_raw_string_hashes,
+    clippy::too_many_lines
+)]
 mod golden;
 
 pub use router::router;

@@ -16,6 +16,7 @@ use crate::limits::{CONCURRENT_DOCUMENTS, PDF_CHART_COST};
 use crate::request::DocumentRequest;
 use crate::state::AppState;
 
+/// A permit a document being converted.
 static DOCUMENT_PERMITS: Semaphore = Semaphore::const_new(CONCURRENT_DOCUMENTS);
 
 /// `POST /api/export/document`, charged to the export budget by its charts

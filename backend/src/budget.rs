@@ -31,11 +31,14 @@ const SHARED_CLIENT: &str = "shared";
 /// A token bucket: what is left to spend, and when that was last worked out.
 #[derive(Clone, Copy)]
 struct Bucket {
+    /// Units left to spend.
     tokens: f64,
+    /// When `tokens` was last brought up to date.
     updated: Instant,
 }
 
 impl Bucket {
+    /// A bucket holding its whole burst.
     fn full(burst: f64, now: Instant) -> Self {
         Self {
             tokens: burst,
@@ -43,6 +46,7 @@ impl Bucket {
         }
     }
 
+    /// Adds what `rate` units a second have brought since the last look, up to `burst`.
     fn refill(&mut self, burst: f64, rate: f64, now: Instant) {
         let elapsed = now.saturating_duration_since(self.updated).as_secs_f64();
         self.tokens = (self.tokens + elapsed * rate).min(burst);
@@ -61,7 +65,9 @@ impl Bucket {
 
 /// Every bucket there is: one per client, by its key, and the server's.
 struct Buckets {
+    /// A bucket a client, by `client_key`.
     clients: HashMap<String, Bucket>,
+    /// The ceiling over them all.
     server: Bucket,
 }
 
@@ -82,6 +88,7 @@ impl OverBudget {
 
 /// The export budget; one per server, in `AppState`.
 pub(crate) struct ExportBudget {
+    /// Behind one lock: a charge takes from a client's bucket and the server's together.
     buckets: Mutex<Buckets>,
 }
 
@@ -92,6 +99,7 @@ impl Default for ExportBudget {
 }
 
 impl ExportBudget {
+    /// A full budget as of `now`.
     fn new(now: Instant) -> Self {
         Self {
             buckets: Mutex::new(Buckets {
@@ -107,6 +115,7 @@ impl ExportBudget {
         self.charge_at(client, cost, Instant::now())
     }
 
+    /// `charge` at the instant `now`, which the tests choose for themselves.
     fn charge_at(&self, client: &str, cost: f64, now: Instant) -> Result<(), OverBudget> {
         // A request dearer than a full bucket would never pass: it waits for a full one.
         let cost = cost.min(CLIENT_BURST);

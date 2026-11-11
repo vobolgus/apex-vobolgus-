@@ -145,8 +145,11 @@ pub(crate) struct Placement {
 /// projection it names and the camera of its view.
 #[derive(Debug, Clone)]
 pub(crate) struct Chart {
+    /// The settings as they were sent.
     config: RenderConfig,
+    /// What `config.projection` names.
     projection: Projection,
+    /// The camera of `config.view`, when there is one.
     view: Option<ViewProjection>,
 }
 

@@ -16,6 +16,8 @@ struct Marker {
     color: &'static str,
 }
 
+/// The marker of `body`. The Earth has one for the match to be whole; no chart of
+/// the sky shows it.
 const fn marker(body: Body) -> Marker {
     let (slug, label, color) = match body {
         Body::Sun => ("sun", "Sun", "#FFD166"),

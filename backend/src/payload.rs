@@ -90,8 +90,11 @@ pub(crate) fn messier() -> Vec<MessierEntry> {
 /// A direction on the sky: a unit vector in the J2000 equatorial frame.
 #[derive(Debug, Serialize)]
 pub(crate) struct Point {
+    /// Towards RA 0h on the equator.
     x: f32,
+    /// Towards RA 6h on the equator.
     y: f32,
+    /// Towards the north celestial pole.
     z: f32,
 }
 

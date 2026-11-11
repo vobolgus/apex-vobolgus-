@@ -9,6 +9,7 @@ use std::fmt;
 /// An SVG document, or a part of one, being written.
 #[derive(Debug, Default)]
 pub(crate) struct SvgWriter {
+    /// What has been written so far.
     text: String,
 }
 
