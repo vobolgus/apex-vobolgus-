@@ -63,7 +63,7 @@ impl StereoProjection {
         let (sl, cl) = (self.sin_latitude, self.cos_latitude);
         let (st, ct) = (self.sin_sidereal, self.cos_sidereal);
 
-        // Умножение матрицы поворота на ECI координаты звезды (star_x, star_y, star_z)
+        // Умножение матрицы поворота на ECI координаты звезды (x, y, z)
         let x = f64::from(x);
         let y = f64::from(y);
         let z = f64::from(z);
