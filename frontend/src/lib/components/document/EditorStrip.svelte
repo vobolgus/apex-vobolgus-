@@ -86,22 +86,22 @@
 								aria-hidden="true"
 							>
 								<rect class="sheet-paper" width={mini.mmW} height={mini.mmH} />
-								{#each chartsOf(page) as item (item.id)}
-									{#if item.chart.view.projection === 'stereographic'}
+								{#each chartsOf(page) as chart (chart.id)}
+									{#if chart.chart.view.projection === 'stereographic'}
 										<ellipse
 											class="sheet-chart"
-											cx={item.frame.x + item.frame.w / 2}
-											cy={item.frame.y + item.frame.h / 2}
-											rx={item.frame.w / 2}
-											ry={item.frame.h / 2}
+											cx={chart.frame.x + chart.frame.w / 2}
+											cy={chart.frame.y + chart.frame.h / 2}
+											rx={chart.frame.w / 2}
+											ry={chart.frame.h / 2}
 										/>
 									{:else}
 										<rect
 											class="sheet-chart"
-											x={item.frame.x}
-											y={item.frame.y}
-											width={item.frame.w}
-											height={item.frame.h}
+											x={chart.frame.x}
+											y={chart.frame.y}
+											width={chart.frame.w}
+											height={chart.frame.h}
 											rx="3"
 										/>
 									{/if}

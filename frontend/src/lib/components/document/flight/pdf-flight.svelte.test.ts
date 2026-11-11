@@ -4,7 +4,7 @@ import type { ChartLayers, ChartView } from '$lib/document/types';
 import { MAX_CHARTS } from '$lib/api/wire/limits';
 import { DocumentStore } from '$lib/document/document.svelte';
 import { memoryStorage } from '$lib/document/test-support';
-import { chartBoxOnScreen, PDF_FLIGHT_MS, type Box, type LandingTarget } from './flight';
+import { chartBoxOnScreen, PDF_FLIGHT_MS, type FlightBox, type LandingTarget } from './flight';
 import { PdfFlight, type FlightPanel, type PdfFlightHost } from './pdf-flight.svelte';
 
 const VIEW: ChartView = {
@@ -25,7 +25,7 @@ const LAYERS: ChartLayers = {
 	planets: false
 };
 
-const CANVAS_BOX: Box = { x: 100, y: 80, width: 600, height: 600 };
+const CANVAS_BOX: FlightBox = { x: 100, y: 80, width: 600, height: 600 };
 const TARGET: LandingTarget = { box: { x: 20, y: 300, width: 60, height: 60 }, corner: '50%' };
 
 /** A preview canvas on screen that can be animated, as a browser's is. */

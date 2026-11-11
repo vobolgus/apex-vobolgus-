@@ -43,3 +43,17 @@ a {
 a:hover {
 	opacity: 0.85;
 }
+
+/*
+ * For a screen reader only: words that say what a picture or a state shows. Out of
+ * sight and out of the layout, but still read. One rule for every component.
+ */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}

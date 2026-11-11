@@ -40,14 +40,14 @@
 	interface Props {
 		block: TypesetBlock;
 		/** Its page: a text's fields and a table's rows read a chart of it. */
-		sheet: DocPage;
+		page: DocPage;
 		/** The document: a block may read a chart on another page than its own. */
 		pages: readonly DocPage[];
 		/** 0-based position among the page's texts and tables, for the accessible name. */
 		index: number;
 		count: number;
-		/** The page, mm. */
-		page: Size;
+		/** The page's size, mm. */
+		pageSize: Size;
 		/** Screen px per mm. */
 		scale: number;
 		/** Where to draw it, mm on its page; off the page while it is dragged to another. */
@@ -71,11 +71,11 @@
 
 	let {
 		block,
-		sheet,
+		page,
 		pages,
 		index,
 		count,
-		page,
+		pageSize,
 		scale,
 		frame,
 		rotation,
@@ -99,18 +99,18 @@
 	const layout = $derived(
 		editing
 			? measuredLayout(typing.draft, block.style, frame.w)
-			: shownLayout(sheet, block, frame.w, pages)
+			: shownLayout(page, block, frame.w, pages)
 	);
 	const name = $derived.by(() => {
 		if (block.kind === 'table') return `Table ${index + 1} of ${count}: ${tableName(block.table)}`;
-		const shown = shownText(sheet, block, pages).replace(/\s+/g, ' ').trim();
+		const shown = shownText(page, block, pages).replace(/\s+/g, ' ').trim();
 		const start = shown.length > 60 ? `${shown.slice(0, 60)}…` : shown;
 		return `Text ${index + 1} of ${count}: ${start}`;
 	});
 	/** Typed in, it stands upright where it is. */
 	const turn = $derived(editing ? 0 : rotation);
 	const placement = $derived(
-		typePlacement(frame, layout.height, turn, page, scale, interactive && !editing)
+		typePlacement(frame, layout.height, turn, pageSize, scale, interactive && !editing)
 	);
 
 	// The frame's height is the lines': kept up to date for whoever needs the box.
@@ -143,7 +143,7 @@
 
 <BlockFrame
 	{block}
-	{page}
+	{pageSize}
 	box={placement.box}
 	{mode}
 	{interactive}
@@ -174,7 +174,7 @@
 			{/if}
 			<ReadsRow
 				{block}
-				page={sheet}
+				{page}
 				{pages}
 				words={editing ? typing.draft : words}
 				blocks={actions.blocks}

@@ -45,8 +45,11 @@ export interface ChartLayers {
 	planets: boolean;
 }
 
-/** A ring on the sky: every point `radiusDeg` from (`raDeg`, `decDeg`). */
-export interface SkyMark {
+/**
+ * A ring on a chart's sky: every point `radiusDeg` from (`raDeg`, `decDeg`). Sent to
+ * the backend it is the wire's `SkyMark` (`chartRenderConfig`).
+ */
+export interface ChartMark {
 	raDeg: number;
 	decDeg: number;
 	radiusDeg: number;
@@ -62,7 +65,7 @@ export interface ChartSnapshot {
 	/** ISO, also the planets' time. */
 	createdAt: string;
 	/** Places ringed on it: where a close-up of this sky looks (a finder card). */
-	marks?: SkyMark[];
+	marks?: ChartMark[];
 }
 
 /**

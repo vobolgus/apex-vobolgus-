@@ -13,7 +13,7 @@
 import { tick } from 'svelte';
 import type { DocumentStore } from '$lib/document/document.svelte';
 import { Announcer } from '$lib/ui/announcer.svelte';
-import type { Box, Landing, LandingTarget } from '../flight/flight';
+import type { FlightBox, Landing, LandingTarget } from '../flight/flight';
 import type { PickerAnchor } from '../templates/pick.svelte';
 import { flash, growIn, makeRoom, reducedMotion, shrinkOut } from './list-motion';
 
@@ -229,14 +229,14 @@ export class PagesList {
 	}
 
 	/**
-	 * Where every chart is on the thumbnails just now, by item id. The page takes
+	 * Where every chart is on the thumbnails just now, by block id. The page takes
 	 * this before an Add and hands it back in the `landing`, so the charts the Add
 	 * moves can be played from where they were.
 	 */
-	chartBoxes(): Record<string, Box> {
-		const boxes: Record<string, Box> = {};
+	chartBoxes(): Record<string, FlightBox> {
+		const boxes: Record<string, FlightBox> = {};
 		for (const chart of this.element?.querySelectorAll<HTMLElement>('.chart') ?? []) {
-			const id = chart.dataset.itemId;
+			const id = chart.dataset.blockId;
 			if (id) boxes[id] = chart.getBoundingClientRect();
 		}
 		return boxes;
@@ -318,7 +318,7 @@ function slideOffset(inside: HTMLElement): number {
  */
 function chartTarget(cell: HTMLElement, blockId: string): LandingTarget | null {
 	const chart = Array.from(cell.querySelectorAll<HTMLElement>('.chart')).find(
-		(element) => element.dataset.itemId === blockId
+		(element) => element.dataset.blockId === blockId
 	);
 	if (!chart) return null;
 	const rect = chart.getBoundingClientRect();

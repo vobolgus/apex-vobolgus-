@@ -2,7 +2,7 @@
  * Where the focus is, and where it is sent, in the page editor: every look into the
  * dialog's own DOM that the controllers need, in one place.
  *
- * A block is found by its `data-item-id`, its focusable part by `role="button"`, the
+ * A block is found by its `data-block-id`, its focusable part by `role="button"`, the
  * page shown by its slot's `data-role="current"`, the paper by `data-paper`. Before
  * the dialog is there, nothing is found and nothing is focused.
  */
@@ -19,8 +19,8 @@ export class EditorFocus {
 	/** A block's element in the editor, on whichever page it is. */
 	element(blockId: string): HTMLElement | null {
 		return (
-			Array.from(this.#root()?.querySelectorAll<HTMLElement>('[data-item-id]') ?? []).find(
-				(element) => element.dataset.itemId === blockId
+			Array.from(this.#root()?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []).find(
+				(element) => element.dataset.blockId === blockId
 			) ?? null
 		);
 	}
@@ -28,14 +28,14 @@ export class EditorFocus {
 	/** Onto a block: it is selected. */
 	block(blockId: string): void {
 		this.#root()
-			?.querySelector<HTMLElement>(`[data-item-id="${blockId}"] [role="button"]`)
+			?.querySelector<HTMLElement>(`[data-block-id="${blockId}"] [role="button"]`)
 			?.focus({ preventScroll: true });
 	}
 
 	/** Onto a block if it is on the page shown; says whether it was. */
 	blockOnCurrent(blockId: string): boolean {
 		const block = this.#root()?.querySelector<HTMLElement>(
-			`${CURRENT} [data-item-id="${blockId}"] [role="button"]`
+			`${CURRENT} [data-block-id="${blockId}"] [role="button"]`
 		);
 		block?.focus({ preventScroll: true });
 		return Boolean(block);
@@ -44,7 +44,8 @@ export class EditorFocus {
 	/** Onto the block at `index` on the page shown, else the last one, else the page itself. */
 	blockAt(index: number): void {
 		const blocks = Array.from(
-			this.#root()?.querySelectorAll<HTMLElement>(`${CURRENT} [data-item-id] [role="button"]`) ?? []
+			this.#root()?.querySelectorAll<HTMLElement>(`${CURRENT} [data-block-id] [role="button"]`) ??
+				[]
 		);
 		const block = blocks[Math.min(index, blocks.length - 1)];
 		if (block) block.focus({ preventScroll: true });
@@ -68,9 +69,9 @@ export class EditorFocus {
 	/** The id of the block of the page shown that has the focus (itself, its field or its toolbar). */
 	selectedId(): string | null {
 		const selected = (document.activeElement as Element | null)?.closest<HTMLElement>(
-			`${CURRENT} [data-item-id]`
+			`${CURRENT} [data-block-id]`
 		);
-		return selected?.dataset.itemId ?? null;
+		return selected?.dataset.blockId ?? null;
 	}
 
 	/** Whether the focus is on something in the editor, not left on the dialog or lost to the body. */

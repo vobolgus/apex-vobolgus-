@@ -144,7 +144,7 @@ export function flash(cell: HTMLElement, delay: number, bump: boolean): void {
 export function makeRoom(cell: HTMLElement, landing: Landing): void {
 	if (!landing.before) return;
 	for (const chart of cell.querySelectorAll<HTMLElement>('.chart')) {
-		const id = chart.dataset.itemId;
+		const id = chart.dataset.blockId;
 		const before = id && id !== landing.blockId ? landing.before[id] : undefined;
 		if (!before || typeof chart.animate !== 'function') continue;
 		const frames = settleKeyframes(before, chart.getBoundingClientRect());

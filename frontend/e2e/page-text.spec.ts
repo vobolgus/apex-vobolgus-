@@ -82,7 +82,7 @@ async function drag(page: Page, from: { x: number; y: number }, to: { x: number;
 /** The element's box once it has stopped moving: a text let go comes to rest over a moment. */
 async function settledBox(locator: Locator) {
 	// At rest, not on its way there: its handles take no press until it is.
-	await expect(locator.locator('xpath=ancestor::*[@data-item-id][1]')).toHaveAttribute(
+	await expect(locator.locator('xpath=ancestor::*[@data-block-id][1]')).toHaveAttribute(
 		'data-state',
 		'idle'
 	);
@@ -331,7 +331,7 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 	const badges = editor.locator('.slot[data-role="current"] .badge');
 	await expect(badges).toHaveText(['1', '2']);
 	await expect(editor.locator('[data-kind="chart"].is-linked')).toHaveAttribute(
-		'data-item-id',
+		'data-block-id',
 		'e2e-frame'
 	);
 
@@ -343,7 +343,7 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		'true'
 	);
 	await expect(editor.locator('[data-kind="chart"].is-linked')).toHaveAttribute(
-		'data-item-id',
+		'data-block-id',
 		'e2e-disc'
 	);
 	await expect.poll(async () => (await savedTexts(page))[0].chartId).toBe('e2e-disc');

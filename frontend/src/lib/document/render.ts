@@ -172,12 +172,12 @@ export function documentRequest(
 			return {
 				width_mm: w,
 				height_mm: h,
-				items: chartsOf(page).map((item) => ({
-					x_mm: item.frame.x,
-					y_mm: item.frame.y,
-					width_mm: item.frame.w,
-					height_mm: item.frame.h,
-					config: chartRenderConfig(item)
+				items: chartsOf(page).map((chart) => ({
+					x_mm: chart.frame.x,
+					y_mm: chart.frame.y,
+					width_mm: chart.frame.w,
+					height_mm: chart.frame.h,
+					config: chartRenderConfig(chart)
 				})),
 				texts: typesetOf(page).map((text) => textRequest(page, text, measure, sky, pages))
 			};

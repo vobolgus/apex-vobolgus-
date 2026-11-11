@@ -27,7 +27,7 @@
 
 	let { block, page, pages, words, blocks, onpicked }: Props = $props();
 
-	const chartIds = $derived(chartsOf(page).map((item) => item.id));
+	const chartIds = $derived(chartsOf(page).map((chart) => chart.id));
 	const others = $derived(otherCharts(page, pages));
 	const chooses = $derived(
 		(chartIds.length >= 2 || others.length > 0) && readsAChart(block, words)

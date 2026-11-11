@@ -147,7 +147,7 @@ test('a chart on a neighbouring page can be dragged onto the current one', async
 	await expect(current).toBeVisible();
 
 	// Page 1 is now the neighbour on the left; its charts are pictures, not buttons.
-	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .body');
+	const side = editor.locator('.slot[data-role="prev"] [data-block-id="e2e-a"] .body');
 	await drag(page, centre(await settledBox(side)), centre(await settledBox(current)));
 
 	await expect
@@ -165,7 +165,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 	await editor.getByRole('button', { name: 'Show page 2, no charts' }).click();
 	const current = editor.getByRole('group', { name: 'Page 2, A4 portrait, no charts' });
 	await expect(current).toBeVisible();
-	const item = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"]');
+	const item = editor.locator('.slot[data-role="prev"] [data-block-id="e2e-a"]');
 	const from = centre(await settledBox(item.locator('.body')));
 	const over = centre(await settledBox(current));
 
@@ -180,7 +180,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 	// ...and it is the topmost thing there, not the current page lying over it.
 	const topmost = await page.evaluate(({ x, y }) => {
 		const hit = document.elementFromPoint(x, y);
-		return hit?.closest('[data-item-id]')?.getAttribute('data-item-id') ?? hit?.className ?? null;
+		return hit?.closest('[data-block-id]')?.getAttribute('data-block-id') ?? hit?.className ?? null;
 	}, over);
 	expect(topmost).toBe('e2e-a');
 	// At full strength: nothing between it and the eye is translucent, though its page is dimmed.
@@ -210,7 +210,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 test('a click on a neighbour’s chart, without a drag, turns to that page', async ({ page }) => {
 	const editor = await seedAndOpen(page);
 	await editor.getByRole('button', { name: 'Show page 2, no charts' }).click();
-	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .body');
+	const side = editor.locator('.slot[data-role="prev"] [data-block-id="e2e-a"] .body');
 	await page.mouse.click(...(Object.values(centre(await settledBox(side))) as [number, number]));
 	await expect(editor.getByRole('group', { name: 'Page 1, A4 portrait, 2 charts' })).toBeVisible();
 	expect((await savedCharts(page)).map((items) => items.length)).toEqual([2, 0]);
@@ -242,7 +242,7 @@ test('a chart in the hand follows the pointer off the paper, and is brought onto
 	page
 }) => {
 	const editor = await seedAndOpen(page);
-	const item = editor.locator('.slot[data-role="current"] [data-item-id="e2e-a"]');
+	const item = editor.locator('.slot[data-role="current"] [data-block-id="e2e-a"]');
 	const paper = (await settledBox(editor.locator('.slot[data-role="current"] [data-paper]')))!;
 	const from = centre((await item.boundingBox())!);
 	// Its centre a little past the page's left edge: off the paper, within reach of it.
@@ -288,7 +288,7 @@ test('a chart in the hand follows the pointer off the paper, and is brought onto
 
 test('a chart let go just short of another page lands on that page', async ({ page }) => {
 	const editor = await seedAndOpen(page);
-	const item = editor.locator('.slot[data-role="current"] [data-item-id="e2e-a"]');
+	const item = editor.locator('.slot[data-role="current"] [data-block-id="e2e-a"]');
 	const next = (await settledBox(editor.locator('.slot[data-role="next"] [data-paper]')))!;
 	const from = centre((await item.boundingBox())!);
 	// Carried across page 2 and out past its far edge, by less than the catch zone.
@@ -356,7 +356,7 @@ test('on a touch screen a tap near a chart corner selects it: the hidden ⊖ doe
 		const editor = page.getByRole('dialog', { name: 'PDF document' });
 		await expect(editor).toBeVisible();
 
-		const item = editor.locator('.slot[data-role="current"] [data-item-id="e2e-b"]');
+		const item = editor.locator('.slot[data-role="current"] [data-block-id="e2e-b"]');
 		const box = (await item.boundingBox())!;
 		// Where the ⊖ sits once the chart is selected.
 		await page.touchscreen.tap(box.x + 30, box.y + 30);

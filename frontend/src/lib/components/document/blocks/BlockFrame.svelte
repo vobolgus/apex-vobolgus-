@@ -24,8 +24,8 @@
 
 	interface Props {
 		block: DocBlock;
-		/** The page, mm. */
-		page: Size;
+		/** The page's size, mm. */
+		pageSize: Size;
 		/** Where to draw it, mm on its page; off the page while it is dragged to another. */
 		box: Rect;
 		mode: BlockState;
@@ -58,7 +58,7 @@
 
 	let {
 		block,
-		page,
+		pageSize,
 		box,
 		mode,
 		interactive,
@@ -139,13 +139,13 @@
 	class:is-quiet={quiet}
 	class:is-linked={linked}
 	class:is-editing={editing}
-	data-item-id={block.id}
+	data-block-id={block.id}
 	data-kind={block.kind}
 	data-state={mode}
-	style:left="{(box.x / page.w) * 100}%"
-	style:top="{(box.y / page.h) * 100}%"
-	style:width="{(box.w / page.w) * 100}%"
-	style:height="{(box.h / page.h) * 100}%"
+	style:left="{(box.x / pageSize.w) * 100}%"
+	style:top="{(box.y / pageSize.h) * 100}%"
+	style:width="{(box.w / pageSize.w) * 100}%"
+	style:height="{(box.h / pageSize.h) * 100}%"
 >
 	{#if chart}
 		{@render held()}

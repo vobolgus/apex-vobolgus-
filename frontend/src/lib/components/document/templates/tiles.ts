@@ -92,13 +92,13 @@ export function previewOf(page: DocPage, laid: LaidPage): DocPage {
 	const kept = typesetOf(page).filter((text) => text.role === undefined);
 	const placed = laid.charts.flatMap(({ id: chartId, frame, chart, marks }): ChartBlock[] => {
 		if (chart) return [{ kind: 'chart', id: chartId, chart, frame }];
-		const item = own.find((it) => it.id === chartId);
-		if (!item) return [];
+		const source = own.find((it) => it.id === chartId);
+		if (!source) return [];
 		// Ringed where the template rings it, and nowhere else, as the page will be.
-		const shown = { ...item.chart };
+		const shown = { ...source.chart };
 		if (marks?.length) shown.marks = marks;
 		else delete shown.marks;
-		return [{ ...item, chart: shown, frame }];
+		return [{ ...source, chart: shown, frame }];
 	});
 	const texts = laid.texts.map((text, i) => ({ ...text, id: `preview-text-${i}` }));
 	return {

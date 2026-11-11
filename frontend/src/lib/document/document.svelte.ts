@@ -170,14 +170,14 @@ export class DocumentStore {
 		if (newPage) this.pages.push(emptyPage(plan.orientation));
 		const page = this.pages[plan.pageIndex ?? this.pages.length - 1];
 		const before = newPage ? null : $state.snapshot(page);
-		const item: ChartBlock = {
+		const block: ChartBlock = {
 			kind: 'chart',
 			id: createId(),
 			chart: $state.snapshot(chart),
 			frame: plan.items.find((placed) => placed.index < 0)!.frame
 		};
-		if (thumb) item.thumb = thumb;
-		placeCharts(page, plan.items, item);
+		if (thumb) block.thumb = thumb;
+		placeCharts(page, plan.items, block);
 		setLayout(page, { manual: plan.manual, layout: plan.layout });
 		this.#scheduleSave();
 		const after = pageState(page);
@@ -200,7 +200,7 @@ export class DocumentStore {
 			this.#scheduleSave();
 			return true;
 		});
-		return { pageId: page.id, blockId: item.id, newPage, relaid: plan.relaid, undo };
+		return { pageId: page.id, blockId: block.id, newPage, relaid: plan.relaid, undo };
 	}
 
 	/** Append an empty page; returns its id. */
@@ -291,8 +291,8 @@ export class DocumentStore {
 		const type = typesetOf(page);
 		const from = page.orientation;
 		page.orientation = orientation;
-		own.charts.forEach((item, i) => {
-			item.frame = fitFrame(charts[i].frame, item.chart.aspect, orientation);
+		own.charts.forEach((block, i) => {
+			block.frame = fitFrame(charts[i].frame, block.chart.aspect, orientation);
 		});
 		page.blocks = [...own.charts, ...type];
 		for (const text of type) {
@@ -497,7 +497,7 @@ export class DocumentStore {
 		const charts = chartsOf(page);
 		const whole =
 			kept.length + dropped.length === charts.length &&
-			charts.every((item) => kept.includes(item.id) !== dropped.includes(item.id));
+			charts.every((block) => kept.includes(block.id) !== dropped.includes(block.id));
 		if (!whole || this.pages.length + laid.length - 1 > MAX_PAGES) return null;
 		if (this.chartCount - dropped.length + made.length > MAX_CHARTS) return null;
 		if (laid.some((part) => part.charts.length > MAX_ITEMS_PER_PAGE)) return null;

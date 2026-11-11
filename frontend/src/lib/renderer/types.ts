@@ -18,6 +18,9 @@ export interface ReferenceLinesState {
 	constellationBoundaries: boolean;
 }
 
+/** A line the chart may draw, by its name among the layers. */
+export type ReferenceLineKey = keyof ReferenceLinesState;
+
 export interface RenderState {
 	orientation: Quaternion;
 	stereoFovDeg: number;

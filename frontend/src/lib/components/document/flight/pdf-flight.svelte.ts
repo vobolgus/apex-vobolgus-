@@ -30,7 +30,7 @@ import {
 	flightStarScale,
 	PDF_FLIGHT_EASING,
 	PDF_FLIGHT_MS,
-	type Box,
+	type FlightBox,
 	type Landing,
 	type LandingTarget
 } from './flight';
@@ -40,7 +40,7 @@ export interface FlightPanel {
 	/** Bring a page into view; with a `landing`, say where the copy comes down on it. */
 	reveal(pageId: string, landing?: Landing): Promise<LandingTarget | null>;
 	/** Where every chart is on the thumbnails just now, by its id. */
-	chartBoxes(): Record<string, Box>;
+	chartBoxes(): Record<string, FlightBox>;
 }
 
 /** What Add to PDF needs of the page. */
@@ -65,8 +65,8 @@ interface FlightCopy {
 	id: number;
 	chart: ChartSnapshot;
 	/** Where it takes off (the chart on screen) and where it lands, screen px. */
-	from: Box;
-	to: Box;
+	from: FlightBox;
+	to: FlightBox;
 	/** The thumbnail chart's corner radius there, a CSS length or percentage. */
 	corner: string;
 }
@@ -77,9 +77,9 @@ interface Departure {
 	blockId: string;
 	newPage: boolean;
 	chart: ChartSnapshot;
-	canvasBox: Box | null;
+	canvasBox: FlightBox | null;
 	flying: boolean;
-	before: Readonly<Record<string, Box>> | undefined;
+	before: Readonly<Record<string, FlightBox>> | undefined;
 }
 
 export class PdfFlight {

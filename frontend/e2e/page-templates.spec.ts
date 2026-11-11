@@ -5,7 +5,6 @@ import {
 	seedDocument,
 	typesetOf,
 	type Frame,
-	type SavedChart as SavedChartBlock,
 	type SavedPage
 } from './saved-document';
 
@@ -151,8 +150,8 @@ test('a page is laid out as a template from its thumbnail, and Undo puts it back
 		picker.getByRole('button', { name: 'Worksheet: Tasks, and a key · 2 pages' })
 	).toBeEnabled();
 	const pair = picker.getByRole('button', { name: 'Two skies: Side by side' });
-	await expect(pair.locator('[data-item-id="e2e-disc"]')).toHaveCount(1);
-	await expect(pair.locator('[data-item-id="e2e-frame"]')).toHaveCount(1);
+	await expect(pair.locator('[data-block-id="e2e-disc"]')).toHaveCount(1);
+	await expect(pair.locator('[data-block-id="e2e-frame"]')).toHaveCount(1);
 
 	// Two skies: both charts under a title, each with a caption that reads it.
 	await pair.click();
@@ -186,7 +185,7 @@ test("charts past a template's places go on new pages; swapping and turning redr
 	// Swapped, the charts go in the other order: the disc over the frame on the tile of two skies.
 	const finder = picker.getByRole('button', { name: /^Two skies/ });
 	const top = async (id: string) =>
-		(await finder.locator(`[data-item-id="${id}"]`).boundingBox())!.y;
+		(await finder.locator(`[data-block-id="${id}"]`).boundingBox())!.y;
 	expect(await top('e2e-frame')).toBeLessThan(await top('e2e-disc'));
 	await picker.getByRole('button', { name: 'Swap charts' }).click();
 	await expect(picker.getByRole('button', { name: 'Swap charts' })).toHaveAttribute(
@@ -343,7 +342,7 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	// One chart is enough: the tile shows the card with a close-up of the brightest object there.
 	const tile = picker.getByRole('button', { name: 'Finder card: A sky and a close-up' });
 	await expect(tile).toBeEnabled();
-	await expect(tile.locator('.chart[data-item-id]')).toHaveCount(2);
+	await expect(tile.locator('.chart[data-block-id]')).toHaveCount(2);
 
 	// It asks what the close-up is of: the objects on this sky, brightest first.
 	await tile.click();
@@ -363,10 +362,10 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	await search.fill('m 44');
 	await expect(rows).toHaveText([/^M 44 · Beehive Cluster/]);
 	// The card beside the list is drawn for it: the sky, and the close-up under it.
-	await expect(objects.locator('.card .chart[data-item-id]')).toHaveCount(2);
+	await expect(objects.locator('.card .chart[data-block-id]')).toHaveCount(2);
 	// The object's place is ringed on the sky there, and not on the close-up.
-	const cardSky = objects.locator('.card .chart[data-item-id="e2e-lone"] canvas');
-	const cardCloseUp = objects.locator('.card .chart:not([data-item-id="e2e-lone"]) canvas');
+	const cardSky = objects.locator('.card .chart[data-block-id="e2e-lone"] canvas');
+	const cardCloseUp = objects.locator('.card .chart:not([data-block-id="e2e-lone"]) canvas');
 	await expect.poll(async () => accentPixels(cardSky)).toBeGreaterThan(10);
 	expect(await accentPixels(cardCloseUp)).toBe(0);
 
@@ -383,13 +382,8 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	await expect(objects).toHaveCount(0);
 
 	await expect.poll(async () => chartsOf((await savedPages(page))[1]).length).toBe(2);
-	interface SavedChart {
-		view: { projection: string; pinholeFovDeg: number };
-		marks?: { raDeg: number; decDeg: number; radiusDeg: number }[];
-		createdAt: string;
-	}
 	const card = (await savedPages(page))[1];
-	const [sky, close] = chartsOf(card) as (Omit<SavedChartBlock, 'chart'> & { chart: SavedChart })[];
+	const [sky, close] = chartsOf(card);
 	expect(sky.id).toBe('e2e-lone');
 	expect(sky.chart.marks).toHaveLength(1);
 	expect(sky.chart.marks![0].radiusDeg).toBe(5);
@@ -407,7 +401,7 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	// One page: nothing else was on it to move on.
 	expect((await savedPages(page)).length).toBe(3);
 	// The page's thumbnail in the panel shows the ring on the sky; a page with no card has none.
-	const thumb = (id: string) => panel.locator(`.chart[data-item-id="${id}"] canvas`);
+	const thumb = (id: string) => panel.locator(`.chart[data-block-id="${id}"] canvas`);
 	await expect.poll(async () => accentPixels(thumb('e2e-lone'))).toBeGreaterThan(10);
 	expect(await accentPixels(thumb(close.id))).toBe(0);
 	expect(await accentPixels(thumb('e2e-disc'))).toBe(0);

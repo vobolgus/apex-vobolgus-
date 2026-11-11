@@ -5,9 +5,8 @@
  * the canvas renderer and are exposed as one `ReferenceLinesState` object.
  */
 
-import type { ReferenceLinesState } from '$lib/renderer/types';
+import type { ReferenceLineKey, ReferenceLinesState } from '$lib/renderer/types';
 
-type ReferenceLineKey = keyof ReferenceLinesState;
 type LayerKey = ReferenceLineKey | 'planets';
 
 interface LayerOption {

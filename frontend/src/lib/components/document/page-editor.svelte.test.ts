@@ -329,7 +329,7 @@ describe('PageEditor', () => {
 	it("offers the same through a selected chart's toolbar", async () => {
 		const ctx = setup();
 		cleanup = ctx.cleanup;
-		const item = ctx.dialog.querySelector('.slot[data-role="current"] [data-item-id="a"]')!;
+		const item = ctx.dialog.querySelector('.slot[data-role="current"] [data-block-id="a"]')!;
 		const tool = (name: string) =>
 			Array.from(item.querySelectorAll<HTMLButtonElement>('.tools button')).find(
 				(el) => el.getAttribute('aria-label') === name
@@ -347,7 +347,7 @@ describe('PageEditor', () => {
 		expect(ctx.store.selectedPageId).toBe('p1');
 		await settle();
 		// The first page has nothing before it.
-		const moved = ctx.dialog.querySelector('.slot[data-role="current"] [data-item-id="a"]')!;
+		const moved = ctx.dialog.querySelector('.slot[data-role="current"] [data-block-id="a"]')!;
 		const names = Array.from(moved.querySelectorAll('.tools button'), (el) =>
 			el.getAttribute('aria-label')
 		);
@@ -361,7 +361,7 @@ describe('PageEditor', () => {
 	it("ignores a tap's click on the ⊖ it revealed: a pointer click counts where it was pressed", () => {
 		const ctx = setup();
 		cleanup = ctx.cleanup;
-		const item = ctx.dialog.querySelector('.slot[data-role="current"] [data-item-id="a"]')!;
+		const item = ctx.dialog.querySelector('.slot[data-role="current"] [data-block-id="a"]')!;
 		const chartEl = item.querySelector('[role="button"]')!;
 		const remove = item.querySelector<HTMLButtonElement>('button.remove')!;
 		// The press selects the chart; the click the tap ends in lands on the ⊖ now there.
@@ -573,7 +573,7 @@ describe('PageEditor', () => {
 		}
 
 		function itemOf(dialog: HTMLDialogElement, id: string) {
-			return dialog.querySelector<HTMLElement>(`[data-item-id="${id}"]`)!;
+			return dialog.querySelector<HTMLElement>(`[data-block-id="${id}"]`)!;
 		}
 
 		it('carries a chart with the pointer and writes the document once, on the release', async () => {

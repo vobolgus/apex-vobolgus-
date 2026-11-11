@@ -13,7 +13,7 @@
 	import { untrack } from 'svelte';
 	import { MAX_PAGES } from '$lib/api/wire/limits';
 	import type { DocumentStore } from '$lib/document/document.svelte';
-	import type { Box, Landing, LandingTarget } from '../flight/flight';
+	import type { FlightBox, Landing, LandingTarget } from '../flight/flight';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
 	import { TemplatePicking } from '../templates/pick.svelte';
 	import TemplatePicker from '../templates/TemplatePicker.svelte';
@@ -102,8 +102,8 @@
 		return list.reveal(pageId, landing);
 	}
 
-	/** Where every chart is on the thumbnails just now, by item id (`PagesList.chartBoxes`). */
-	export function chartBoxes(): Record<string, Box> {
+	/** Where every chart is on the thumbnails just now, by block id (`PagesList.chartBoxes`). */
+	export function chartBoxes(): Record<string, FlightBox> {
 		return list.chartBoxes();
 	}
 
@@ -381,15 +381,6 @@
 		color: var(--fg-icon-off);
 		background: transparent;
 		cursor: default;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
 	}
 
 	.tab:active {

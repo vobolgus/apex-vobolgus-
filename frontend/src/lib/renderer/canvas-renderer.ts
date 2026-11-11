@@ -58,12 +58,10 @@ import type {
 	MorphInterpolator,
 	MorphInterpolatorFactory,
 	PerceptualCacheKey,
-	ReferenceLinesState,
+	ReferenceLineKey,
 	RenderState,
 	ViewportCacheKey
 } from './types';
-
-type ReferenceLineKey = keyof ReferenceLinesState;
 
 /**
  * A single toggleable reference-line layer. Everything the renderer needs to know about a layer

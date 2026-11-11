@@ -34,8 +34,8 @@ export function otherCharts(page: DocPage, pages: readonly DocPage[]): ChartChoi
 	return pages.flatMap((sheet, at) =>
 		sheet.id === page.id
 			? []
-			: chartsOf(sheet).map((item, i) => ({
-					id: item.id,
+			: chartsOf(sheet).map((chart, i) => ({
+					id: chart.id,
 					label: `Page ${at + 1} · chart ${i + 1}`
 				}))
 	);
@@ -55,10 +55,10 @@ export function readingOf(
 ): Reading {
 	const charts = chartsOf(page);
 	const id = boundChartBlock(page, block, pages)?.id;
-	const at = charts.findIndex((item) => item.id === id);
+	const at = charts.findIndex((chart) => chart.id === id);
 	return {
 		at: at < 0 ? null : at,
-		pinned: charts.some((item) => item.id === block.chartId),
+		pinned: charts.some((chart) => chart.id === block.chartId),
 		other: id !== undefined && others.some((other) => other.id === id) ? id : null
 	};
 }

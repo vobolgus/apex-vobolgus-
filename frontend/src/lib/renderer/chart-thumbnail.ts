@@ -11,7 +11,7 @@ import {
 	PINHOLE_CORNER_RADIUS,
 	STAR_COLOR
 } from '$lib/constants';
-import type { ChartSnapshot, ChartView, SkyMark } from '$lib/document/types';
+import type { ChartSnapshot, ChartView, ChartMark } from '$lib/document/types';
 import {
 	getProjectionFrameParams,
 	sampleStarMorphFrame,
@@ -99,7 +99,7 @@ const RING_STEPS = 360;
  * backend's `ring_points` (backend/src/chart/marks.rs), so that the
  * thumbnail's ring is the one the vector preview and the PDF draw.
  */
-export function ringPoints(mark: SkyMark): StarVector[] {
+export function ringPoints(mark: ChartMark): StarVector[] {
 	const ra = (mark.raDeg * Math.PI) / 180;
 	const dec = (mark.decDeg * Math.PI) / 180;
 	const radius = (mark.radiusDeg * Math.PI) / 180;

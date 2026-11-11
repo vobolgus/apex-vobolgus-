@@ -20,8 +20,8 @@
 		/** 0-based position among its page's charts, for the accessible name. */
 		index: number;
 		count: number;
-		/** The page, mm. */
-		page: Size;
+		/** The page's size, mm. */
+		pageSize: Size;
 		orientation: PageOrientation;
 		/** 1-based numbers of the pages before and after this one, null where there is none. */
 		prevPage: number | null;
@@ -47,7 +47,7 @@
 		chart,
 		index,
 		count,
-		page,
+		pageSize,
 		orientation,
 		prevPage,
 		nextPage,
@@ -70,7 +70,7 @@
 
 <BlockFrame
 	block={chart}
-	{page}
+	{pageSize}
 	box={frame}
 	{mode}
 	{interactive}

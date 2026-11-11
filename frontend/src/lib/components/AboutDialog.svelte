@@ -339,15 +339,6 @@
 		stroke-linecap: round;
 	}
 
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
-
 	/* One column on narrow screens; the shortcuts go under the description. */
 	@media (max-width: 640px) {
 		.content {

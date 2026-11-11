@@ -269,14 +269,4 @@
 		grid-template-rows: auto minmax(0, 1fr) auto;
 		overflow: hidden;
 	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		margin: 0;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
-	}
 </style>

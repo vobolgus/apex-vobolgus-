@@ -38,7 +38,7 @@ import type {
 	PageOrientation,
 	PageTemplate,
 	Rect,
-	SkyMark,
+	ChartMark,
 	TableLook,
 	TableSpec,
 	TextRole,
@@ -293,11 +293,11 @@ function parseChartBlock(
 }
 
 /** The places ringed on a chart: those that read as places, sixteen at the most. */
-function parseMarks(value: unknown): SkyMark[] {
+function parseMarks(value: unknown): ChartMark[] {
 	if (!Array.isArray(value)) return [];
 	return value
 		.filter(
-			(mark): mark is SkyMark =>
+			(mark): mark is ChartMark =>
 				isRecord(mark) &&
 				isFiniteNumber(mark.raDeg) &&
 				isFiniteNumber(mark.decDeg) &&

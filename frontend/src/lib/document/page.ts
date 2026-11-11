@@ -106,9 +106,9 @@ export function pastePlace(
 export function placeCharts(page: DocPage, plan: readonly PlacedChart[], added?: ChartBlock) {
 	const charts = chartsOf(page);
 	const placed = plan.map(({ index, frame }) => {
-		const item = index < 0 ? added! : charts[index];
-		item.frame = { ...frame };
-		return item;
+		const block = index < 0 ? added! : charts[index];
+		block.frame = { ...frame };
+		return block;
 	});
 	page.blocks = [...placed, ...typesetOf(page)];
 }
@@ -204,15 +204,15 @@ export function laidPages(
 			const chart = { ...(entry.chart ?? source!.chart) };
 			if (entry.marks?.length) chart.marks = entry.marks.map((mark) => ({ ...mark }));
 			else delete chart.marks;
-			const item: ChartBlock = {
+			const block: ChartBlock = {
 				...source,
 				kind: 'chart',
 				id: idOf(entry.id)!,
 				chart,
 				frame: fitFrame(entry.frame, chart.aspect, part.orientation)
 			};
-			if (entry.closeUpOf !== undefined) item.closeUpOf = entry.closeUpOf;
-			return item;
+			if (entry.closeUpOf !== undefined) block.closeUpOf = entry.closeUpOf;
+			return block;
 		});
 		const texts = [
 			...(at === 0 ? structuredClone(own) : []),
@@ -253,7 +253,7 @@ export function templateParts(
 	const own = chartsOf(page);
 	const roled = typesetOf(page).filter((text) => text.role !== undefined);
 	const charts = laid.charts.map((placed) =>
-		placed.chart ? undefined : own.find((item) => item.id === placed.id)
+		placed.chart ? undefined : own.find((block) => block.id === placed.id)
 	);
 	const texts = laid.texts.map((placed) =>
 		roled.find(

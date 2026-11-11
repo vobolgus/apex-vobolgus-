@@ -238,7 +238,7 @@
 		}
 		if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 		// A focused chart takes the arrows itself; a text field would want them too.
-		if (target?.closest?.('[data-item-id], input, textarea, select')) return;
+		if (target?.closest?.('[data-block-id], input, textarea, select')) return;
 		event.preventDefault();
 		stage.step(event.key === 'ArrowLeft' ? -1 : 1, Boolean(target?.closest?.('[data-strip]')));
 	}
@@ -504,15 +504,6 @@
 	.stage.is-carrying {
 		z-index: 1;
 		overflow: visible;
-	}
-
-	.sr-only {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-		white-space: nowrap;
 	}
 
 	/* A phone: the whole screen, no frame of dimmed app around it. */

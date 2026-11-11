@@ -261,16 +261,16 @@ export function boundChartBlock(
 	let best: ChartBlock | null = null;
 	let bestGap = Infinity;
 	let bestCentre = Infinity;
-	for (const item of charts) {
-		const itemGap = gap(box, item.frame);
-		const itemCentre = centreDistance(box, item.frame);
+	for (const chart of charts) {
+		const chartGap = gap(box, chart.frame);
+		const chartCentre = centreDistance(box, chart.frame);
 		const nearer =
-			itemGap < bestGap - 1e-6 ||
-			(Math.abs(itemGap - bestGap) <= 1e-6 && itemCentre < bestCentre - 1e-6);
+			chartGap < bestGap - 1e-6 ||
+			(Math.abs(chartGap - bestGap) <= 1e-6 && chartCentre < bestCentre - 1e-6);
 		if (nearer) {
-			best = item;
-			bestGap = itemGap;
-			bestCentre = itemCentre;
+			best = chart;
+			bestGap = chartGap;
+			bestCentre = chartCentre;
 		}
 	}
 	return best;

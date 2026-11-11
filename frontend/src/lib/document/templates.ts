@@ -46,7 +46,7 @@ import type {
 	PageOrientation,
 	PageTemplate,
 	Rect,
-	SkyMark,
+	ChartMark,
 	TableBlock,
 	TableSpec,
 	TemplateId,
@@ -98,7 +98,7 @@ interface LaidChart {
 	/** For a made close-up: the id of the chart whose sky it is a part of. */
 	closeUpOf?: string;
 	/** The places ringed on it from now on; none when absent. */
-	marks?: SkyMark[];
+	marks?: ChartMark[];
 }
 
 /** A page as a template lays it out: its charts in their new order, and its text. */
@@ -467,8 +467,8 @@ function runs<T>(list: readonly T[], size: number): T[][] {
 	return out;
 }
 
-function chartOf(item: ChartBlock): Chart {
-	return { id: item.id, kind: chartKind(item.chart), aspect: item.chart.aspect };
+function chartOf(block: ChartBlock): Chart {
+	return { id: block.id, kind: chartKind(block.chart), aspect: block.chart.aspect };
 }
 
 /** The name a close-up yet to be made goes by, for its caption to point at. */
@@ -481,10 +481,10 @@ function closeUpId(skyId: string): string {
  * is most often one, else the first chart; never a close-up an earlier card made
  * while there is anything else.
  */
-export function finderSky(items: readonly ChartBlock[]): ChartBlock | undefined {
-	const own = items.filter((item) => item.closeUpOf === undefined);
-	const from = own.length > 0 ? own : items;
-	return from.find((item) => chartKind(item.chart) === 'stereo') ?? from[0];
+export function finderSky(charts: readonly ChartBlock[]): ChartBlock | undefined {
+	const own = charts.filter((block) => block.closeUpOf === undefined);
+	const from = own.length > 0 ? own : charts;
+	return from.find((block) => chartKind(block.chart) === 'stereo') ?? from[0];
 }
 
 /**
@@ -584,14 +584,14 @@ function finderPages(
 	options: TemplateOptions
 ): { card: LaidPage; rest: LaidPage[] } {
 	const sky = finderSky(inOrder)!;
-	const closeUps = inOrder.filter((item) => item.closeUpOf === sky.id);
+	const closeUps = inOrder.filter((block) => block.closeUpOf === sky.id);
 	// Laid out again as it is, the card keeps the close-up it has.
 	const had = options.again === true && !options.closeUp ? closeUps[0] : undefined;
 	const card = finderPage(ctx, sky, options.closeUp, had);
 	const old = options.closeUp ? closeUps : [];
-	if (old.length > 0) card.dropped = old.map((item) => item.id);
-	const rest = inOrder.filter((item) => item !== sky && item !== had && !old.includes(item));
-	return { card, rest: rest.map((item) => captionPage(ctx, [chartOf(item)])) };
+	if (old.length > 0) card.dropped = old.map((block) => block.id);
+	const rest = inOrder.filter((block) => block !== sky && block !== had && !old.includes(block));
+	return { card, rest: rest.map((block) => captionPage(ctx, [chartOf(block)])) };
 }
 
 /**

@@ -7,7 +7,7 @@ import {
 	PINHOLE_CORNER_RADIUS,
 	STAR_COLOR
 } from '$lib/constants';
-import type { ChartSnapshot, SkyMark } from '$lib/document/types';
+import type { ChartSnapshot, ChartMark } from '$lib/document/types';
 import { pointingToOrientation } from '$lib/math/pointing';
 import type { StarVector } from '$lib/math/projection';
 import { CHART_THUMB_PX, drawChartThumbnail, ringPoints, thumbnailCrop } from './chart-thumbnail';
@@ -143,7 +143,7 @@ const centroid = (points: Point[]): Point => ({
 
 describe('ringPoints', () => {
 	it('is a closed ring of unit vectors, each the radius from the place', () => {
-		const mark: SkyMark = { raDeg: 83.8, decDeg: -5.4, radiusDeg: 10 };
+		const mark: ChartMark = { raDeg: 83.8, decDeg: -5.4, radiusDeg: 10 };
 		const centre = starAt(mark.raDeg, mark.decDeg);
 		const ring = ringPoints(mark);
 		expect(ring).toHaveLength(361);

@@ -97,7 +97,7 @@
 		const element = (target as Element | null)?.closest?.<HTMLElement>(
 			'[data-kind="text"], [data-kind="table"]'
 		);
-		return element?.dataset.itemId ?? null;
+		return element?.dataset.blockId ?? null;
 	}
 
 	/** The chart the selected text reads, while that is a question; its badge is marked. */
@@ -115,7 +115,7 @@
 	function handlePaperPointerDown(event: PointerEvent) {
 		if (!current) return;
 		// A press on bare paper puts the focus on the page: no chart stays selected.
-		if ((event.target as Element).closest('[data-item-id]')) return;
+		if ((event.target as Element).closest('[data-block-id]')) return;
 		(event.currentTarget as HTMLElement).focus({ preventScroll: true });
 	}
 
@@ -170,7 +170,7 @@
 					chart={block}
 					{index}
 					count={charts.length}
-					page={size}
+					pageSize={size}
 					orientation={page.orientation}
 					{prevPage}
 					{nextPage}
@@ -187,11 +187,11 @@
 				{@const turned = held ? held.rotation : null}
 				<EditorTypeset
 					{block}
-					sheet={page}
+					{page}
 					{pages}
 					index={texts.findIndex((text) => text.id === block.id)}
 					count={texts.length}
-					page={size}
+					pageSize={size}
 					{scale}
 					{frame}
 					rotation={turned ?? block.rotation ?? 0}

@@ -51,26 +51,26 @@
 	style:height="{size.h * scale}px"
 	aria-hidden="true"
 >
-	{#each chartsOf(page) as item (item.id)}
-		{@const round = item.chart.view.projection === 'stereographic'}
-		{@const w = item.frame.w * scale}
-		{@const h = item.frame.h * scale}
+	{#each chartsOf(page) as chart (chart.id)}
+		{@const round = chart.chart.view.projection === 'stereographic'}
+		{@const w = chart.frame.w * scale}
+		{@const h = chart.frame.h * scale}
 		<div
 			class="chart"
-			class:pending={item.id === pendingBlockId}
-			data-item-id={item.id}
-			style:left="{item.frame.x * scale}px"
-			style:top="{item.frame.y * scale}px"
+			class:pending={chart.id === pendingBlockId}
+			data-block-id={chart.id}
+			style:left="{chart.frame.x * scale}px"
+			style:top="{chart.frame.y * scale}px"
 			style:width="{w}px"
 			style:height="{h}px"
 			style:--corner={round ? '50%' : `${cornerMm * scale}px`}
 		>
-			{#if item.id !== pendingBlockId}
+			{#if chart.id !== pendingBlockId}
 				<canvas
 					{@attach (canvas) =>
 						drawChartThumbnail(
 							canvas,
-							item.chart,
+							chart.chart,
 							w,
 							h,
 							catalog.starVectors,
@@ -85,7 +85,7 @@
 		{@const box = anchoredFrame(text.frame, text.rotation ?? 0, text.frame.w, layout.height)}
 		<div
 			class="text"
-			data-item-id={text.id}
+			data-block-id={text.id}
 			style:left="{box.x * scale}px"
 			style:top="{box.y * scale}px"
 			style:width="{box.w * scale}px"

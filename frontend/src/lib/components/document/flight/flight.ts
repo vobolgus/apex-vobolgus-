@@ -15,7 +15,8 @@ import type { ChartView } from '$lib/document/types';
 import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
 import { thumbnailCrop } from '$lib/renderer/chart-thumbnail';
 
-export interface Box {
+/** A box on the screen as `getBoundingClientRect` gives it, window px: where a copy flies from and to. */
+export interface FlightBox {
 	x: number;
 	y: number;
 	width: number;
@@ -34,12 +35,12 @@ export interface Landing {
 	 * The charts already on the page may have moved to make room; they are played to
 	 * their new places over the length of the flight, so the room is seen being made.
 	 */
-	before?: Readonly<Record<string, Box>>;
+	before?: Readonly<Record<string, FlightBox>>;
 }
 
 /** Where the copy comes to a stop: the chart's place on the thumbnail, and its corner radius there. */
 export interface LandingTarget {
-	box: Box;
+	box: FlightBox;
 	/** A CSS length or percentage, as the thumbnail's chart has it. */
 	corner: string;
 }
@@ -66,7 +67,7 @@ const FLIGHT_STAR_GAIN = 2.2;
  * Where the chart itself (the disc, or the pinhole frame) is on screen, given where
  * its canvas is: the canvas is square with the chart centred on it.
  */
-export function chartBoxOnScreen(canvas: Box, view: ChartView): Box {
+export function chartBoxOnScreen(canvas: FlightBox, view: ChartView): FlightBox {
 	const crop = thumbnailCrop(view);
 	const scale = canvas.width / CHART_CANVAS_BACKING_PX;
 	return {
@@ -78,7 +79,7 @@ export function chartBoxOnScreen(canvas: Box, view: ChartView): Box {
 }
 
 /** How many times larger than its place on the thumbnail the copy starts out. */
-export function flightScale(from: Box, to: Box): number {
+export function flightScale(from: FlightBox, to: FlightBox): number {
 	return to.width > 0 ? from.width / to.width : 1;
 }
 
@@ -87,7 +88,7 @@ export function flightScale(from: Box, to: Box): number {
  * `from` (the chart on screen), that many times larger, and ends untransformed,
  * exactly where it is laid out. To be run on `PDF_FLIGHT_EASING`.
  */
-export function flightKeyframes(from: Box, to: Box): Keyframe[] {
+export function flightKeyframes(from: FlightBox, to: FlightBox): Keyframe[] {
 	const dx = from.x + from.width / 2 - (to.x + to.width / 2);
 	const dy = from.y + from.height / 2 - (to.y + to.height / 2);
 	return [
@@ -101,7 +102,7 @@ export function flightKeyframes(from: Box, to: Box): Keyframe[] {
  * `after`, it is played there from `before`, in step with the copy flying in. Null
  * when it did not move, to within what the eye could see.
  */
-export function settleKeyframes(before: Box, after: Box): Keyframe[] | null {
+export function settleKeyframes(before: FlightBox, after: FlightBox): Keyframe[] | null {
 	if (!(after.width > 0) || !(after.height > 0)) return null;
 	const dx = before.x + before.width / 2 - (after.x + after.width / 2);
 	const dy = before.y + before.height / 2 - (after.y + after.height / 2);
@@ -126,7 +127,7 @@ export const FLIGHT_FADE: Keyframe[] = [
  * start as a band several px wide; it starts that many times thinner instead and
  * ends at the thumbnail's 1 px. For the same easing as the move.
  */
-export function flightEdgeKeyframes(from: Box, to: Box, color: string): Keyframe[] {
+export function flightEdgeKeyframes(from: FlightBox, to: FlightBox, color: string): Keyframe[] {
 	const start = 1 / Math.max(1, flightScale(from, to));
 	return [
 		{ boxShadow: `inset 0 0 0 ${start}px ${color}` },
@@ -152,6 +153,6 @@ export function flightStarScale(scale: number, startScale: number): number {
  * The density to draw the copy's canvas at: the screen's, times how much larger
  * than its final size it is shown at first (capped), so it is sharp while large.
  */
-export function flightPixelRatio(from: Box, to: Box, dpr: number): number {
+export function flightPixelRatio(from: FlightBox, to: FlightBox, dpr: number): number {
 	return dpr * Math.min(MAX_OVERSAMPLE, Math.max(1, flightScale(from, to)));
 }

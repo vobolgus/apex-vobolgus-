@@ -19,7 +19,12 @@ export interface Frame {
 export interface SavedChart {
 	id: string;
 	frame: Frame;
-	chart: { marks?: unknown[]; view: { projection: string; pinholeFovDeg: number } };
+	chart: {
+		view: { projection: string; pinholeFovDeg: number };
+		/** Places ringed on it. */
+		marks?: { raDeg: number; decDeg: number; radiusDeg: number }[];
+		createdAt: string;
+	};
 	closeUpOf?: string;
 }
 
