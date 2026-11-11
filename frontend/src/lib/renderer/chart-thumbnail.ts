@@ -96,7 +96,7 @@ const RING_STEPS = 360;
 
 /**
  * The ring of points `radiusDeg` from a mark's place, closed, as unit vectors: the
- * backend's `ring_points` (backend/src/svg_generator/grids.rs), so that the
+ * backend's `ring_points` (backend/src/chart/marks.rs), so that the
  * thumbnail's ring is the one the vector preview and the PDF draw.
  */
 export function ringPoints(mark: SkyMark): StarVector[] {

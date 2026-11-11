@@ -3,7 +3,7 @@
  *
  * The celestial equator, the ecliptic and the galactic equator are implemented TWICE in this
  * repo: once in TypeScript for the live canvas preview (`reference-lines.ts` / `math/astronomy.ts`)
- * and once in Rust for the exported SVG (`backend/src/svg_generator/grids.rs`). "The preview
+ * and once in Rust for the exported SVG (`backend/src/chart/grids.rs`). "The preview
  * matches the export" is the product's core promise, so both implementations are pinned against
  * the SAME fixture: `backend/assets/golden/reference-geometry.json`.
  *
@@ -60,7 +60,7 @@ function driftMessage(
 		'',
 		'The canvas preview (frontend/src/lib/renderer/reference-lines.ts +',
 		'frontend/src/lib/math/astronomy.ts) and the SVG exporter',
-		'(backend/src/svg_generator/grids.rs) implement this geometry SEPARATELY and must agree —',
+		'(backend/src/chart/grids.rs) implement this geometry SEPARATELY and must agree —',
 		'the preview is supposed to be exactly what the customer gets exported.',
 		'',
 		'Do NOT "fix" this by regenerating backend/assets/golden/reference-geometry.json to match',

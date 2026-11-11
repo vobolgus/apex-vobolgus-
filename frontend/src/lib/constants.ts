@@ -63,7 +63,7 @@ export const CHART_PAGE_COLOR = '#0a0a0b';
 export const CHART_SKY_COLOR = '#ffffff';
 export const STAR_COLOR = '#000000';
 // A ring round a marked place (`ChartSnapshot.marks`): the accent, as the backend
-// draws it (`MARK_COLOR` in backend/src/svg_generator/grids.rs).
+// draws it (`MARK_COLOR` in backend/src/chart/marks.rs).
 export const MARK_COLOR = '#d34b4b';
 
 // === Chart canvas ===

@@ -3,7 +3,7 @@
  *
  * This module is the single source of truth for the frame conversions and astronomical
  * constants used by the canvas preview. The Rust SVG exporter
- * (`backend/src/svg_generator/grids.rs`) implements the same geometry independently, so the
+ * (`backend/src/chart/grids.rs`) implements the same geometry independently, so the
  * two are pinned against the shared fixture `backend/assets/golden/reference-geometry.json`
  * (see `src/lib/renderer/reference-geometry.golden.test.ts`). If you change anything here,
  * change the Rust side and the fixture together.
