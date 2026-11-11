@@ -12,7 +12,8 @@
 	 * The stage drives two things from outside (`StageController`): `flush()` from
 	 * its render loop, which applies the latest drag position once per frame right
 	 * before the canvas draws it, and `trackPointer()` from the page's pointermove,
-	 * which lights the handles up when the pointer comes near the frame.
+	 * which lights the handles up when the pointer comes near the frame. A handle's
+	 * drag itself is `PinholeDrag`'s.
 	 */
 	import { onDestroy, untrack } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
@@ -34,10 +35,8 @@
 		EDGE_HANDLES,
 		HANDLE_CURSOR,
 		axisFovDeg,
-		beginPinholeDrag,
 		formatPinholeReadout,
 		isNearRect,
-		pinholeDragRequest,
 		pinholeFovRange,
 		pinholeFrameRect,
 		pinholeHandleLayout,
@@ -46,18 +45,16 @@
 		pinholeKeyStep,
 		pinholeLimitState,
 		pinholeLimits,
-		pxPerFrac,
 		readoutPlacement,
 		resolvePinholeResize,
 		type EdgeHandle,
 		type FrameHandle,
 		type HandleState,
 		type HitSizes,
-		type PinholeDragOrigin,
-		type PinholeLimits,
 		type PinholeShape
 	} from '$lib/math/pinhole-frame';
 	import { view } from '$lib/state/view.svelte';
+	import { PinholeDrag } from './pinhole-drag.svelte';
 
 	interface Props {
 		/** Side of the square chart surface, CSS px. */
@@ -73,27 +70,20 @@
 
 	let { surfaceSizePx, clipWidthPx, clipHeightPx, visible, onChange }: Props = $props();
 
-	/** Class on <html> while a handle is dragged; pins the cursor page-wide. */
-	const RESIZING_CLASS = 'pinhole-resizing';
-
-	interface DragSession {
-		origin: PinholeDragOrigin;
-		pointerId: number;
-		target: HTMLElement;
-		start: PinholeShape;
-		limits: PinholeLimits;
-		pointerX: number;
-		pointerY: number;
-		shift: boolean;
-		/** A pointer or Shift change waiting for the next `flush()`. */
-		pending: boolean;
-	}
-
 	let rootEl: HTMLDivElement | null = $state(null);
-	let session: DragSession | null = null;
-	let activeHandle = $state<FrameHandle | null>(null);
-	let dragLimits = $state.raw<PinholeLimits | null>(null);
-	let squareSnap = $state(false);
+	/** A handle's drag: it reads the frame as it is now, and writes the view. */
+	const drag = new PinholeDrag({
+		root: () => rootEl,
+		shape: () => shape,
+		frame: () => frame,
+		surfaceSizePx: () => surfaceSizePx,
+		clipWidthPx: () => clipWidthPx,
+		clipHeightPx: () => clipHeightPx,
+		write: writeShape,
+		changed: () => onChange(),
+		ended: lingerReadout
+	});
+
 	let hoveredHandle = $state<FrameHandle | null>(null);
 	let focusedHandle = $state<EdgeHandle | null>(null);
 	let near = $state(false);
@@ -124,18 +114,18 @@
 	const layout = $derived(pinholeHandleLayout(frame, hitSizes));
 	// During a drag the bounds stay the ones it started with.
 	const limits = $derived(
-		dragLimits ?? pinholeLimits(surfaceSizePx, clipWidthPx, clipHeightPx, shape)
+		drag.limits ?? pinholeLimits(surfaceSizePx, clipWidthPx, clipHeightPx, shape)
 	);
 	const fovRanges = $derived({
 		x: pinholeFovRange(shape, 'x', limits),
 		y: pinholeFovRange(shape, 'y', limits)
 	});
 	const readout = $derived(
-		formatPinholeReadout(shape, pinholeLimitState(shape, limits), squareSnap)
+		formatPinholeReadout(shape, pinholeLimitState(shape, limits), drag.squareSnap)
 	);
 	const readoutAt = $derived(readoutPlacement(frame, surfaceSizePx, clipHeightPx));
 	/** The handle that leads the styling: the dragged one, else the keyboard-focused one. */
-	const leadHandle = $derived<FrameHandle | null>(activeHandle ?? focusedHandle);
+	const leadHandle = $derived<FrameHandle | null>(drag.active ?? focusedHandle);
 	const readoutVisible = $derived(leadHandle !== null || near || lingering);
 	/** Crosshair on the frame centre, the fixed point of the symmetric resize. */
 	const crosshairPath = $derived.by(() => {
@@ -170,17 +160,7 @@
 
 	/** Apply the latest drag position. Called by the page's render loop, once per frame. */
 	export function flush(): boolean {
-		if (!session?.pending) return false;
-		session.pending = false;
-		applyDrag(session);
-		return true;
-	}
-
-	function applyDrag(drag: DragSession) {
-		const request = pinholeDragRequest(drag.origin, drag.pointerX, drag.pointerY, drag.shift);
-		const next = resolvePinholeResize(drag.start, request, drag.limits);
-		writeShape(next);
-		squareSnap = request.square && Math.abs(next.aspectRatio - 1) < 1e-6;
+		return drag.flush();
 	}
 
 	/** Light the handles up while a mouse or pen is over or near the frame. */
@@ -202,139 +182,6 @@
 		near = false;
 	}
 
-	function requestFrame(drag: DragSession) {
-		drag.pending = true;
-		onChange();
-	}
-
-	function onHitPointerDown(event: PointerEvent, handle: FrameHandle) {
-		if (event.button !== 0 || !event.isPrimary || session || !rootEl) return;
-		// The sky's InputController already ignores non-canvas targets; this also
-		// keeps the page from treating the press as anything but a resize.
-		event.stopPropagation();
-		const target = event.currentTarget as HTMLElement;
-		target.setPointerCapture(event.pointerId);
-		const box = rootEl.getBoundingClientRect();
-		const start: PinholeShape = { ...shape };
-		session = {
-			origin: beginPinholeDrag(
-				handle,
-				event.clientX,
-				event.clientY,
-				box.left + box.width / 2,
-				box.top + box.height / 2,
-				frame,
-				pxPerFrac(surfaceSizePx)
-			),
-			pointerId: event.pointerId,
-			target,
-			start,
-			limits: pinholeLimits(surfaceSizePx, clipWidthPx, clipHeightPx, start),
-			pointerX: event.clientX,
-			pointerY: event.clientY,
-			shift: event.shiftKey,
-			pending: false
-		};
-		dragLimits = session.limits;
-		activeHandle = handle;
-		const html = document.documentElement;
-		html.style.setProperty('--pinhole-resize-cursor', HANDLE_CURSOR[handle]);
-		html.classList.add(RESIZING_CLASS);
-		target.addEventListener('pointermove', onDragPointerMove);
-		target.addEventListener('pointerup', onDragPointerUp);
-		target.addEventListener('pointercancel', onDragPointerEnd);
-		target.addEventListener('lostpointercapture', onDragPointerEnd);
-		window.addEventListener('pointerdown', onOtherPointerDown, true);
-		window.addEventListener('keydown', onDragKey);
-		window.addEventListener('keyup', onDragKey);
-		window.addEventListener('blur', onWindowBlur);
-		document.addEventListener('visibilitychange', onVisibilityChange);
-	}
-
-	function onDragPointerMove(event: PointerEvent) {
-		if (!session || event.pointerId !== session.pointerId) return;
-		session.pointerX = event.clientX;
-		session.pointerY = event.clientY;
-		session.shift = event.shiftKey;
-		requestFrame(session);
-	}
-
-	function onDragPointerUp(event: PointerEvent) {
-		if (!session || event.pointerId !== session.pointerId) return;
-		if (event.clientX !== session.pointerX || event.clientY !== session.pointerY) {
-			session.pointerX = event.clientX;
-			session.pointerY = event.clientY;
-			session.pending = true;
-		}
-		endDrag(true);
-	}
-
-	function onDragPointerEnd(event: PointerEvent) {
-		if (session && event.pointerId === session.pointerId) endDrag(true);
-	}
-
-	/** A second finger (or pen) during a handle drag must not start a sky drag. */
-	function onOtherPointerDown(event: PointerEvent) {
-		if (session && event.pointerId !== session.pointerId) {
-			event.stopPropagation();
-			event.preventDefault();
-		}
-	}
-
-	/** Shift is re-read on its own key events, so pressing it without moving snaps at once. */
-	function onDragKey(event: KeyboardEvent) {
-		if (!session) return;
-		if (event.key === 'Escape' && event.type === 'keydown') {
-			endDrag(false);
-			return;
-		}
-		if (event.key !== 'Shift') return;
-		const shift = event.type === 'keydown';
-		if (session.shift === shift) return;
-		session.shift = shift;
-		requestFrame(session);
-	}
-
-	// Losing the window or the tab mid-drag cancels the resize.
-	function onWindowBlur() {
-		endDrag(false);
-	}
-
-	function onVisibilityChange() {
-		if (document.hidden) endDrag(false);
-	}
-
-	/** Finish the drag, keeping the result (`commit`) or restoring the start state. */
-	function endDrag(commit: boolean) {
-		const drag = session;
-		if (!drag) return;
-		session = null;
-		if (!commit) {
-			writeShape(drag.start);
-		} else if (drag.pending) {
-			applyDrag(drag);
-		}
-		const { target } = drag;
-		target.removeEventListener('pointermove', onDragPointerMove);
-		target.removeEventListener('pointerup', onDragPointerUp);
-		target.removeEventListener('pointercancel', onDragPointerEnd);
-		target.removeEventListener('lostpointercapture', onDragPointerEnd);
-		window.removeEventListener('pointerdown', onOtherPointerDown, true);
-		window.removeEventListener('keydown', onDragKey);
-		window.removeEventListener('keyup', onDragKey);
-		window.removeEventListener('blur', onWindowBlur);
-		document.removeEventListener('visibilitychange', onVisibilityChange);
-		if (target.hasPointerCapture(drag.pointerId)) target.releasePointerCapture(drag.pointerId);
-		const html = document.documentElement;
-		html.classList.remove(RESIZING_CLASS);
-		html.style.removeProperty('--pinhole-resize-cursor');
-		activeHandle = null;
-		dragLimits = null;
-		squareSnap = false;
-		lingerReadout();
-		onChange();
-	}
-
 	function onHitPointerEnter(event: PointerEvent, handle: FrameHandle) {
 		if (event.pointerType !== 'touch') hoveredHandle = handle;
 	}
@@ -344,7 +191,7 @@
 	}
 
 	function onEdgeKeyDown(event: KeyboardEvent, handle: EdgeHandle) {
-		if (session || event.altKey || event.ctrlKey || event.metaKey) return;
+		if (drag.dragging || event.altKey || event.ctrlKey || event.metaKey) return;
 		const step = pinholeKeyStep(event.key, event.shiftKey);
 		if (step === null) return;
 		// The page's window keydown would otherwise rotate the sky on the same arrow.
@@ -376,7 +223,8 @@
 	$effect(() => {
 		const fovDeg = view.pinholeFovDeg;
 		untrack(() => {
-			if (lastFovDeg !== null && fovDeg !== lastFovDeg && visible && !session) lingerReadout();
+			if (lastFovDeg !== null && fovDeg !== lastFovDeg && visible && !drag.dragging)
+				lingerReadout();
 			lastFovDeg = fovDeg;
 		});
 	});
@@ -385,7 +233,7 @@
 	$effect(() => {
 		if (visible) return;
 		untrack(() => {
-			endDrag(true);
+			drag.end(true);
 			near = false;
 			hoveredHandle = null;
 			focusedHandle = null;
@@ -394,7 +242,7 @@
 
 	onDestroy(() => {
 		clearTimeout(lingerTimer);
-		endDrag(true);
+		drag.end(true);
 	});
 </script>
 
@@ -402,8 +250,8 @@
 	<div
 		bind:this={rootEl}
 		class="pinhole-overlay"
-		class:is-dragging={activeHandle !== null}
-		class:is-square-snap={squareSnap}
+		class:is-dragging={drag.active !== null}
+		class:is-square-snap={drag.squareSnap}
 		data-near={near ? '' : undefined}
 	>
 		<svg
@@ -429,7 +277,7 @@
 					/>
 				{/if}
 			{/each}
-			{#if activeHandle}
+			{#if drag.active}
 				<path class="crosshair" d={crosshairPath} />
 			{/if}
 		</svg>
@@ -455,7 +303,7 @@
 				style:width="{hit.width}px"
 				style:height="{hit.height}px"
 				style:cursor={HANDLE_CURSOR[handle]}
-				onpointerdown={(event) => onHitPointerDown(event, handle)}
+				onpointerdown={(event) => drag.start(event, handle)}
 				onpointerenter={(event) => onHitPointerEnter(event, handle)}
 				onpointerleave={() => onHitPointerLeave(handle)}
 				onmousedown={(event) => event.preventDefault()}
@@ -475,7 +323,7 @@
 				style:width="{hit.width}px"
 				style:height="{hit.height}px"
 				style:cursor={HANDLE_CURSOR[handle]}
-				onpointerdown={(event) => onHitPointerDown(event, handle)}
+				onpointerdown={(event) => drag.start(event, handle)}
 				onpointerenter={(event) => onHitPointerEnter(event, handle)}
 				onpointerleave={() => onHitPointerLeave(handle)}
 				onmousedown={(event) => event.preventDefault()}

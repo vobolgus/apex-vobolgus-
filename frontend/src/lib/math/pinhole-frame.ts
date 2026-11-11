@@ -99,7 +99,7 @@ interface Rect {
 	height: number;
 }
 
-interface FrameRect extends Rect {
+export interface FrameRect extends Rect {
 	/** Corner radius of the frame as the renderer draws it, in CSS px. */
 	cornerRadius: number;
 }
