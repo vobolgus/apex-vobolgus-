@@ -11,7 +11,7 @@
  * runs the animation, and the pages panel says where the copy lands (`reveal`).
  */
 
-import type { ChartView } from '$lib/api/render-config';
+import type { ChartView } from '$lib/document/types';
 import { CHART_CANVAS_BACKING_PX } from '$lib/constants';
 import { thumbnailCrop } from '$lib/renderer/chart-thumbnail';
 

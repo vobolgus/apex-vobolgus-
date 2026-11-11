@@ -1,6 +1,6 @@
 /**
  * Text on a page of the PDF document: its fields, and how it breaks into lines.
- * Pure functions, no DOM: whoever calls brings the measure (`text-fonts.svelte.ts`).
+ * Pure functions, no DOM: whoever calls brings the measure (`renderer/text-measure.svelte.ts`).
  *
  * The editor breaks the lines and the backend only sets each where it is told to, in
  * the same font file, so the PDF breaks where the editor did. Lines break as CSS

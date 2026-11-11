@@ -4,10 +4,14 @@
  * (`text.ts`, `table.ts`) meet the global state they read: each call reads
  * `textFonts.epoch`, so a layout made inside an effect or a `$derived` is made
  * again when a face arrives, and the catalogue store, so it is made again when a
- * catalogue does.
+ * catalogue does. The document's export is set the same way, once what it needs
+ * has arrived (`typesetRequest`).
  */
 
 import { loadMessier } from '$lib/api/catalog';
+import type { DocumentRequest } from '$lib/api/wire/request';
+import { typesetOf } from '$lib/document/blocks';
+import { documentRequest } from '$lib/document/render';
 import {
 	blockLayout,
 	boundTableContent,
@@ -16,8 +20,8 @@ import {
 	type Sky
 } from '$lib/document/table';
 import { layoutText, type Sheets, type TextLayout } from '$lib/document/text';
-import { measureText, textFonts } from '$lib/document/text-fonts.svelte';
 import type { DocPage, TableBlock, TextStyle, TypesetBlock } from '$lib/document/types';
+import { loadTextFonts, measureText, textFonts } from '$lib/renderer/text-measure.svelte';
 import { catalog } from '$lib/state/catalog.svelte';
 
 /** What the tables read: the catalogues, as far as they have loaded. */
@@ -29,6 +33,25 @@ function loadedSky(): Sky {
 export function measuredLayout(text: string, style: TextStyle, widthMm: number): TextLayout {
 	void textFonts.epoch;
 	return layoutText(text, style, widthMm, measureText);
+}
+
+/** How tall `text` sets with the loaded faces, mm: the measure a template lays a page out with. */
+export function measuredHeight(text: string, style: TextStyle, widthMm: number): number {
+	return measuredLayout(text, style, widthMm).height;
+}
+
+/**
+ * The document as the backend is asked for it (`documentRequest`), once what its
+ * type needs has arrived: lines broken in a fallback font would break elsewhere in
+ * the PDF, and a table of Messier objects lists none without their catalogue.
+ */
+export async function typesetRequest(pages: readonly DocPage[]): Promise<DocumentRequest> {
+	const type = pages.flatMap(typesetOf);
+	await loadTextFonts(type.map((block) => block.style));
+	if (type.some((block) => block.kind === 'table' && block.table.source === 'messier')) {
+		await loadMessier();
+	}
+	return documentRequest(pages, measureText, loadedSky());
 }
 
 /**

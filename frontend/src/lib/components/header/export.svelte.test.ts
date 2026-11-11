@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DocumentExportResult } from '$lib/api/document-export';
 import type { ExportResult } from '$lib/api/export';
-import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { ChartLayers, ChartView } from '$lib/document/types';
 import type { DocumentStore } from '$lib/document/document.svelte';
-import type { DocumentExportResult } from '$lib/document/render';
 import { ToastStore } from '$lib/ui/toast.svelte';
 import { ExportController, withExportProgress, type ExportHost } from './export.svelte';
 
 const exportChart = vi.hoisted(() => vi.fn<() => Promise<ExportResult>>());
 const exportDocument = vi.hoisted(() => vi.fn<() => Promise<DocumentExportResult>>());
 vi.mock('$lib/api/export', () => ({ exportChart }));
-vi.mock('$lib/document/render', () => ({ exportDocument }));
+vi.mock('$lib/api/document-export', () => ({ exportDocument }));
 
 const VIEW: ChartView = {
 	projection: 'stereographic',

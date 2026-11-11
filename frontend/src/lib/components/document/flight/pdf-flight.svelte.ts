@@ -12,7 +12,7 @@
  */
 
 import { tick } from 'svelte';
-import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { ChartLayers, ChartView } from '$lib/document/types';
 import { MAX_CHARTS, MAX_PAGES } from '$lib/api/wire/limits';
 import type { DocumentStore } from '$lib/document/document.svelte';
 import { snapshotChart } from '$lib/document/render';

@@ -7,11 +7,14 @@
  * arrived. Until then a width is measured in whatever the browser falls back to, so
  * every layout made before reads `textFonts.epoch`, which moves when a face loads,
  * and is made again.
+ *
+ * The model's layouts are pure and take a `Measure` (`document/text.ts`); this is the
+ * one a browser brings them.
  */
 
 import { base } from '$app/paths';
-import { FONT_FAMILY, type Measure } from './text';
-import type { TextFont, TextStyle } from './types';
+import { FONT_FAMILY, type Measure } from '$lib/document/text';
+import type { TextFont, TextStyle } from '$lib/document/types';
 
 type FaceKey = `${TextFont}-${'regular' | 'bold'}${'' | '-italic'}`;
 

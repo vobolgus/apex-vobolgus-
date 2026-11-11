@@ -5,6 +5,7 @@ import { sampleStarMorphFrame } from '../math/projection';
 import type { UnitVec3 } from '../math/astronomy';
 import type { ProjectionFrameParams } from '../math/projection';
 import type { ConstellationSegments, SegmentPoint } from '../api/wire/payload';
+import { CONSTELLATION_LINE_STYLE, type DashPattern, type ReferenceLineStyle } from './line-styles';
 
 // Astronomical constants and frame conversions live in ../math/astronomy.ts — this module is
 // drawing only. Re-exported here for existing consumers.
@@ -15,40 +16,6 @@ const SAMPLE_STEP_DEG = 1;
 const SAMPLE_COUNT = 360 / SAMPLE_STEP_DEG + 1; // 361, closes the loop
 
 const BOUNDARY_BISECT_ITERATIONS = 6;
-
-interface DashPattern {
-	dashDeg: number;
-	gapDeg: number;
-}
-
-export interface ReferenceLineStyle {
-	strokeStyle: string;
-	lineWidth: number;
-	alpha: number;
-	dashPattern?: DashPattern;
-}
-
-export const REFERENCE_LINE_STYLES: {
-	equator: ReferenceLineStyle;
-	ecliptic: ReferenceLineStyle;
-	galacticEquator: ReferenceLineStyle;
-} = {
-	equator: {
-		strokeStyle: '#000000',
-		lineWidth: 1,
-		alpha: 1
-	},
-	ecliptic: {
-		strokeStyle: '#dc2626',
-		lineWidth: 1,
-		alpha: 0.95
-	},
-	galacticEquator: {
-		strokeStyle: '#b58cff',
-		lineWidth: 1,
-		alpha: 0.9
-	}
-};
 
 export function sampleEquator(): UnitVec3[] {
 	const out: UnitVec3[] = new Array(SAMPLE_COUNT);
@@ -375,18 +342,6 @@ function drawArcSlice(
 		cycleStart += period;
 	}
 }
-
-export const CONSTELLATION_LINE_STYLE: ReferenceLineStyle = {
-	strokeStyle: '#000000',
-	lineWidth: 0.6,
-	alpha: 0.35
-};
-
-export const CONSTELLATION_BOUNDARY_STYLE: ReferenceLineStyle = {
-	strokeStyle: '#000000',
-	lineWidth: 0.4,
-	alpha: 0.15
-};
 
 const GREAT_CIRCLE_SUBDIV_DEG = 3;
 

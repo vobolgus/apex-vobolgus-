@@ -5,8 +5,9 @@
  * All geometry is in millimetres, origin at the page's top-left, y down.
  */
 
-import type { ChartLayers, ChartView } from '$lib/api/render-config';
 import type { TextFont } from '$lib/api/wire/request';
+import type { ProjectionMode } from '$lib/math/projection';
+import type { Quaternion } from '$lib/math/quaternion';
 
 export type PageOrientation = 'portrait' | 'landscape';
 
@@ -22,6 +23,26 @@ export interface Rect {
 	y: number;
 	w: number;
 	h: number;
+}
+
+/** How a chart looks at the sky: what of the preview's state a chart is drawn from. */
+export interface ChartView {
+	projection: ProjectionMode;
+	orientation: Quaternion;
+	stereoFovDeg: number;
+	pinholeFovDeg: number;
+	pinholeAspectRatio: number;
+	pinholeHeightFrac: number;
+}
+
+/** What is drawn on a chart besides its stars. */
+export interface ChartLayers {
+	constellations: boolean;
+	constellationBoundaries: boolean;
+	equator: boolean;
+	ecliptic: boolean;
+	galacticEquator: boolean;
+	planets: boolean;
 }
 
 /** A ring on the sky: every point `radiusDeg` from (`raDeg`, `decDeg`). */

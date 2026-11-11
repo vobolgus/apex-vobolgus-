@@ -4,14 +4,14 @@
  * down, with the dark page around it left transparent so the paper shows.
  */
 
-import { chartSizePx, type ChartView } from '$lib/api/render-config';
+import { chartSizePx } from '$lib/api/render-config';
 import {
 	CHART_CANVAS_BACKING_PX,
 	MARK_COLOR,
 	PINHOLE_CORNER_RADIUS,
 	STAR_COLOR
 } from '$lib/constants';
-import type { ChartSnapshot, SkyMark } from '$lib/document/types';
+import type { ChartSnapshot, ChartView, SkyMark } from '$lib/document/types';
 import {
 	getProjectionFrameParams,
 	sampleStarMorphFrame,

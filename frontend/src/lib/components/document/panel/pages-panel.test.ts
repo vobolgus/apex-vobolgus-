@@ -4,14 +4,14 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { chartsOf } from '$lib/document/blocks';
 import { MAX_PAGES } from '$lib/api/wire/limits';
 import { DocumentStore } from '$lib/document/document.svelte';
-import type { ChartSnapshot, ChartBlock } from '$lib/document/types';
+import type { ChartSnapshot } from '$lib/document/types';
 import PagesPanel from './PagesPanel.svelte';
 
 const preview = vi.hoisted(() => ({
-	url: vi.fn<(item: ChartBlock) => Promise<string>>(() => Promise.resolve('blob:preview'))
+	url: vi.fn<(config: object) => Promise<string>>(() => Promise.resolve('blob:preview'))
 }));
 
-vi.mock('$lib/document/render', () => ({ chartPreviewUrl: preview.url }));
+vi.mock('$lib/api/chart-preview', () => ({ chartPreviewUrl: preview.url }));
 
 // jsdom has no ResizeObserver, which `bind:offsetWidth` (the panel's footprint) uses.
 beforeAll(() => {

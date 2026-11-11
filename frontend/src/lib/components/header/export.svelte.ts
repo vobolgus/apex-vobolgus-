@@ -11,14 +11,16 @@
  */
 
 import { tick } from 'svelte';
+import { exportDocument } from '$lib/api/document-export';
 import { exportChart, type ExportFormat } from '$lib/api/export';
-import { buildRenderConfig, type ChartLayers, type ChartView } from '$lib/api/render-config';
+import { buildRenderConfig } from '$lib/api/render-config';
 import type { RenderConfig } from '$lib/api/wire/request';
 import type { DocumentStore } from '$lib/document/document.svelte';
+import type { ChartLayers, ChartView } from '$lib/document/types';
 import { plural } from '$lib/document/labels';
-import { exportDocument } from '$lib/document/render';
 import { Dropdown } from '$lib/ui/dropdown.svelte';
 import { toast as pageToast, type ToastItem, type ToastStore } from '$lib/ui/toast.svelte';
+import { typesetRequest } from '../document/typeset.svelte';
 
 /** The export menu: what each format is for, and its shortcut (⌘S always saves a PNG). */
 export const EXPORT_OPTIONS = [
@@ -176,7 +178,7 @@ export class ExportController {
 		await withExportProgress(
 			this.#toast,
 			'Preparing the PDF…',
-			() => exportDocument(store.pages),
+			() => exportDocument(() => typesetRequest(store.pages)),
 			// A refusal (a 400) names its reason: trying again would not help.
 			(result) =>
 				!result.ok && result.message

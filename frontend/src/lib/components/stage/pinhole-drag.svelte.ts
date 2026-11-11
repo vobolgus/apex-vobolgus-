@@ -99,7 +99,7 @@ export class PinholeDrag {
 	start = (event: PointerEvent, handle: FrameHandle): void => {
 		const root = this.#host.root();
 		if (event.button !== 0 || !event.isPrimary || this.#session || !root) return;
-		// The sky's InputController already ignores non-canvas targets; this also
+		// The sky's input (`SkyInput`) already ignores non-canvas targets; this also
 		// keeps the page from treating the press as anything but a resize.
 		event.stopPropagation();
 		const target = event.currentTarget as HTMLElement;

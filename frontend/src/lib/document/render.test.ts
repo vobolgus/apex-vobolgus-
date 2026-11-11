@@ -1,20 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildRenderConfig, type ChartView } from '$lib/api/render-config';
+import { describe, expect, it } from 'vitest';
+import { buildRenderConfig } from '$lib/api/render-config';
 import { LayerState } from '$lib/state/layers.svelte';
 import { PRINT_MM_PER_PREVIEW_PX } from './geometry';
 import {
-	clearPreviewCache,
 	documentRequest,
-	exportDocument,
-	chartPreviewUrl,
 	chartRenderConfig,
 	PAPER_STYLE,
-	PREVIEW_CACHE_LIMIT,
 	snapshotChart,
 	textRequest
 } from './render';
 import { DEFAULT_TEXT_STYLE, FONT_METRICS, LINE_HEIGHT, MM_PER_PT, NO_VALUE } from './text';
-import type { ChartBlock, DocPage, TableBlock, TextBlock } from './types';
+import type { ChartBlock, ChartView, DocPage, TableBlock, TextBlock } from './types';
 
 const VIEW: ChartView = {
 	projection: 'stereographic',
@@ -388,7 +384,7 @@ describe('documentRequest', () => {
 			{ id: 'p1', orientation: 'portrait', blocks: [stereoItem(), pinholeItem()] },
 			{ id: 'p2', orientation: 'landscape', blocks: [] }
 		];
-		const body = documentRequest(pages);
+		const body = documentRequest(pages, () => 0, { messier: [], stars: [] });
 		expect(body.pages).toHaveLength(2);
 		expect(body.pages[0]).toMatchObject({ width_mm: 210, height_mm: 297 });
 		expect(body.pages[1]).toEqual({ width_mm: 297, height_mm: 210, items: [], texts: [] });
@@ -410,199 +406,5 @@ describe('documentRequest', () => {
 		]);
 		// Thumbnails stay on this side.
 		expect(JSON.stringify(body)).not.toContain('data:image');
-	});
-});
-
-describe('backend calls', () => {
-	let created: string[];
-	let revoked: string[];
-	const originalCreate = URL.createObjectURL;
-	const originalRevoke = URL.revokeObjectURL;
-
-	beforeEach(() => {
-		created = [];
-		revoked = [];
-		URL.createObjectURL = () => {
-			const url = `blob:test/${created.length}`;
-			created.push(url);
-			return url;
-		};
-		URL.revokeObjectURL = (url: string) => {
-			revoked.push(url);
-		};
-	});
-
-	afterEach(async () => {
-		// Revocation waits for the request: let it land before the stubs go.
-		clearPreviewCache();
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		URL.createObjectURL = originalCreate;
-		URL.revokeObjectURL = originalRevoke;
-		vi.unstubAllGlobals();
-		vi.restoreAllMocks();
-	});
-
-	function okResponse(text = '<svg/>') {
-		return { ok: true, status: 200, blob: async () => new Blob([text]), text: async () => text };
-	}
-
-	function mockFetch(
-		respond: (url: string, init: RequestInit) => unknown = () => okResponse()
-	): ReturnType<typeof vi.fn> {
-		const fetchMock = vi.fn(async (url: string, init: RequestInit) => respond(url, init));
-		vi.stubGlobal('fetch', fetchMock);
-		return fetchMock;
-	}
-
-	describe('exportDocument', () => {
-		it('posts the document and downloads one PDF', async () => {
-			const fetchMock = mockFetch();
-			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [stereoItem()] }];
-
-			await expect(exportDocument(pages)).resolves.toEqual({ ok: true });
-
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-			expect(url).toBe('/api/export/document');
-			expect(init.method).toBe('POST');
-			expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
-			expect(JSON.parse(init.body as string)).toEqual(documentRequest(pages));
-			expect(click).toHaveBeenCalledTimes(1);
-			const link = click.mock.contexts[0] as HTMLAnchorElement;
-			expect(link.download).toMatch(/^skycharts-\d+\.pdf$/);
-			expect(link.href).toBe(created[0]);
-			expect(revoked).toEqual([created[0]]);
-		});
-
-		it('logs a failed export, downloads nothing and passes on why it was refused', async () => {
-			mockFetch(() => ({ ok: false, status: 400, text: async () => 'too many pages' }));
-			const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
-			await expect(exportDocument(pages)).resolves.toEqual({
-				ok: false,
-				message: 'too many pages'
-			});
-
-			expect(click).not.toHaveBeenCalled();
-			expect(error).toHaveBeenCalledTimes(1);
-			expect(String(error.mock.calls[0][0])).toContain('400 too many pages');
-		});
-
-		it("reads the refusal out of the proxy's JSON error", async () => {
-			const body = JSON.stringify({ message: 'a document needs 1 to 100 pages, got 101' });
-			mockFetch(() => ({ ok: false, status: 400, text: async () => body }));
-			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
-			await expect(exportDocument(pages)).resolves.toEqual({
-				ok: false,
-				message: 'a document needs 1 to 100 pages, got 101'
-			});
-		});
-
-		it('has no reason to give when the backend failed or is away', async () => {
-			vi.spyOn(console, 'error').mockImplementation(() => {});
-			const pages: DocPage[] = [{ id: 'p', orientation: 'portrait', blocks: [] }];
-			mockFetch(() => ({ ok: false, status: 500, text: async () => 'PDF conversion error' }));
-			await expect(exportDocument(pages)).resolves.toEqual({ ok: false, message: null });
-			mockFetch(() => Promise.reject(new TypeError('Failed to fetch')));
-			await expect(exportDocument(pages)).resolves.toEqual({ ok: false, message: null });
-		});
-
-		it('does not call the backend for an empty document', async () => {
-			const fetchMock = mockFetch();
-			await expect(exportDocument([])).resolves.toEqual({ ok: false, message: null });
-			expect(fetchMock).not.toHaveBeenCalled();
-		});
-	});
-
-	describe('chartPreviewUrl', () => {
-		it("fetches the chart's SVG with its config and returns an object URL", async () => {
-			const fetchMock = mockFetch();
-			const item = stereoItem();
-			await expect(chartPreviewUrl(item)).resolves.toBe('blob:test/0');
-			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-			expect(url).toBe('/api/export?format=svg');
-			expect(init.method).toBe('POST');
-			expect(JSON.parse(init.body as string)).toEqual(chartRenderConfig(item));
-		});
-
-		it('caches by config: a move hits, a resize fetches again', async () => {
-			const fetchMock = mockFetch();
-			const first = await chartPreviewUrl(stereoItem({ x: 12, y: 12, w: 93, h: 93 }));
-			const moved = await chartPreviewUrl(stereoItem({ x: 100, y: 150, w: 93, h: 93 }));
-			expect(moved).toBe(first);
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-			const resized = await chartPreviewUrl(stereoItem({ x: 12, y: 12, w: 120, h: 120 }));
-			expect(resized).not.toBe(first);
-			expect(fetchMock).toHaveBeenCalledTimes(2);
-		});
-
-		it('shares one request between concurrent callers', async () => {
-			const fetchMock = mockFetch();
-			const [a, b] = await Promise.all([
-				chartPreviewUrl(stereoItem()),
-				chartPreviewUrl(stereoItem())
-			]);
-			expect(a).toBe(b);
-			expect(fetchMock).toHaveBeenCalledTimes(1);
-		});
-
-		it('revokes the least recently used preview beyond the cap', async () => {
-			const fetchMock = mockFetch();
-			const sized = (w: number) => stereoItem({ x: 12, y: 12, w, h: w });
-			const firstUrl = await chartPreviewUrl(sized(40));
-			for (let i = 1; i < PREVIEW_CACHE_LIMIT; i++) await chartPreviewUrl(sized(40 + i));
-			// Touch the first so the second becomes the oldest.
-			await chartPreviewUrl(sized(40));
-			expect(revoked).toEqual([]);
-
-			await chartPreviewUrl(sized(500));
-			await Promise.resolve();
-			expect(revoked).toEqual(['blob:test/1']);
-			expect(fetchMock).toHaveBeenCalledTimes(PREVIEW_CACHE_LIMIT + 1);
-			// The first is still cached, the evicted one is fetched again.
-			await expect(chartPreviewUrl(sized(40))).resolves.toBe(firstUrl);
-			await chartPreviewUrl(sized(41));
-			expect(fetchMock).toHaveBeenCalledTimes(PREVIEW_CACHE_LIMIT + 2);
-		});
-
-		it('keeps an evicted URL that an image still shows until none does', async () => {
-			mockFetch();
-			const shown = { images: [{ src: 'blob:test/0' }] };
-			vi.stubGlobal('document', shown);
-			const sized = (w: number) => stereoItem({ x: 12, y: 12, w, h: w });
-			for (let i = 0; i <= PREVIEW_CACHE_LIMIT; i++) await chartPreviewUrl(sized(40 + i));
-			await Promise.resolve();
-			// The oldest went out of the cache, but a page still draws it.
-			expect(revoked).toEqual([]);
-
-			shown.images = [];
-			await chartPreviewUrl(sized(500));
-			await Promise.resolve();
-			expect(revoked).toEqual(['blob:test/0', 'blob:test/1']);
-		});
-
-		it('does not cache a failure', async () => {
-			let fail = true;
-			const fetchMock = mockFetch(() =>
-				fail ? { ok: false, status: 502, text: async () => '' } : okResponse()
-			);
-			await expect(chartPreviewUrl(stereoItem())).rejects.toThrow('502');
-			fail = false;
-			await expect(chartPreviewUrl(stereoItem())).resolves.toBe('blob:test/0');
-			expect(fetchMock).toHaveBeenCalledTimes(2);
-		});
-
-		it('revokes every URL when the cache is cleared', async () => {
-			mockFetch();
-			await chartPreviewUrl(stereoItem());
-			await chartPreviewUrl(pinholeItem());
-			clearPreviewCache();
-			await Promise.resolve();
-			expect(revoked.sort()).toEqual(['blob:test/0', 'blob:test/1']);
-		});
 	});
 });

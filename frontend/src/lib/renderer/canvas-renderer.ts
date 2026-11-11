@@ -39,13 +39,15 @@ import {
 import {
 	CONSTELLATION_BOUNDARY_STYLE,
 	CONSTELLATION_LINE_STYLE,
+	REFERENCE_LINE_STYLES,
+	type ReferenceLineStyle
+} from './line-styles';
+import {
 	drawConstellationLines,
 	drawReferenceLine,
-	REFERENCE_LINE_STYLES,
 	sampleEcliptic,
 	sampleEquator,
 	sampleGalacticEquator,
-	type ReferenceLineStyle,
 	type UnitVec3
 } from './reference-lines';
 

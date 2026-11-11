@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { ChartLayers, ChartView } from '$lib/document/types';
 import { MAX_CHARTS } from '$lib/api/wire/limits';
 import { DocumentStore } from '$lib/document/document.svelte';
 import { memoryStorage } from '$lib/document/test-support';

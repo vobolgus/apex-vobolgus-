@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { MAX_FOV_DEG_STEREO } from '$lib/constants';
 import { toViewSpace, viewBasis } from '$lib/math/projection';
 import { normalizeQuaternion } from '$lib/math/quaternion';
-import { buildRenderConfig, chartSizePx, type ChartView } from './render-config';
+import type { ChartView } from '$lib/document/types';
+import { buildRenderConfig, chartSizePx } from './render-config';
 
 const VIEW: ChartView = {
 	projection: 'stereographic',

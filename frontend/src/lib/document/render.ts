@@ -1,6 +1,7 @@
 /**
- * The document's charts as RenderConfigs, and its text as lines: vector previews
- * and the PDF export.
+ * The document's charts as RenderConfigs, and its text as lines: what the vector
+ * previews and the PDF export ask the backend for. Pure: who sends a request
+ * (`$lib/api`) brings the measure and the catalogues it is made with.
  *
  * Each chart is drawn at its frame size in mm with `view.px` set to mm per preview
  * px, so scaling a chart on the page spreads the stars apart but keeps their radius
@@ -11,22 +12,21 @@
  * in, and sent line by line: the PDF breaks where the editor does.
  */
 
-import {
-	buildRenderConfig,
-	type ChartLayers,
-	type ChartView,
-	type ViewRenderConfig
-} from '$lib/api/render-config';
+import { buildRenderConfig, type ViewRenderConfig } from '$lib/api/render-config';
 import { MAX_LINE_CHARS, MAX_LINES_PER_TEXT } from '$lib/api/wire/limits';
 import type { DocumentRequest, DocumentText, DocumentTextLine } from '$lib/api/wire/request';
 import { chartsOf, typesetOf } from './blocks';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
-import { loadMessier } from '$lib/api/catalog';
-import { catalog } from '$lib/state/catalog.svelte';
 import { blockLayout, type Sky } from './table';
 import { alignAnchor, anchoredFrame, type Measure } from './text';
-import { loadTextFonts, measureText } from './text-fonts.svelte';
-import type { ChartBlock, ChartSnapshot, DocPage, TypesetBlock } from './types';
+import type {
+	ChartBlock,
+	ChartLayers,
+	ChartSnapshot,
+	ChartView,
+	DocPage,
+	TypesetBlock
+} from './types';
 
 /**
  * Overrides of the preview's style for a chart on white paper. The outline is
@@ -38,12 +38,6 @@ export const PAPER_STYLE = {
 	chart_color: '#ffffff',
 	chart_outline: '#c9ced6'
 } as const;
-
-/** Previews kept as object URLs; the least recently used one is revoked beyond this. */
-export const PREVIEW_CACHE_LIMIT = 60;
-
-/** How a document export went; `message` is the backend's reason for refusing it. */
-export type DocumentExportResult = { ok: true } | { ok: false; message: string | null };
 
 /** A frozen copy of what the preview shows now, for Add to PDF. */
 export function snapshotChart(
@@ -76,8 +70,8 @@ export function snapshotChart(
 }
 
 /** The preview's config for the chart, sized in mm with stars fixed in mm, on paper. */
-export function chartRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): ViewRenderConfig {
-	const { chart, frame } = item;
+export function chartRenderConfig(block: Pick<ChartBlock, 'chart' | 'frame'>): ViewRenderConfig {
+	const { chart, frame } = block;
 	const config = buildRenderConfig(chart.view, chart.layers, new Date(chart.createdAt));
 	const drawn: ViewRenderConfig = {
 		...config,
@@ -163,13 +157,14 @@ export function textRequest(
 const NO_SKY: Sky = { messier: [], stars: [] };
 
 /**
- * `measure` breaks the text into lines: the canvas's, once the fonts have loaded.
- * `sky` is what the tables read: the loaded catalogues.
+ * The whole document as the backend is asked for it. `measure` breaks the text into
+ * lines: the canvas's, once the fonts have loaded. `sky` is what the tables read:
+ * the loaded catalogues.
  */
 export function documentRequest(
 	pages: readonly DocPage[],
-	measure: Measure = measureText,
-	sky: Sky = { messier: catalog.messier, stars: catalog.stars }
+	measure: Measure,
+	sky: Sky
 ): DocumentRequest {
 	return {
 		pages: pages.map((page) => {
@@ -188,137 +183,4 @@ export function documentRequest(
 			};
 		})
 	};
-}
-
-/**
- * Download the whole document as one PDF. Errors are logged rather than thrown, as
- * `exportChart` does; the result says whether a file was downloaded and, when the
- * backend refused the document (a 400, which trying again will not change), why.
- */
-export async function exportDocument(pages: readonly DocPage[]): Promise<DocumentExportResult> {
-	if (pages.length === 0) return { ok: false, message: null };
-	let message: string | null = null;
-	try {
-		// Lines broken in a fallback font would break elsewhere in the PDF.
-		const texts = pages.flatMap(typesetOf);
-		await loadTextFonts(texts.map((text) => text.style));
-		// A table of Messier objects lists none without their catalogue.
-		if (texts.some((text) => text.kind === 'table' && text.table.source === 'messier')) {
-			await loadMessier();
-		}
-		const response = await fetch('/api/export/document', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(documentRequest(pages))
-		});
-		if (!response.ok) {
-			const text = await response.text();
-			// A 400 says what is wrong with the document, a 429 how long to wait.
-			if (response.status === 400 || response.status === 429) message = refusal(text);
-			throw new Error(`Document export failed: ${response.status} ${text}`);
-		}
-		const url = URL.createObjectURL(await response.blob());
-		const link = document.createElement('a');
-		link.download = `skycharts-${Date.now()}.pdf`;
-		link.href = url;
-		link.click();
-		URL.revokeObjectURL(url);
-		return { ok: true };
-	} catch (error) {
-		console.error(error);
-		return { ok: false, message };
-	}
-}
-
-/** The backend's plain-text reason, which the proxy wraps as `{ "message": … }`. */
-function refusal(body: string): string | null {
-	let text = body;
-	try {
-		const parsed: unknown = JSON.parse(body);
-		if (typeof parsed === 'object' && parsed !== null && 'message' in parsed) {
-			text = String(parsed.message);
-		}
-	} catch {
-		// Plain text already.
-	}
-	text = text.trim();
-	return text === '' ? null : text;
-}
-
-// Insertion order is recency: a hit moves to the end, eviction takes the first.
-const previews = new Map<string, Promise<string>>();
-/**
- * Evicted URLs an image still shows. A page that becomes current in the editor
- * draws a new <img> with the URL its chart already had, which a revoked URL would
- * break; these are revoked once no image shows them.
- */
-const retired = new Set<string>();
-
-/**
- * An object URL of the chart's SVG at its current size, cached by the JSON of its
- * config (the position on the page does not matter). Rejects when the backend
- * fails; a failure is not cached, so the next call tries again.
- */
-export function chartPreviewUrl(item: Pick<ChartBlock, 'chart' | 'frame'>): Promise<string> {
-	const body = JSON.stringify(chartRenderConfig(item));
-	const cached = previews.get(body);
-	if (cached) {
-		previews.delete(body);
-		previews.set(body, cached);
-		return cached;
-	}
-	const url = fetchPreview(body);
-	previews.set(body, url);
-	url.catch(() => {
-		if (previews.get(body) === url) previews.delete(body);
-	});
-	for (const [key, evicted] of previews) {
-		if (previews.size <= PREVIEW_CACHE_LIMIT) break;
-		previews.delete(key);
-		evicted.then(
-			(href) => {
-				retired.add(href);
-				revokeUnshown();
-			},
-			() => {}
-		);
-	}
-	return url;
-}
-
-/** Drop every cached preview and revoke its URL. */
-export function clearPreviewCache(): void {
-	for (const url of previews.values()) revokeWhenSettled(url);
-	previews.clear();
-	for (const href of retired) URL.revokeObjectURL(href);
-	retired.clear();
-}
-
-/** Revoke the retired URLs that no image in the document shows any more. */
-function revokeUnshown() {
-	const shown = new Set(
-		typeof document === 'undefined' ? [] : Array.from(document.images, (image) => image.src)
-	);
-	for (const href of retired) {
-		if (shown.has(href)) continue;
-		retired.delete(href);
-		URL.revokeObjectURL(href);
-	}
-}
-
-async function fetchPreview(body: string): Promise<string> {
-	const response = await fetch('/api/export?format=svg', {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body
-	});
-	if (!response.ok) throw new Error(`Chart preview failed: ${response.status}`);
-	return URL.createObjectURL(await response.blob());
-}
-
-function revokeWhenSettled(url: Promise<string>) {
-	url.then(
-		(href) => URL.revokeObjectURL(href),
-		() => {}
-	);
 }

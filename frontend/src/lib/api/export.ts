@@ -10,7 +10,7 @@ import type { RenderConfig } from './wire/request';
 export type ExportFormat = 'PNG' | 'SVG' | 'PDF';
 
 /** Trigger a browser download for `href` under `filename`. */
-function downloadFile(href: string, filename: string) {
+export function downloadFile(href: string, filename: string) {
 	const link = document.createElement('a');
 	link.download = filename;
 	link.href = href;

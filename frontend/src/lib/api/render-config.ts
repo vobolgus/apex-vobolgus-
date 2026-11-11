@@ -14,30 +14,11 @@ import {
 	CHART_SKY_COLOR,
 	STAR_COLOR
 } from '$lib/constants';
-import { viewBasis, type ProjectionMode } from '$lib/math/projection';
-import type { Quaternion } from '$lib/math/quaternion';
-import { CONSTELLATION_LINE_STYLE, REFERENCE_LINE_STYLES } from '$lib/renderer/reference-lines';
+import type { ChartLayers, ChartView } from '$lib/document/types';
+import { viewBasis } from '$lib/math/projection';
+import { CONSTELLATION_LINE_STYLE, REFERENCE_LINE_STYLES } from '$lib/renderer/line-styles';
 import { FULL_MAX_MAG } from './wire/payload';
 import type { RenderConfig, ViewConfig } from './wire/request';
-
-/** The preview state an export depends on. */
-export interface ChartView {
-	projection: ProjectionMode;
-	orientation: Quaternion;
-	stereoFovDeg: number;
-	pinholeFovDeg: number;
-	pinholeAspectRatio: number;
-	pinholeHeightFrac: number;
-}
-
-export interface ChartLayers {
-	constellations: boolean;
-	constellationBoundaries: boolean;
-	equator: boolean;
-	ecliptic: boolean;
-	galacticEquator: boolean;
-	planets: boolean;
-}
 
 /**
  * A RenderConfig as this page sends it: of all the backend takes (`wire/request`),

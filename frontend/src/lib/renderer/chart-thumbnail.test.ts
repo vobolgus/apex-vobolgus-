@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ChartView } from '$lib/api/render-config';
+import type { ChartView } from '$lib/document/types';
 import {
 	CHART_CANVAS_BACKING_PX,
 	CHART_RADIUS_FRAC,

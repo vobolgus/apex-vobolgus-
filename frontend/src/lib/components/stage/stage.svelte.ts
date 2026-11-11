@@ -10,16 +10,16 @@
  * leave alone.
  */
 
-import type { ChartView } from '$lib/api/render-config';
+import type { ChartView } from '$lib/document/types';
 import { loadFlubberInterpolator } from '$lib/flubber';
 import type { ProjectionMode } from '$lib/math/projection';
 import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
-import { InputController } from '$lib/renderer/input-handlers';
 import { catalog } from '$lib/state/catalog.svelte';
 import type { LayerState } from '$lib/state/layers.svelte';
 import type { ProjectionTransition } from '$lib/state/projection-transition.svelte';
 import { view } from '$lib/state/view.svelte';
 import { RenderLoop } from './render-loop';
+import { SkyInput } from './sky-input';
 
 /** What the stage asks of the pinhole frame's handles (`PinholeFrameOverlay`). */
 interface FrameOverlay {
@@ -37,7 +37,7 @@ export class StageController {
 	overlay: FrameOverlay | undefined = undefined;
 	readonly #loop: RenderLoop;
 	#canvas: HTMLCanvasElement | null = null;
-	#input: InputController | null = null;
+	#input: SkyInput | null = null;
 	#renderer: CanvasRenderer | null = null;
 
 	constructor(layers: LayerState, projection: ProjectionTransition) {
@@ -78,7 +78,7 @@ export class StageController {
 	 */
 	attach(canvas: HTMLCanvasElement): () => void {
 		this.#canvas = canvas;
-		this.#input = new InputController({
+		this.#input = new SkyInput({
 			canvas: () => this.#canvas,
 			onChange: this.markDirty,
 			getMode: () => (this.projection.blend < 0.5 ? 'stereographic' : 'pinhole')

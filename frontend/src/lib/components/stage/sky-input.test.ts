@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_FOV_DEG_STEREO, MIN_FOV_DEG_STEREO } from '$lib/constants';
 import { quaternionFromAxisAngle, type Quaternion } from '$lib/math/quaternion';
 import { view } from '$lib/state/view.svelte';
-import { InputController } from './input-handlers';
+import { SkyInput } from './sky-input';
 
 const IDENTITY: Quaternion = { x: 0, y: 0, z: 0, w: 1 };
 
@@ -20,7 +20,7 @@ function setup() {
 	canvas.releasePointerCapture = () => {};
 	canvas.hasPointerCapture = () => false;
 	const onChange = vi.fn();
-	const input = new InputController({
+	const input = new SkyInput({
 		canvas: () => canvas,
 		onChange,
 		getMode: () => 'stereographic'

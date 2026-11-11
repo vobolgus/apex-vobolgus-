@@ -23,7 +23,7 @@
  * `ViewUrl` keeps the address bar and the chart in step, both ways.
  */
 
-import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { ChartLayers, ChartView } from '$lib/document/types';
 import {
 	CHART_RADIUS_FRAC,
 	MAX_FOV_DEG_PINHOLE,

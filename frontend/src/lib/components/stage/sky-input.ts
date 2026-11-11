@@ -1,3 +1,10 @@
+/**
+ * What moves the sky on the stage: a drag that glides on when it is let go, the
+ * keys that pan, roll and zoom while they are held, the wheel and a pinch, and the
+ * timed moves (north up, a flight to another view). It writes the view; the stage's
+ * render loop asks it each frame whether anything moved (`tick`).
+ */
+
 import {
 	EPSILON,
 	MAX_FOV_DEG_PINHOLE,
@@ -96,13 +103,13 @@ function axisAngle(q: Quaternion): { axis: Vec3; angle: number } | null {
 	};
 }
 
-interface InputControllerOptions {
+interface SkyInputOptions {
 	canvas: () => HTMLCanvasElement | null;
 	onChange: () => void;
 	getMode: () => ProjectionMode;
 }
 
-export class InputController {
+export class SkyInput {
 	private activePointers = new Map<number, { x: number; y: number }>();
 	private dragging = false;
 	private activePointerId: number | null = null;
@@ -121,7 +128,7 @@ export class InputController {
 	/** The field of view the wheel asked for, which `tick` eases towards. */
 	private zoomTarget: { mode: ProjectionMode; fovDeg: number } | null = null;
 
-	constructor(private readonly opts: InputControllerOptions) {}
+	constructor(private readonly opts: SkyInputOptions) {}
 
 	onPointerDown(event: PointerEvent) {
 		if (!(event.target instanceof HTMLCanvasElement)) return;

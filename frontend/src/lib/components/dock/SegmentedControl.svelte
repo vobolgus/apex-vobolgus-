@@ -43,7 +43,7 @@
 		if (event.key === 'ArrowRight' || event.key === 'ArrowDown') step = 1;
 		else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') step = -1;
 		else return;
-		// The window-level InputController rotates the sky on arrows; this key is ours.
+		// The window-level `SkyInput` rotates the sky on arrows; this key is ours.
 		event.preventDefault();
 		event.stopPropagation();
 		// A held key would flip the projection back and forth on every repeat.

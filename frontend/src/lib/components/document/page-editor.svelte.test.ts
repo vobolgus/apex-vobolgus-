@@ -10,7 +10,7 @@ import { editorLayout } from './editor/screen-geometry';
 import PageEditor from './PageEditor.svelte';
 
 // No backend here: every preview is one made-up URL.
-vi.mock('$lib/document/render', () => ({
+vi.mock('$lib/api/chart-preview', () => ({
 	chartPreviewUrl: () => Promise.resolve('blob:preview')
 }));
 
