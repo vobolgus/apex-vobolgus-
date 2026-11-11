@@ -2,7 +2,7 @@
  * Option data for the dock's segmented controls, and the layers panel's size.
  */
 
-import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
+import type { ProjectionMode } from '$lib/math/projection';
 
 export interface SegmentOption<T extends string> {
 	value: T;

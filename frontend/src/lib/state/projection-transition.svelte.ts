@@ -11,13 +11,14 @@ import {
 	PROJECTION_TRANSITION_MIN_MS,
 	PROJECTION_TRANSITION_MS
 } from '$lib/constants';
-import { pinholeFovToStereoFov, stereoFovToPinholeFov } from '$lib/math/projection';
+import {
+	pinholeFovToStereoFov,
+	stereoFovToPinholeFov,
+	type ProjectionMode
+} from '$lib/math/projection';
 import { getProjectionBlend } from '$lib/renderer/projection-blend';
 import type { ProjectionAnimationState } from '$lib/renderer/types';
 import { view } from '$lib/state/view.svelte';
-
-export const PROJECTION_OPTIONS = ['stereographic', 'pinhole'] as const;
-export type ProjectionMode = (typeof PROJECTION_OPTIONS)[number];
 
 /** Blend deltas below this are snapped instead of animated. */
 const BLEND_EPSILON = 0.001;

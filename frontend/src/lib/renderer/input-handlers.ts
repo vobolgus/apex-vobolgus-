@@ -7,6 +7,7 @@ import {
 } from '$lib/constants';
 import { projectPointerToArcball } from '$lib/math/arcball';
 import { clamp, easeInOutCubic } from '$lib/math/easing';
+import type { ProjectionMode } from '$lib/math/projection';
 import {
 	multiplyQuaternions,
 	normalizeQuaternion,
@@ -19,8 +20,6 @@ import {
 } from '$lib/math/quaternion';
 import { view } from '$lib/state/view.svelte';
 import { prefersReducedMotion } from '$lib/ui/motion';
-
-export type ProjectionMode = 'stereographic' | 'pinhole';
 
 const PAN_SPEED_RAD_PER_S = (60 * Math.PI) / 180;
 const ROLL_SPEED_RAD_PER_S = (60 * Math.PI) / 180;

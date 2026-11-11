@@ -14,7 +14,7 @@
  * first's copy is taken away, the browser having no room to keep both for long.
  */
 
-import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
+import { PROJECTION_MODES, type ProjectionMode } from '$lib/math/projection';
 import { chartsOf, layered, typesetOf } from './blocks';
 import { keptFrame } from './geometry';
 import { MAX_TABLE_ROWS, MIN_TABLE_ROWS, TABLE_LOOKS, TABLE_SOURCES } from './table';
@@ -137,7 +137,6 @@ function serialize(pages: DocPage[], budget: number): string {
 	return JSON.stringify({ pages: saved });
 }
 
-const PROJECTIONS: readonly ProjectionMode[] = ['stereographic', 'pinhole'];
 const LAYER_KEYS = [
 	'constellations',
 	'constellationBoundaries',
@@ -450,7 +449,7 @@ function parseChart(value: unknown): ChartSnapshot | null {
 	if (!isRecord(value) || !isRecord(value.view) || !isRecord(value.layers)) return null;
 	const { view, layers, aspect, createdAt } = value;
 	const q = view.orientation;
-	if (!PROJECTIONS.includes(view.projection as ProjectionMode)) return null;
+	if (!PROJECTION_MODES.includes(view.projection as ProjectionMode)) return null;
 	if (!isRecord(q) || ![q.x, q.y, q.z, q.w].every(isFiniteNumber)) return null;
 	const sizes = [
 		view.stereoFovDeg,

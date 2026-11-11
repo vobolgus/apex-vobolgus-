@@ -12,11 +12,12 @@
 
 import type { ChartView } from '$lib/api/render-config';
 import { loadFlubberInterpolator } from '$lib/flubber';
+import type { ProjectionMode } from '$lib/math/projection';
 import { CanvasRenderer } from '$lib/renderer/canvas-renderer';
 import { InputController } from '$lib/renderer/input-handlers';
 import { catalog } from '$lib/state/catalog.svelte';
 import type { LayerState } from '$lib/state/layers.svelte';
-import type { ProjectionMode, ProjectionTransition } from '$lib/state/projection-transition.svelte';
+import type { ProjectionTransition } from '$lib/state/projection-transition.svelte';
 import { view } from '$lib/state/view.svelte';
 import { RenderLoop } from './render-loop';
 

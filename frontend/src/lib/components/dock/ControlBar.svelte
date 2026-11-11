@@ -4,8 +4,8 @@
 	 * shows and hides the layers panel where the screen has room for one, and opens
 	 * its popover where it has not.
 	 */
+	import type { ProjectionMode } from '$lib/math/projection';
 	import type { LayerState } from '$lib/state/layers.svelte';
-	import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
 	import type { Dropdown } from '$lib/ui/dropdown.svelte';
 	import type { LayersDock } from './layers-dock.svelte';
 	import LayersPopover from './LayersPopover.svelte';

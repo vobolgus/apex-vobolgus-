@@ -35,6 +35,10 @@ export function toViewSpace(
 
 export type Vec3Tuple = [number, number, number];
 
+/** The two ways a chart is drawn: the sky in a disc, or a frame of it seen through a pinhole. */
+export const PROJECTION_MODES = ['stereographic', 'pinhole'] as const;
+export type ProjectionMode = (typeof PROJECTION_MODES)[number];
+
 /** The view-space axes as sky directions (equatorial frame). */
 export interface ViewBasis {
 	right: Vec3Tuple;

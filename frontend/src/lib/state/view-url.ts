@@ -36,8 +36,8 @@ import {
 	PINHOLE_HEIGHT_FRAC_MIN
 } from '$lib/constants';
 import { orientationToPointing, pointingToOrientation } from '$lib/math/pointing';
+import type { ProjectionMode } from '$lib/math/projection';
 import type { Quaternion } from '$lib/math/quaternion';
-import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
 import { prefersReducedMotion } from '$lib/ui/motion';
 
 /** The address bar follows the view once it has been still for this long. */

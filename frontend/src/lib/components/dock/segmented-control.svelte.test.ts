@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SegmentedControl from './SegmentedControl.svelte';
 import { PROJECTION_SEGMENTS } from './options';
-import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
+import type { ProjectionMode } from '$lib/math/projection';
 
 function setup(initial: ProjectionMode = 'stereographic') {
 	const target = document.createElement('div');

@@ -15,10 +15,9 @@ import {
 	CHART_SKY_COLOR,
 	STAR_COLOR
 } from '$lib/constants';
-import { viewBasis, type Vec3Tuple } from '$lib/math/projection';
+import { viewBasis, type ProjectionMode, type Vec3Tuple } from '$lib/math/projection';
 import type { Quaternion } from '$lib/math/quaternion';
 import { CONSTELLATION_LINE_STYLE, REFERENCE_LINE_STYLES } from '$lib/renderer/reference-lines';
-import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
 
 /** The preview state an export depends on. */
 export interface ChartView {
