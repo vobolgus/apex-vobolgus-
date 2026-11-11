@@ -842,71 +842,89 @@ interface TreeCandidate {
 	ub: number;
 }
 
-/**
- * Lay `items` (in the page's order; on Add the new chart last) out on a page of
- * orientation `o`: the best layout by size, then looks, and the band it was picked from.
- */
-export function arrange(
-	o: PageOrientation,
-	items: readonly ArrangeItem[],
-	opts: ArrangeOptions = {}
-): ArrangeResult {
-	const mode = opts.mode ?? 'scratch';
-	const n = items.length;
-	if (n === 0) {
-		return {
-			frames: [],
-			seq: [],
-			tree: null,
-			sizing: 'uniform',
-			P: 1,
-			s: 1,
-			kept: false,
-			belowMin: false,
-			metrics: { lr: 1, tb: 1, stab: 1 },
-			ranked: [],
-			trees: 0
-		};
-	}
-	const B = contentBox(o);
-	const base = items.map((it) => aloneSize(it.aspect, o));
-	const ignoreMin = !!opts.ignoreMin;
+/** What every stage of `arrange` reads: how it lays out, the charts, and the room for them. */
+interface Setting {
+	mode: ArrangeMode;
+	items: readonly ArrangeItem[];
+	/** The content box. */
+	B: Rect;
+	/** Each chart's size alone on the page. */
+	base: Size[];
+	ignoreMin: boolean;
+}
 
-	// The old layout, for stability (Add: every chart but the new one; a turn: all, transposed).
+/** An empty page's layout. */
+function noLayout(): ArrangeResult {
+	return {
+		frames: [],
+		seq: [],
+		tree: null,
+		sizing: 'uniform',
+		P: 1,
+		s: 1,
+		kept: false,
+		belowMin: false,
+		metrics: { lr: 1, tb: 1, stab: 1 },
+		ranked: [],
+		trees: 0
+	};
+}
+
+/**
+ * The old layout, for stability (Add: every chart but the new one; a turn: all, transposed),
+ * and the content box it was laid out in. None when no chart had a frame.
+ */
+function oldLayout(
+	ctx: Setting,
+	o: PageOrientation,
+	from: PageOrientation | undefined
+): { old: (Rect | null)[] | null; box: Rect } {
+	const { mode, items } = ctx;
+	const n = items.length;
 	let old: (Rect | null)[] | null = null;
-	let oldBox = B;
+	let box = ctx.B;
 	if (mode === 'add') old = items.map((it, i) => (i < n - 1 ? (it.frame ?? null) : null));
 	if (mode === 'turn') {
 		old = items.map((it) => it.frame ?? null);
-		oldBox = contentBox(opts.from ?? (o === 'portrait' ? 'landscape' : 'portrait'));
+		box = contentBox(from ?? (o === 'portrait' ? 'landscape' : 'portrait'));
 	}
 	if (old && old.every((f) => !f)) old = null;
-	const ref = stabilityRef(old, oldBox, mode === 'turn');
+	return { old, box };
+}
 
-	// Orders and trees.
-	let seqs: number[][];
-	let extra: LayoutTree[] = [];
+/** The chart orders to enumerate trees for, and trees to try as they are (`extra`). */
+function ordersOf(
+	ctx: Setting,
+	old: (Rect | null)[] | null
+): { seqs: number[][]; extra: LayoutTree[] } {
+	const { mode, items } = ctx;
+	const n = items.length;
 	if (mode === 'add') {
-		if (n <= ARRANGE.insertN) seqs = insertOrders(n);
-		else {
-			// 7–8 charts: Atkins insertion into the page's own tree; the page order alone when
-			// the old frames have no guillotine structure.
-			const prior = old?.slice(0, n - 1);
-			const oldTree =
-				prior && prior.every((f): f is Rect => f !== null) ? treeFromFrames(prior) : null;
-			if (oldTree !== null) {
-				seqs = [];
-				extra = insertions(oldTree, n - 1);
-			} else seqs = [identityOrder(n)];
-		}
-	} else if (n <= ARRANGE.permN) seqs = distinctOrders(items);
-	else if (n === ARRANGE.permN + 1) {
+		if (n <= ARRANGE.insertN) return { seqs: insertOrders(n), extra: [] };
+		// 7–8 charts: Atkins insertion into the page's own tree; the page order alone when
+		// the old frames have no guillotine structure.
+		const prior = old?.slice(0, n - 1);
+		const oldTree =
+			prior && prior.every((f): f is Rect => f !== null) ? treeFromFrames(prior) : null;
+		if (oldTree !== null) return { seqs: [], extra: insertions(oldTree, n - 1) };
+		return { seqs: [identityOrder(n)], extra: [] };
+	}
+	if (n <= ARRANGE.permN) return { seqs: distinctOrders(items), extra: [] };
+	if (n === ARRANGE.permN + 1) {
 		const g = groupedOrder(items);
-		seqs = inversions(g) === 0 ? [identityOrder(n)] : [identityOrder(n), g];
-	} else seqs = [identityOrder(n)];
-	const orderFactor = (inv: number) =>
-		inv === 0 ? 1 : mode === 'add' ? ARRANGE.orderAdd : ARRANGE.orderScratch;
+		return { seqs: inversions(g) === 0 ? [identityOrder(n)] : [identityOrder(n), g], extra: [] };
+	}
+	return { seqs: [identityOrder(n)], extra: [] };
+}
 
+/** The P factor of a changed order. */
+function orderFactor(ctx: Setting, inv: number): number {
+	return inv === 0 ? 1 : ctx.mode === 'add' ? ARRANGE.orderAdd : ARRANGE.orderScratch;
+}
+
+/** Every tree of every order, and the trees given as they are, by their upper bound. */
+function treesOf(ctx: Setting, { seqs, extra }: ReturnType<typeof ordersOf>): TreeCandidate[] {
+	const { base, B } = ctx;
 	const trees: TreeCandidate[] = [];
 	const enumerate = treeEnumerator(base);
 	for (const seq of seqs) {
@@ -920,43 +938,67 @@ export function arrange(
 		const seq = leavesOf(tree);
 		trees.push({ seq, tree, s: envelopeScale(e.W, e.H, B), inv: inversions(seq), ub: 0 });
 	}
-	for (const c of trees) c.ub = c.s * orderFactor(c.inv);
+	for (const c of trees) c.ub = c.s * orderFactor(ctx, c.inv);
 	trees.sort((a, b) => b.ub - a.ub || a.inv - b.inv);
+	return trees;
+}
 
-	const minSideOK = (t: readonly number[]) =>
-		ignoreMin || t.every((v, i) => Math.min(base[i].w, base[i].h) * v >= MIN_CHART_SIDE_MM - 1e-6);
-	const evaluate = (
-		c: Omit<TreeCandidate, 'ub'>,
-		sizing: LayoutSizing,
-		t: number[]
-	): LayoutCandidate => {
-		const frames = layoutFrames(c.tree, t, base, B);
-		const rag = raggedPairs(c.tree, frames);
-		const s = Math.min(...t);
-		const P = s * (rag.near ? ARRANGE.ragged : 1) * orderFactor(c.inv);
-		return { frames, seq: c.seq, tree: c.tree, sizing, t, s, P, rag, inv: c.inv };
-	};
-	const sizingsOf = (c: Omit<TreeCandidate, 'ub'>): [LayoutSizing, number[]][] => {
-		const out: [LayoutSizing, number[]][] = [['uniform', new Array<number>(n).fill(c.s)]];
-		const bl = blockedScales(c.tree, base, B, n);
-		if (bl && !out[0][1].every((v, i) => Math.abs(v - bl[i]) < 1e-9)) {
-			// Identical charts always share one size: a blocked sizing that breaks that is dropped.
-			const sizes = new Map<string, number>();
-			let same = true;
-			items.forEach((it, i) => {
-				const k = typeKey(it);
-				const prev = sizes.get(k);
-				if (prev !== undefined && Math.abs(prev - bl[i]) * base[i].w > 0.05) same = false;
-				sizes.set(k, bl[i]);
-			});
-			if (same) out.push(['blocked', bl]);
-		}
-		return out;
-	};
+/** Whether every chart keeps each side at 40 mm at these scales (or the rule is ignored). */
+function minSideOK(ctx: Setting, t: readonly number[]): boolean {
+	const { base } = ctx;
+	return (
+		ctx.ignoreMin ||
+		t.every((v, i) => Math.min(base[i].w, base[i].h) * v >= MIN_CHART_SIDE_MM - 1e-6)
+	);
+}
 
-	// Walk the trees by their upper bound; stop once nothing can reach the band. A tree whose
-	// uniform sizing breaks the 40 mm rule can still pass blocked (a panorama across the page
-	// over two discs); otherwise it is only a fallback.
+/** A tree sized at `t`: its frames, its raggedness and its P. */
+function evaluate(
+	ctx: Setting,
+	c: Omit<TreeCandidate, 'ub'>,
+	sizing: LayoutSizing,
+	t: number[]
+): LayoutCandidate {
+	const frames = layoutFrames(c.tree, t, ctx.base, ctx.B);
+	const rag = raggedPairs(c.tree, frames);
+	const s = Math.min(...t);
+	const P = s * (rag.near ? ARRANGE.ragged : 1) * orderFactor(ctx, c.inv);
+	return { frames, seq: c.seq, tree: c.tree, sizing, t, s, P, rag, inv: c.inv };
+}
+
+/** The sizings of a tree: uniform, and blocked where that differs and keeps twins alike. */
+function sizingsOf(ctx: Setting, c: Omit<TreeCandidate, 'ub'>): [LayoutSizing, number[]][] {
+	const { items, base, B } = ctx;
+	const n = items.length;
+	const out: [LayoutSizing, number[]][] = [['uniform', new Array<number>(n).fill(c.s)]];
+	const bl = blockedScales(c.tree, base, B, n);
+	if (bl && !out[0][1].every((v, i) => Math.abs(v - bl[i]) < 1e-9)) {
+		// Identical charts always share one size: a blocked sizing that breaks that is dropped.
+		const sizes = new Map<string, number>();
+		let same = true;
+		items.forEach((it, i) => {
+			const k = typeKey(it);
+			const prev = sizes.get(k);
+			if (prev !== undefined && Math.abs(prev - bl[i]) * base[i].w > 0.05) same = false;
+			sizes.set(k, bl[i]);
+		});
+		if (same) out.push(['blocked', bl]);
+	}
+	return out;
+}
+
+/**
+ * The sized layouts that may reach the band, and the best P among them. The trees are
+ * walked by their upper bound, and the walk stops once nothing can reach the band. A tree
+ * whose uniform sizing breaks the 40 mm rule can still pass blocked (a panorama across the
+ * page over two discs); otherwise it is only a fallback.
+ */
+function sizedLayouts(
+	ctx: Setting,
+	trees: readonly TreeCandidate[]
+): { cands: LayoutCandidate[]; Pbest: number; belowMin: boolean } {
+	const { base, ignoreMin } = ctx;
+	const n = ctx.items.length;
 	const sMin = Math.max(...base.map((b) => MIN_CHART_SIDE_MM / Math.min(b.w, b.h)));
 	let Pbest = 0;
 	const cands: LayoutCandidate[] = [];
@@ -965,67 +1007,55 @@ export function arrange(
 		if (c.ub < (1 - ARRANGE.band) * Pbest - 1e-12) break;
 		const uniformOK = ignoreMin || c.s >= sMin - 1e-9;
 		if (!uniformOK && fallback.length < 64) fallback.push(c);
-		for (const [sizing, t] of sizingsOf(c)) {
+		for (const [sizing, t] of sizingsOf(ctx, c)) {
 			if (sizing === 'uniform' && !uniformOK) continue;
-			if (!minSideOK(t)) continue;
-			const cand = evaluate(c, sizing, t);
+			if (!minSideOK(ctx, t)) continue;
+			const cand = evaluate(ctx, c, sizing, t);
 			cands.push(cand);
 			if (cand.P > Pbest) Pbest = cand.P;
 		}
 	}
-	let belowMin = false;
-	if (!cands.length) {
-		// Nothing keeps every side at 40 mm (a crowded turn): the best layouts without the rule.
-		belowMin = true;
-		for (const c of fallback) {
-			const cand = evaluate(c, 'uniform', new Array<number>(n).fill(c.s));
-			cands.push(cand);
-			if (cand.P > Pbest) Pbest = cand.P;
-		}
+	if (cands.length) return { cands, Pbest, belowMin: false };
+	// Nothing keeps every side at 40 mm (a crowded turn): the best layouts without the rule.
+	for (const c of fallback) {
+		const cand = evaluate(ctx, c, 'uniform', new Array<number>(n).fill(c.s));
+		cands.push(cand);
+		if (cand.P > Pbest) Pbest = cand.P;
 	}
-	const finish = (ranked: LayoutCandidate[], best: LayoutCandidate): ArrangeResult => ({
-		frames: best.frames,
-		seq: best.seq,
-		tree: best.tree,
-		sizing: best.sizing,
-		P: best.P,
-		s: best.s,
-		kept: !!best.kept,
-		belowMin,
-		metrics: best.metrics ?? {
-			lr: symmetry(best.frames, items, B, 'lr'),
-			tb: symmetry(best.frames, items, B, 'tb'),
-			stab: stability(best.frames, ref, B)
-		},
-		ranked,
-		trees: trees.length
-	});
+	return { cands, Pbest, belowMin: true };
+}
 
-	// The preferred layout (a turn) is kept outright when it is close enough to the best.
-	if (opts.prefer && opts.prefer.tree !== null && opts.prefer.tree !== undefined) {
-		const tree = opts.prefer.tree;
-		const sizing = opts.prefer.sizing;
-		const e = envelopeOf(tree, base);
-		const seq = leavesOf(tree);
-		const c = { seq, tree, s: envelopeScale(e.W, e.H, B), inv: inversions(seq) };
-		const options = sizingsOf(c)
-			.filter(([, t]) => minSideOK(t))
-			.map(([sz, t]) => evaluate(c, sz, t));
-		const same =
-			options.find((x) => sizing && x.sizing === sizing) ?? options.sort((a, b) => b.P - a.P)[0];
-		if (same && same.P >= ARRANGE.turnKeep * Pbest) {
-			const kept = { ...same, kept: true };
-			return finish([kept], kept);
-		}
-	}
+/** The preferred layout (a turn), kept outright when it is close enough to the best. */
+function keptLayout(
+	ctx: Setting,
+	prefer: ArrangeOptions['prefer'],
+	Pbest: number
+): LayoutCandidate | null {
+	if (!prefer || prefer.tree === null || prefer.tree === undefined) return null;
+	const tree = prefer.tree;
+	const sizing = prefer.sizing;
+	const e = envelopeOf(tree, ctx.base);
+	const seq = leavesOf(tree);
+	const c = { seq, tree, s: envelopeScale(e.W, e.H, ctx.B), inv: inversions(seq) };
+	const options = sizingsOf(ctx, c)
+		.filter(([, t]) => minSideOK(ctx, t))
+		.map(([sz, t]) => evaluate(ctx, c, sz, t));
+	const same =
+		options.find((x) => sizing && x.sizing === sizing) ?? options.sort((a, b) => b.P - a.P)[0];
+	if (same && same.P >= ARRANGE.turnKeep * Pbest) return { ...same, kept: true };
+	return null;
+}
 
-	// The band: identical-looking layouts deduplicated, identical charts handed out, ranked on looks.
+/** The layouts within the band of the best, those that look alike counted once. */
+function bandOf(ctx: Setting, cands: readonly LayoutCandidate[], Pbest: number): LayoutCandidate[] {
 	const band: LayoutCandidate[] = [];
 	const seen = new Map<string, number>();
 	for (const c of cands) {
 		if (c.P < (1 - ARRANGE.band) * Pbest - 1e-12) continue;
 		const key = c.frames
-			.map((f, i) => `${typeKey(items[i])}:${f.x.toFixed(1)},${f.y.toFixed(1)},${f.w.toFixed(1)}`)
+			.map(
+				(f, i) => `${typeKey(ctx.items[i])}:${f.x.toFixed(1)},${f.y.toFixed(1)},${f.w.toFixed(1)}`
+			)
 			.sort()
 			.join('|');
 		const prev = seen.get(key);
@@ -1037,7 +1067,15 @@ export function arrange(
 		seen.set(key, band.length);
 		band.push(c);
 	}
-	const W = ARRANGE.weights;
+	return band;
+}
+
+/**
+ * Identical charts handed out to the slots of each layout of the band, in place, and each
+ * layout's coverage of the box; the largest coverage, for the looks to be measured against.
+ */
+function handOut(ctx: Setting, band: LayoutCandidate[], ref: StabilityRef | null): number {
+	const { items, B } = ctx;
 	let covMax = 0;
 	for (const c of band) {
 		const slotFrames = c.seq.map((i) => c.frames[i]);
@@ -1049,6 +1087,20 @@ export function arrange(
 		c.cov = frames.reduce((a, f, i) => a + chartArea(f, items[i].kind), 0) / (B.w * B.h);
 		covMax = Math.max(covMax, c.cov);
 	}
+	return covMax;
+}
+
+/** The band measured on looks (`ARRANGE.weights`) and sorted, the best first, in place. */
+function rankOnLooks(
+	ctx: Setting,
+	band: LayoutCandidate[],
+	ref: StabilityRef | null,
+	covMax: number,
+	Pbest: number
+): void {
+	const { items, B } = ctx;
+	const n = items.length;
+	const W = ARRANGE.weights;
 	const pairs = (n * (n - 1)) / 2 || 1;
 	for (const c of band) {
 		const m: LayoutMetrics = {
@@ -1071,6 +1123,52 @@ export function arrange(
 			inversions(a.seq) - inversions(b.seq) ||
 			(treeString(a.tree) < treeString(b.tree) ? -1 : 1)
 	);
+}
+
+/**
+ * Lay `items` (in the page's order; on Add the new chart last) out on a page of
+ * orientation `o`: the best layout by size, then looks, and the band it was picked from.
+ */
+export function arrange(
+	o: PageOrientation,
+	items: readonly ArrangeItem[],
+	opts: ArrangeOptions = {}
+): ArrangeResult {
+	if (items.length === 0) return noLayout();
+	const B = contentBox(o);
+	const ctx: Setting = {
+		mode: opts.mode ?? 'scratch',
+		items,
+		B,
+		base: items.map((it) => aloneSize(it.aspect, o)),
+		ignoreMin: !!opts.ignoreMin
+	};
+	const { old, box } = oldLayout(ctx, o, opts.from);
+	const ref = stabilityRef(old, box, ctx.mode === 'turn');
+	const trees = treesOf(ctx, ordersOf(ctx, old));
+	const { cands, Pbest, belowMin } = sizedLayouts(ctx, trees);
+	const finish = (ranked: LayoutCandidate[], best: LayoutCandidate): ArrangeResult => ({
+		frames: best.frames,
+		seq: best.seq,
+		tree: best.tree,
+		sizing: best.sizing,
+		P: best.P,
+		s: best.s,
+		kept: !!best.kept,
+		belowMin,
+		metrics: best.metrics ?? {
+			lr: symmetry(best.frames, items, B, 'lr'),
+			tb: symmetry(best.frames, items, B, 'tb'),
+			stab: stability(best.frames, ref, B)
+		},
+		ranked,
+		trees: trees.length
+	});
+
+	const kept = keptLayout(ctx, opts.prefer, Pbest);
+	if (kept) return finish([kept], kept);
+	const band = bandOf(ctx, cands, Pbest);
+	rankOnLooks(ctx, band, ref, handOut(ctx, band, ref), Pbest);
 	return finish(band, band[0]);
 }
 

@@ -345,6 +345,32 @@ export function tableWidth(content: TableContent, style: TextStyle, measure: Mea
 }
 
 /**
+ * The columns of a table `available` font sizes wide: how wide each is, in font
+ * sizes, and where it starts, mm. They are as wide as what they hold, or give way
+ * (`fittedWidths`), and share out what the width leaves between them.
+ */
+function placedColumns(
+	content: TableContent,
+	style: TextStyle,
+	available: number,
+	measure: Measure
+): { widths: number[]; starts: number[] } {
+	const size = style.size * MM_PER_PT;
+	const widths = fittedWidths(content, columnWidths(content, style, measure), available);
+	const gaps = Math.max(0, widths.length - 1);
+	const natural = widths.reduce((sum, width) => sum + width, 0);
+	// What the width leaves over is shared out between the columns.
+	const gap = gaps > 0 ? Math.max(COLUMN_GAP, (available - natural) / gaps) : COLUMN_GAP;
+	const starts: number[] = [];
+	let at = 0;
+	for (const width of widths) {
+		starts.push(at * size);
+		at += width + gap;
+	}
+	return { widths, starts };
+}
+
+/**
  * A table set in `style` in a column `widthMm` wide. Its title in bold in the
  * middle; under it, a table of names is its names, each in the middle of one of
  * three columns alike; a table of details is its header in bold between two rules,
@@ -366,20 +392,9 @@ export function layoutTable(
 	const plain = (text: string) => measure(text, { ...style, bold: false });
 	const bold = (text: string) => measure(text, { ...style, bold: true });
 	const available = widthMm / size;
+	const { widths, starts } = placedColumns(content, style, available, measure);
 
-	const widths = fittedWidths(content, columnWidths(content, style, measure), available);
-	const gaps = Math.max(0, widths.length - 1);
-	const natural = widths.reduce((sum, width) => sum + width, 0);
-	// What the width leaves over is shared out between the columns.
-	const gap = gaps > 0 ? Math.max(COLUMN_GAP, (available - natural) / gaps) : COLUMN_GAP;
-
-	// Where each column starts, mm, and where a cell's anchor is in it.
-	const starts: number[] = [];
-	let at = 0;
-	for (const width of widths) {
-		starts.push(at * size);
-		at += width + gap;
-	}
+	// Where a cell's anchor is in its column.
 	const cell = (text: string, column: number, baseline: number, header: boolean): TextLine => {
 		const set = content.align[column];
 		const width = widths[column];

@@ -528,37 +528,26 @@ export function isOnChart(chart: ChartSnapshot, raDeg: number, decDeg: number): 
 	return away <= (field / 2) * 0.92;
 }
 
-/**
- * `source` laid out by `template`: one page or more, the first to take the place of
- * `source`, the rest to follow it. Every chart of the page is on one of them, but
- * for a close-up a new finder card replaces (`dropped`). A page with no charts gives
- * nothing.
- */
-export function layTemplate(
-	template: TemplateId,
-	source: DocPage,
-	options: TemplateOptions = {}
-): LaidPage[] {
-	const orientation = options.orientation ?? source.orientation;
-	const items = chartsOf(source);
-	if (items.length === 0) return [];
-	if (template === 'charts') {
-		// The arranger's own layout of the charts, as Add to PDF would have left them.
-		const order = options.swap ? [...items].reverse() : items;
-		const laid = arrangePage({ id: source.id, orientation, blocks: order });
-		return [
-			{
-				orientation,
-				charts: laid.items.map(({ index, frame }) => ({ id: order[index].id, frame })),
-				texts: [],
-				layout: laid.layout
-			}
-		];
-	}
+/** Charts alone: the arranger's own layout of them, as Add to PDF would have left them. */
+function chartsAlone(id: string, order: ChartBlock[], orientation: PageOrientation): LaidPage {
+	const laid = arrangePage({ id, orientation, blocks: order });
+	return {
+		orientation,
+		charts: laid.items.map(({ index, frame }) => ({ id: order[index].id, frame })),
+		texts: [],
+		layout: laid.layout
+	};
+}
 
-	const language = options.language ?? DEFAULT_LANGUAGE;
+/** What a template laying `source` out in `language` reads of it: its own text and tables. */
+function contextOf(
+	source: DocPage,
+	orientation: PageOrientation,
+	language: Language,
+	options: TemplateOptions
+): Context {
 	const again = options.again === true;
-	const ctx: Context = {
+	return {
 		orientation,
 		box: contentBox(orientation),
 		words: TEMPLATE_WORDS[language],
@@ -582,7 +571,48 @@ export function layTemplate(
 			return { text: keptWords(text.text, language), style: text.style };
 		}
 	};
+}
+
+/**
+ * A finder card of the charts `inOrder`: one sky and its close-up; a close-up it had
+ * before goes, and whatever else is on the page follows (`rest`), a chart to a page
+ * under its caption.
+ */
+function finderPages(
+	ctx: Context,
+	inOrder: readonly ChartBlock[],
+	options: TemplateOptions
+): { card: LaidPage; rest: LaidPage[] } {
+	const sky = finderSky(inOrder)!;
+	const closeUps = inOrder.filter((item) => item.closeUpOf === sky.id);
+	// Laid out again as it is, the card keeps the close-up it has.
+	const had = options.again === true && !options.closeUp ? closeUps[0] : undefined;
+	const card = finderPage(ctx, sky, options.closeUp, had);
+	const old = options.closeUp ? closeUps : [];
+	if (old.length > 0) card.dropped = old.map((item) => item.id);
+	const rest = inOrder.filter((item) => item !== sky && item !== had && !old.includes(item));
+	return { card, rest: rest.map((item) => captionPage(ctx, [chartOf(item)])) };
+}
+
+/**
+ * `source` laid out by `template`: one page or more, the first to take the place of
+ * `source`, the rest to follow it. Every chart of the page is on one of them, but
+ * for a close-up a new finder card replaces (`dropped`). A page with no charts gives
+ * nothing.
+ */
+export function layTemplate(
+	template: TemplateId,
+	source: DocPage,
+	options: TemplateOptions = {}
+): LaidPage[] {
+	const orientation = options.orientation ?? source.orientation;
+	const items = chartsOf(source);
+	if (items.length === 0) return [];
 	const inOrder = options.swap ? [...items].reverse() : items;
+	if (template === 'charts') return [chartsAlone(source.id, inOrder, orientation)];
+
+	const language = options.language ?? DEFAULT_LANGUAGE;
+	const ctx = contextOf(source, orientation, language, options);
 	const ordered = inOrder.map(chartOf);
 	/** `pages` as made by the template `id`, for each to remember. */
 	const by = (id: PageTemplate['id'], pages: LaidPage[]): LaidPage[] =>
@@ -599,23 +629,8 @@ export function layTemplate(
 				runs(ordered, 2).map((run) => pairPage(ctx, run))
 			);
 		case 'finder': {
-			// One sky and its close-up; a close-up it had before goes, and whatever else is
-			// on the page follows, a chart to a page under its caption.
-			const sky = finderSky(inOrder)!;
-			const closeUps = inOrder.filter((item) => item.closeUpOf === sky.id);
-			// Laid out again as it is, the card keeps the close-up it has.
-			const had = again && !options.closeUp ? closeUps[0] : undefined;
-			const card = finderPage(ctx, sky, options.closeUp, had);
-			const old = options.closeUp ? closeUps : [];
-			if (old.length > 0) card.dropped = old.map((item) => item.id);
-			const rest = inOrder.filter((item) => item !== sky && item !== had && !old.includes(item));
-			return [
-				...by('finder', [card]),
-				...by(
-					'caption',
-					rest.map((item) => captionPage(ctx, [chartOf(item)]))
-				)
-			];
+			const { card, rest } = finderPages(ctx, inOrder, options);
+			return [...by('finder', [card]), ...by('caption', rest)];
 		}
 		case 'sheet':
 			return by(
