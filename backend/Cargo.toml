@@ -3,6 +3,12 @@ name = "backend"
 version = "0.1.0"
 edition = "2024"
 
+# `main` over the library of the same name: documented once, as the library.
+[[bin]]
+name = "backend"
+path = "src/main.rs"
+doc = false
+
 [dependencies]
 anyhow = "1"
 rust-core = { path = "../rust-core" }

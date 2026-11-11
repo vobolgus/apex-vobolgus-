@@ -22,6 +22,10 @@ use std::time::{Duration, Instant};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+/// Request body limit of `/api/export/document`: 200 charts (the most a document
+/// holds) at about 1 KB of config each and 100 pages, with plenty of room.
+pub const DOCUMENT_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+
 /// Units for one chart drawn into a PDF, alone or in a document.
 pub const PDF_CHART_COST: f64 = 4.0;
 /// Units for one chart sent as SVG.

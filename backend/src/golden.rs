@@ -42,7 +42,7 @@ mod subject {
 
     /// The server without a static build: a fresh export budget and catalogue cache.
     pub fn app() -> Router {
-        crate::build_app(crate::AppState::new(catalog()), None)
+        crate::router(crate::AppState::new(catalog()), None)
     }
 
     /// The SVG of every page of a document request, as the PDF is made from them.
