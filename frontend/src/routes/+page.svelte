@@ -7,7 +7,7 @@
 	import AboutDialog from '$lib/components/AboutDialog.svelte';
 	import { chartThumbnail, drawChartThumbnail } from '$lib/components/document/chart-thumbnail';
 	import PageEditor from '$lib/components/document/PageEditor.svelte';
-	import PagesPanel from '$lib/components/document/PagesPanel.svelte';
+	import PagesPanel from '$lib/components/document/panel/PagesPanel.svelte';
 	import PinholeFrameOverlay from '$lib/components/PinholeFrameOverlay.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import LayersPanel from '$lib/components/dock/LayersPanel.svelte';
