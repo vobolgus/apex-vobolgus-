@@ -138,7 +138,6 @@
 	data-page-id={page.id}
 	class:is-target={drag?.target && !current}
 	class:is-lifted={lifted}
-	class:is-narrow={narrow}
 	style:left="{box.left}px"
 	style:top="{box.top - labelHeight}px"
 	style:width="{box.width}px"
