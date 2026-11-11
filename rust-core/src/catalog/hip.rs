@@ -1,16 +1,32 @@
+//! The Hipparcos stars to magnitude 6.5.
+
 use serde::{Deserialize, Serialize};
 
+use super::CatalogError;
+
+/// The table compiled into the crate: 8870 stars to V 6.5, brightest first.
+const EMBEDDED: &[u8] = include_bytes!("hip_data.bin");
+
+/// A star of the Hipparcos catalogue.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Star {
+    /// Its Hipparcos number.
     pub hip_id: i32,
+    /// Visual magnitude, V.
     pub v_mag: f32,
-    pub ra: f32,  // в радианах
-    pub dec: f32, // в радианах
-    pub x: f32,   // ECI X coordinate
-    pub y: f32,   // ECI Y coordinate
-    pub z: f32,   // ECI Z coordinate
+    /// Right ascension, radians.
+    pub ra: f32,
+    /// Declination, radians.
+    pub dec: f32,
+    /// Unit vector towards the star in the equatorial (ECI) frame: x towards RA 0h.
+    pub x: f32,
+    /// Towards RA 6h.
+    pub y: f32,
+    /// Towards the north celestial pole.
+    pub z: f32,
 }
 
+/// The stars of the Hipparcos catalogue, in the order of their table.
 pub struct HipCatalog {
     stars: Vec<Star>,
 }
@@ -22,23 +38,30 @@ impl Default for HipCatalog {
 }
 
 impl HipCatalog {
+    /// The catalogue compiled into the crate: 8870 stars to V 6.5, brightest first.
+    ///
+    /// # Panics
+    ///
+    /// Never: the embedded table is a valid one, which the tests check.
+    #[must_use]
     pub fn new() -> Self {
-        let binary_data = include_bytes!("hip_data.bin");
-        let stars: Vec<Star> = bincode::deserialize(binary_data).unwrap();
-        Self { stars }
+        Self::from_bincode(EMBEDDED).expect("the embedded Hipparcos table decodes")
     }
 
-    pub fn get_stars(&self, max_mag: f32, min_mag: Option<f32>) -> Vec<Star> {
-        self.stars
-            .iter()
-            .filter(|s| s.v_mag <= max_mag && min_mag.is_none_or(|min| s.v_mag >= min))
-            .cloned()
-            .collect()
+    /// A catalogue from a bincode list of [`Star`] records.
+    ///
+    /// # Errors
+    ///
+    /// [`CatalogError::Decode`] when the bytes are not such a list.
+    pub fn from_bincode(bytes: &[u8]) -> Result<Self, CatalogError> {
+        Ok(Self {
+            stars: bincode::deserialize(bytes)?,
+        })
     }
 
-    /// Iterates over stars matching the magnitude filter without allocating.
-    /// Returns `&Star` references into the embedded catalog.
-    pub fn iter_stars(&self, max_mag: f32, min_mag: Option<f32>) -> impl Iterator<Item = &Star> {
+    /// The stars with `min_mag <= v_mag <= max_mag` (no lower bound with `None`),
+    /// in the order of the table, without copying them.
+    pub fn stars(&self, max_mag: f32, min_mag: Option<f32>) -> impl Iterator<Item = &Star> {
         self.stars
             .iter()
             .filter(move |s| s.v_mag <= max_mag && min_mag.is_none_or(|min| s.v_mag >= min))
@@ -47,27 +70,34 @@ impl HipCatalog {
 
 #[cfg(test)]
 mod tests {
-    use super::{HipCatalog, Star};
+    use super::*;
 
-    fn assert_star_eq(a: &Star, b: &Star) {
-        assert_eq!(a.hip_id, b.hip_id);
-        assert_eq!(a.v_mag, b.v_mag);
-        assert_eq!(a.ra, b.ra);
-        assert_eq!(a.dec, b.dec);
-        assert_eq!(a.x, b.x);
-        assert_eq!(a.y, b.y);
-        assert_eq!(a.z, b.z);
+    #[test]
+    fn test_hip_catalog_loading() {
+        let catalog = HipCatalog::new();
+        let stars: Vec<&Star> = catalog.stars(6.5, None).collect();
+        // Должно быть загружено ~8870 звезд ярче 6.5 звездной величины
+        assert!(!stars.is_empty());
+        assert!(stars.len() > 8000 && stars.len() < 9000);
+
+        // Проверяем фильтрацию по звездным величинам
+        let bright_stars: Vec<&Star> = catalog.stars(2.0, None).collect();
+        assert!(bright_stars.len() < stars.len());
+        for star in bright_stars {
+            assert!(star.v_mag <= 2.0);
+        }
+
+        // Проверяем диапазон min_mag .. max_mag
+        for star in catalog.stars(5.0, Some(3.0)) {
+            assert!(star.v_mag >= 3.0 && star.v_mag <= 5.0);
+        }
     }
 
     #[test]
-    fn iter_stars_matches_get_stars() {
-        let catalog = HipCatalog::new();
-        let owned: Vec<Star> = catalog.get_stars(4.0, Some(1.0));
-        let iterated: Vec<Star> = catalog.iter_stars(4.0, Some(1.0)).cloned().collect();
-
-        assert_eq!(owned.len(), iterated.len());
-        for (a, b) in owned.iter().zip(iterated.iter()) {
-            assert_star_eq(a, b);
-        }
+    fn a_table_that_is_not_bincode_is_an_error() {
+        assert!(matches!(
+            HipCatalog::from_bincode(&[1, 2, 3]),
+            Err(CatalogError::Decode(_))
+        ));
     }
 }

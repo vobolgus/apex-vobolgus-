@@ -8,9 +8,9 @@
 
 use rust_core::planets::{Body, all_positions};
 use rust_core::{
-    CameraConfig, DateTime, HipCatalog, MessierCatalog, PinholeProjection, ProjectionError,
-    StereoProjection, ViewKind, ViewProjection, julian_date, ra_dec_to_unit_vector, sidereal_time,
-    vernal_equinox_hour_angle,
+    CameraConfig, DateTime, HipCatalog, MessierCatalog, MessierKind, MessierObject,
+    PinholeProjection, ProjectionError, Star, StereoProjection, ViewKind, ViewProjection,
+    julian_date, ra_dec_to_unit_vector, sidereal_time, vernal_equinox_hour_angle,
 };
 
 /// FNV-1a over the bits of what it is fed: the same values in the same order give
@@ -74,7 +74,7 @@ fn same_f32(actual: f32, expected: f32) -> bool {
 fn sweep_points() -> Vec<(f32, f32, f32)> {
     let catalog = HipCatalog::new();
     catalog
-        .iter_stars(4.5, None)
+        .stars(4.5, None)
         .map(|star| (star.x, star.y, star.z))
         .chain([
             (0.0, 0.0, 1.0),
@@ -556,7 +556,7 @@ fn degenerate_views_are_refused() {
 #[test]
 fn hipparcos_catalogue() {
     let catalog = HipCatalog::new();
-    let all = catalog.get_stars(f32::INFINITY, None);
+    let all: Vec<&Star> = catalog.stars(f32::INFINITY, None).collect();
     let mut digest = Digest::new();
     for star in &all {
         digest.i32(star.hip_id);
@@ -572,19 +572,19 @@ fn hipparcos_catalogue() {
     );
 
     let counts = [
-        catalog.get_stars(4.0, None).len(),
-        catalog.get_stars(6.5, None).len(),
-        catalog.get_stars(6.5, Some(3.0)).len(),
+        catalog.stars(4.0, None).count(),
+        catalog.stars(6.5, None).count(),
+        catalog.stars(6.5, Some(3.0)).count(),
         // Both bounds are inclusive: Polaris is 1.97.
-        catalog.get_stars(1.97, Some(1.97)).len(),
-        catalog.get_stars(-2.0, None).len(),
-        catalog.iter_stars(4.0, Some(1.0)).count(),
-        catalog.iter_stars(f32::NAN, None).count(),
+        catalog.stars(1.97, Some(1.97)).count(),
+        catalog.stars(-2.0, None).count(),
+        catalog.stars(4.0, Some(1.0)).count(),
+        catalog.stars(f32::NAN, None).count(),
     ];
     assert_eq!(counts, [518, 8870, 8698, 1, 0, 503, 0]);
 
     let polaris = catalog
-        .iter_stars(2.0, Some(1.9))
+        .stars(2.0, Some(1.9))
         .find(|star| star.hip_id == 11767)
         .expect("Polaris is in the catalogue");
     assert_eq!(
@@ -612,9 +612,9 @@ fn hipparcos_catalogue() {
 #[test]
 fn messier_catalogue() {
     let catalog = MessierCatalog::new();
-    let all = catalog.get_all_objects();
+    let all = catalog.objects();
     let mut digest = Digest::new();
-    for object in &all {
+    for object in all {
         digest.i32(object.m_number);
         digest.str(&object.name);
         for value in [
@@ -628,10 +628,10 @@ fn messier_catalogue() {
         ] {
             digest.f32(value);
         }
-        digest.i32(object.obj_type);
+        digest.i32(i32::from(object.kind));
         digest.str(&object.constellation);
-        digest.str(object.type_name());
-        digest.str(object.type_color());
+        digest.str(object.kind.name());
+        digest.str(object.kind.color());
     }
     assert_eq!(all.len(), 110);
     assert_eq!(
@@ -644,11 +644,11 @@ fn messier_catalogue() {
         (1..=110).collect::<Vec<_>>()
     );
 
-    let m42 = catalog.get_object_by_number(42).expect("M42 exists");
+    let m42 = catalog.object(42).expect("M42 exists");
     assert_eq!(m42.name, "Orion Nebula");
     assert_eq!(m42.constellation, "Ori");
     assert_eq!(
-        (m42.obj_type, m42.type_name(), m42.type_color()),
+        (i32::from(m42.kind), m42.kind.name(), m42.kind.color()),
         (4, "Nebula", "#00CED1")
     );
     assert_eq!(
@@ -664,17 +664,17 @@ fn messier_catalogue() {
         ]
         .map(f32::to_bits)
     );
-    assert!(catalog.get_object_by_number(0).is_none());
-    assert!(catalog.get_object_by_number(111).is_none());
+    assert!(catalog.object(0).is_none());
+    assert!(catalog.object(111).is_none());
 
     let kinds: Vec<(usize, &str, &str)> = (1..=7)
-        .map(|kind| {
-            let objects = catalog.get_objects_by_type(kind);
-            assert_eq!(objects.len(), catalog.iter_objects_by_type(kind).count());
+        .map(|code| {
+            let kind = MessierKind::try_from(code).expect("a type code");
+            let objects: Vec<&MessierObject> = catalog.of_kind(kind).collect();
             (
                 objects.len(),
-                objects[0].type_name(),
-                objects[0].type_color(),
+                objects[0].kind.name(),
+                objects[0].kind.color(),
             )
         })
         .collect();
@@ -690,20 +690,20 @@ fn messier_catalogue() {
             (1, "Double Star", "#FFFDE7"),
         ]
     );
-    assert!(catalog.get_objects_by_type(0).is_empty());
-    assert!(catalog.get_objects_by_type(8).is_empty());
+    assert!(MessierKind::try_from(0).is_err());
+    assert!(MessierKind::try_from(8).is_err());
 
     let by_constellation = [
-        catalog.get_objects_by_constellation("Sgr").len(),
-        catalog.get_objects_by_constellation("vir").len(),
-        catalog.iter_objects_by_constellation("UMA").count(),
-        catalog.get_objects_by_constellation("Xyz").len(),
+        catalog.in_constellation("Sgr").count(),
+        catalog.in_constellation("vir").count(),
+        catalog.in_constellation("UMA").count(),
+        catalog.in_constellation("Xyz").count(),
     ];
     assert_eq!(by_constellation, [15, 11, 7, 0]);
     let by_magnitude = [
-        catalog.get_objects_by_magnitude(0.0, 6.0).len(),
-        catalog.get_objects_by_magnitude(8.0, 9.0).len(),
-        catalog.iter_objects_by_magnitude(9.0, 8.0).count(),
+        catalog.in_magnitude_range(0.0, 6.0).count(),
+        catalog.in_magnitude_range(8.0, 9.0).count(),
+        catalog.in_magnitude_range(9.0, 8.0).count(),
     ];
     assert_eq!(by_magnitude, [28, 25, 0]);
 }

@@ -424,7 +424,7 @@ impl SvgGenerator {
         let target_constellation = config.constellation.as_ref();
 
         let mag_limit = config.magnitude_limit.unwrap_or(6.5);
-        let stars = hip_catalog.get_stars(mag_limit, None);
+        let stars: Vec<Star> = hip_catalog.stars(mag_limit, None).copied().collect();
         let star_map: HashMap<i32, &Star> = stars.iter().map(|s| (s.hip_id, s)).collect();
 
         draw_constellation_boundaries(
@@ -902,7 +902,7 @@ mod tests {
     fn view_follows_the_basis_it_is_given() {
         // Betelgeuse (HIP 27989) is east of Rigel (HIP 24436): right of it with this basis.
         let catalog = hip_catalog();
-        let stars = catalog.get_stars(1.0, None);
+        let stars: Vec<&Star> = catalog.stars(1.0, None).collect();
         let find = |hip: i32| stars.iter().find(|s| s.hip_id == hip).unwrap();
         let (betelgeuse, rigel) = (find(27989), find(24436));
         let cfg = view_config("pinhole");

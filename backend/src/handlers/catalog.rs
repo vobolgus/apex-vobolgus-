@@ -38,7 +38,7 @@ pub struct CatalogStar {
 /// The stars with `min_mag <= v_mag <= max_mag`, as the catalog routes send them.
 pub fn stars_payload(catalog: &HipCatalog, max_mag: f32, min_mag: Option<f32>) -> Vec<CatalogStar> {
     catalog
-        .iter_stars(max_mag, min_mag)
+        .stars(max_mag, min_mag)
         .map(|star| CatalogStar {
             v_mag: star.v_mag,
             ra: star.ra,
@@ -105,11 +105,12 @@ pub struct MessierEntry {
 /// The whole Messier catalogue, by number.
 pub fn messier_payload() -> Vec<MessierEntry> {
     let mut objects: Vec<MessierEntry> = MessierCatalog::new()
-        .iter_all_objects()
+        .objects()
+        .iter()
         .map(|object| MessierEntry {
             m: object.m_number,
             name: object.name.clone(),
-            kind: object.type_name(),
+            kind: object.kind.name(),
             constellation: object.constellation.clone(),
             mag: object.v_mag,
             // From the unit vector, which is what the charts are drawn from.
@@ -213,7 +214,7 @@ pub fn constellation_boundaries_payload() -> Vec<ConstellationResponse> {
 /// The stick figures as polylines of unit vectors, sorted by constellation.
 pub fn constellations_payload(catalog: &HipCatalog) -> Vec<ConstellationResponse> {
     let constellations = get_constellations_data();
-    let stars = catalog.get_stars(7.5, None);
+    let stars: Vec<Star> = catalog.stars(7.5, None).copied().collect();
     let star_map: HashMap<i32, &Star> = stars.iter().map(|s| (s.hip_id, s)).collect();
 
     let mut result: Vec<ConstellationResponse> = constellations
