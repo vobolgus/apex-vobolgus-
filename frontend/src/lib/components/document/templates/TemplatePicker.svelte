@@ -28,14 +28,13 @@
 		CLOSE_UP_FIELD_DEG,
 		CLOSE_UP_FIELDS,
 		finderSky,
-		TEMPLATE_LANGUAGES,
 		TEMPLATES,
 		type LaidPage,
-		type TemplateInfo,
-		type TemplateLanguage
+		type TemplateInfo
 	} from '$lib/document/templates';
 	import { measuredLayout } from '$lib/document/text-fonts.svelte';
-	import type { DocPage, PageOrientation, TextStyle } from '$lib/document/types';
+	import type { DocPage, Language, PageOrientation, TextStyle } from '$lib/document/types';
+	import { LANGUAGES } from '$lib/document/words';
 	import { catalog } from '$lib/state/catalog.svelte';
 	import EditorOrientation from '../EditorOrientation.svelte';
 	import FinderObjects from './FinderObjects.svelte';
@@ -67,7 +66,7 @@
 	let orientation = $state<PageOrientation>(untrack(() => page.orientation));
 	let swap = $state(false);
 	/** The language the templates write in: the browser's when it is one of theirs. */
-	let language = $state<TemplateLanguage>(navigator.language.startsWith('ru') ? 'ru' : 'en');
+	let language = $state<Language>(navigator.language.startsWith('ru') ? 'ru' : 'en');
 	let place = $state<{ left: number; top: number } | null>(null);
 	/** The tiles, or the objects a finder card's close-up may be of. */
 	let step = $state<'templates' | 'objects'>('templates');
@@ -234,7 +233,7 @@
 				onselect={(next) => (orientation = next)}
 			/>
 			<div class="fields" role="group" aria-label="Language of the text">
-				{#each TEMPLATE_LANGUAGES as code (code)}
+				{#each LANGUAGES as code (code)}
 					<button
 						class="chip"
 						type="button"

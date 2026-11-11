@@ -10,10 +10,15 @@ import {
 	TEMPLATES,
 	type CloseUp,
 	type LaidPage,
-	type TemplateInfo,
-	type TemplateLanguage
+	type TemplateInfo
 } from '$lib/document/templates';
-import type { ChartBlock, DocPage, PageOrientation, TextStyle } from '$lib/document/types';
+import type {
+	ChartBlock,
+	DocPage,
+	Language,
+	PageOrientation,
+	TextStyle
+} from '$lib/document/types';
 
 export interface Tile {
 	info: TemplateInfo;
@@ -29,7 +34,7 @@ export interface Tile {
 export interface TileOptions {
 	orientation: PageOrientation;
 	swap: boolean;
-	language: TemplateLanguage;
+	language: Language;
 	/** How tall text set in `style` is at `width`, mm. */
 	height: (text: string, style: TextStyle, width: number) => number;
 	/** How many more pages the document can take. */

@@ -22,8 +22,9 @@
  * by the same template for the other orientation (`again`), as it is: its own
  * words, its own close-up.
  *
- * A template writes in a language (`TemplateLanguage`), English or Russian: its own
- * words only. What a field shows (`text.ts`) and an object's name are the same in both.
+ * A template writes in a language (`Language`), English or Russian: its own words
+ * only, which are kept with every other word set on a page (`words/`). What a field
+ * shows (`text.ts`) and an object's name are the same in both.
  */
 
 import { viewBasis } from '$lib/math/projection';
@@ -33,11 +34,13 @@ import { chartsOf, typesetOf } from './blocks';
 import { contentBox, GUTTER_MM } from './geometry';
 import { fullTableHeight } from './table';
 import { LINE_HEIGHT, MM_PER_PT } from './text';
+import { DEFAULT_LANGUAGE, TEMPLATE_WORDS, type TemplateWords } from './words';
 import type {
 	ChartBlock,
 	ChartKind,
 	ChartSnapshot,
 	DocPage,
+	Language,
 	NewBlock,
 	PageLayout,
 	PageOrientation,
@@ -46,13 +49,12 @@ import type {
 	SkyMark,
 	TableBlock,
 	TableSpec,
+	TemplateId,
 	TextBlock,
 	TextRole,
 	TextStyle,
 	TypesetBlock
 } from './types';
-
-export type TemplateId = 'charts' | 'caption' | 'pair' | 'finder' | 'sheet';
 
 export interface TemplateInfo {
 	id: TemplateId;
@@ -71,12 +73,6 @@ export const TEMPLATES: readonly TemplateInfo[] = [
 	{ id: 'finder', name: 'Finder card', note: 'A sky and a close-up', minCharts: 1 },
 	{ id: 'sheet', name: 'Worksheet', note: 'Tasks, and a key', minCharts: 1 }
 ];
-
-/** The languages a template writes its words in. */
-export type TemplateLanguage = 'en' | 'ru';
-
-/** In the order the picker offers them; the first is the one a template writes in untold. */
-export const TEMPLATE_LANGUAGES: readonly TemplateLanguage[] = ['en', 'ru'];
 
 export const TEXT_ROLES: readonly TextRole[] = [
 	'title',
@@ -142,7 +138,7 @@ export interface TemplateOptions {
 	/** For a finder card: the object to draw the close-up of. Without one it is the sky alone. */
 	closeUp?: CloseUp;
 	/** The language of the words it writes; English when absent. */
-	language?: TemplateLanguage;
+	language?: Language;
 	/**
 	 * The page is already what this template made, and is laid out as it is (for a
 	 * turn): every text of a part keeps its words and its face, stock or not, a
@@ -165,54 +161,6 @@ const TABLE: TextStyle = { font: 'serif', size: 10, bold: false, italic: false, 
 /** The rows a worksheet's tables start with: three names a row. */
 const SHEET_TABLE_ROWS = 4;
 
-/** The words a template writes on its own, in one language. */
-interface Words {
-	titles: Record<'caption' | 'pair' | 'finder', string>;
-	skyCaption: string;
-	frameCaption: string;
-	/** What a close-up's caption says after the object's name. */
-	closeUpCaption: string;
-	header: string;
-	tasks: string;
-}
-
-const WORDS: Record<TemplateLanguage, Words> = {
-	en: {
-		titles: { caption: 'Sky chart', pair: 'Two skies', finder: 'Finder card' },
-		skyCaption: 'Latitude {lat} · sidereal time {lst}',
-		frameCaption: 'Centre {ra}, {dec} · field {fov}',
-		closeUpCaption: ' · field {fov}',
-		header: 'Name ______________________   Class ________',
-		tasks: [
-			'1. Mark the zenith with Z and the cardinal points with N, S, W, E.',
-			'2. Mark the celestial pole with P.',
-			'3. Mark the vernal equinox, or else the autumnal one.',
-			'4. Draw the great circles of the celestial equator and of the ecliptic.',
-			'5. Work out the sidereal time of the chart: __________',
-			'6. Find the latitude it was taken at: __________',
-			'7. Draw the outlines of all the constellations in sight.',
-			'8. Mark on the chart the objects of the tables below.'
-		].join('\n')
-	},
-	ru: {
-		titles: { caption: 'Карта неба', pair: 'Два неба', finder: 'Поисковая карта' },
-		skyCaption: 'Широта {lat} · звёздное время {lst}',
-		frameCaption: 'Центр {ra}, {dec} · поле {fov}',
-		closeUpCaption: ' · поле {fov}',
-		header: 'Фамилия, имя ______________________   Класс ________',
-		tasks: [
-			'1. Обозначьте точку зенита символом Z и стороны света символами N, S, W, E.',
-			'2. Обозначьте полюс мира символом P.',
-			'3. Обозначьте точку весны или же точку осени.',
-			'4. Проведите большие круги небесного экватора и эклиптики.',
-			'5. Рассчитайте звёздное время скайчарта: __________',
-			'6. Определите широту места съёмки: __________',
-			'7. Проведите контуры всех видимых созвездий.',
-			'8. Отметьте на скайчарте объекты из таблиц ниже.'
-		].join('\n')
-	}
-};
-
 /** A key is fields alone, and a sheet's number a sign: the same in every language. */
 const SKY_KEY = '{lat} · {lst}';
 const FRAME_KEY = '{ra} {dec}';
@@ -223,7 +171,7 @@ const FRAME_KEY = '{ra} {dec}';
  * of keeping it: in another language, those words are that language's.
  */
 const STOCK = new Set<string>([
-	...Object.values(WORDS).flatMap((words) => [
+	...Object.values(TEMPLATE_WORDS).flatMap((words) => [
 		...Object.values(words.titles),
 		words.skyCaption,
 		words.frameCaption,
@@ -239,10 +187,10 @@ const STOCK = new Set<string>([
  * stock words after it, so it is in no list: the name stays, and the words after it
  * become the language's.
  */
-function keptWords(text: string, language: TemplateLanguage): string {
-	for (const { closeUpCaption } of Object.values(WORDS)) {
+function keptWords(text: string, language: Language): string {
+	for (const { closeUpCaption } of Object.values(TEMPLATE_WORDS)) {
 		if (text.endsWith(closeUpCaption) && text.length > closeUpCaption.length) {
-			return text.slice(0, -closeUpCaption.length) + WORDS[language].closeUpCaption;
+			return text.slice(0, -closeUpCaption.length) + TEMPLATE_WORDS[language].closeUpCaption;
 		}
 	}
 	return text;
@@ -275,7 +223,7 @@ interface Context {
 	orientation: PageOrientation;
 	box: Rect;
 	/** The template's own words, in the language it writes in. */
-	words: Words;
+	words: TemplateWords;
 	height: (text: string, style: TextStyle, width: number) => number;
 	/**
 	 * What the page's text of that part says now, and how it is set, if it is kept:
@@ -283,7 +231,7 @@ interface Context {
 	 */
 	kept: (role: TextRole, chartId?: string) => { text: string; style: TextStyle } | null;
 	/** The language it writes in, for a table's own words. */
-	language: TemplateLanguage;
+	language: Language;
 	/** The table of that part the page has now, if it has one: its rows and its look are kept. */
 	keptTable: (role: TextRole, chartId: string) => TableBlock | undefined;
 }
@@ -498,7 +446,7 @@ function tableAt(
 		look: had?.table.look ?? 'names',
 		rows: had?.table.rows ?? SHEET_TABLE_ROWS
 	};
-	if (ctx.language !== TEMPLATE_LANGUAGES[0]) table.language = ctx.language;
+	if (ctx.language !== DEFAULT_LANGUAGE) table.language = ctx.language;
 	const style = { ...(had?.style ?? TABLE) };
 	return {
 		kind: 'table',
@@ -608,12 +556,12 @@ export function layTemplate(
 		];
 	}
 
-	const language = options.language ?? TEMPLATE_LANGUAGES[0];
+	const language = options.language ?? DEFAULT_LANGUAGE;
 	const again = options.again === true;
 	const ctx: Context = {
 		orientation,
 		box: contentBox(orientation),
-		words: WORDS[language],
+		words: TEMPLATE_WORDS[language],
 		language,
 		keptTable: (role, chartId) =>
 			typesetOf(source).find(

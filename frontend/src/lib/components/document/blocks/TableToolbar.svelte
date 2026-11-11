@@ -4,18 +4,16 @@
 	 * brightest stars) and how (the names alone, or a row an object), then in how many
 	 * rows and in which language. Nothing in it is typed.
 	 */
+	import { LANGUAGE_NAMES, TABLE_LOOK_NAMES, TABLE_SOURCE_NAMES } from '$lib/document/labels';
 	import {
 		lookOf,
 		MAX_TABLE_ROWS,
 		MIN_TABLE_ROWS,
-		TABLE_LANGUAGES,
-		TABLE_LOOK_NAMES,
 		TABLE_LOOKS,
-		TABLE_SOURCE_NAMES,
 		TABLE_SOURCES
 	} from '$lib/document/table';
-	import { LANGUAGE_NAMES } from '$lib/document/labels';
 	import type { TableBlock, TableSpec } from '$lib/document/types';
+	import { DEFAULT_LANGUAGE, LANGUAGES } from '$lib/document/words';
 	import type { BlockActions } from '../editor/actions';
 	import Chip from './Chip.svelte';
 	import { ICONS } from './icons';
@@ -75,9 +73,9 @@
 		onpress={() => retable({ rows: spec.rows + 1 })}
 	/>
 	<span class="tool-divider" aria-hidden="true"></span>
-	{#each TABLE_LANGUAGES as language (language)}
+	{#each LANGUAGES as language (language)}
 		<Chip
-			pressed={(spec.language ?? 'en') === language}
+			pressed={(spec.language ?? DEFAULT_LANGUAGE) === language}
 			label={LANGUAGE_NAMES[language]}
 			title="Its words in {LANGUAGE_NAMES[language]}"
 			onpress={() => retable({ language })}

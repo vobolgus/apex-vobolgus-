@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pointingToOrientation } from '$lib/math/pointing';
 import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
-import { constellationName, starName } from './sky-names';
 import {
 	blockLayout,
 	fullTableHeight,
@@ -11,13 +10,13 @@ import {
 	narrowestTableWidth,
 	MAX_TABLE_ROWS,
 	tableContent,
-	tableName,
 	tableWidth,
 	type Sky,
 	type TableContent
 } from './table';
 import { DEFAULT_TEXT_STYLE, FONT_METRICS, LINE_HEIGHT, MM_PER_PT } from './text';
 import type { ChartBlock, ChartSnapshot, TableBlock, TableSpec } from './types';
+import { constellationName } from './words';
 
 const DEG = Math.PI / 180;
 
@@ -93,37 +92,6 @@ describe('isInChart', () => {
 		expect(isInChart(frame, ...at(90, 11))).toBe(false);
 		// Behind the camera is not in it, though its tangent would say so.
 		expect(isInChart(frame, ...at(270, 0))).toBe(false);
-	});
-});
-
-describe('names', () => {
-	it('gives the constellations in full', () => {
-		expect(constellationName('Ori')).toBe('Orion');
-		expect(constellationName('CVn')).toBe('Canes Venatici');
-		expect(constellationName('Xyz')).toBe('Xyz');
-	});
-
-	it('names a bright star by its place, once', () => {
-		const taken = new Set<string>();
-		const sirius = star(6.752, -16.716, -1.44);
-		expect(starName(sirius.ra, sirius.dec, taken)).toBe('Sirius');
-		// A companion as near gets no name: the brighter, met first, has it.
-		expect(starName(sirius.ra + 0.001, sirius.dec, taken)).toBeNull();
-		const vega = star(18.616, 38.784, 0.03);
-		expect(starName(vega.ra, vega.dec, taken)).toBe('Vega');
-		// A star of no fame, and a place a degree off a famous one.
-		expect(starName(star(3, 3, 5).ra, star(3, 3, 5).dec, new Set())).toBeNull();
-		expect(starName(vega.ra, vega.dec + 1 * DEG, new Set())).toBeNull();
-		// Polaris, where right ascension means little.
-		const polaris = star(2.53, 89.264, 1.97);
-		expect(starName(polaris.ra + 0.2, polaris.dec, new Set())).toBe('Polaris');
-		// In Russian, by the name it goes by there; taken all the same, whatever it was called.
-		const again = new Set<string>();
-		expect(starName(vega.ra, vega.dec, again, 'ru')).toBe('Вега');
-		expect(starName(vega.ra, vega.dec, again)).toBeNull();
-		expect(
-			starName(star(14.66, -60.834, -0.01).ra, star(14.66, -60.834, -0.01).dec, again, 'ru')
-		).toBe('Альфа Центавра');
 	});
 });
 
@@ -516,10 +484,5 @@ describe('blockLayout', () => {
 		expect(layout.lines.map((line) => line.text)).toEqual(['Field 120°']);
 		expect(layout.rules).toBeUndefined();
 		expect(layout.lines[0].x).toBeUndefined();
-	});
-
-	it('names a table by what it lists and how', () => {
-		expect(tableName({ source: 'messier', rows: 10 })).toBe('Messier objects, names, 10 rows');
-		expect(tableName({ source: 'stars', look: 'details', rows: 1 })).toBe('Stars, details, 1 row');
 	});
 });

@@ -8,12 +8,12 @@ import {
 	layTemplate,
 	TEMPLATES,
 	type CloseUp,
-	type LaidPage,
-	type TemplateId
+	type LaidPage
 } from './templates';
 import { fieldValues } from './text';
 import { DEFAULT_TEXT_STYLE, LINE_HEIGHT, MM_PER_PT } from './text';
 import { specOf, wordsOf } from './test-support';
+import type { TemplateId } from './types';
 import type {
 	ChartBlock,
 	ChartSnapshot,

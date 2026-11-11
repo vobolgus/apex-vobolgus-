@@ -12,11 +12,13 @@
  * Either is laid out into the same `TextLayout` a text is: a line a cell, each
  * where its column puts it, and a table's rules. So it is drawn, moved, turned,
  * copied and sent to the PDF as text is.
+ *
+ * What it says, in each language, is looked up in `words/`; what the editor calls
+ * it, in `labels.ts`.
  */
 
 import { toViewSpace } from '$lib/math/projection';
 import type { CatalogStar, MessierObject } from '$lib/api/catalog-types';
-import { constellationName, kindName, starName } from './sky-names';
 import {
 	boundChart,
 	FONT_METRICS,
@@ -30,9 +32,11 @@ import {
 	type TextLine,
 	type TextRule
 } from './text';
+import { constellationName, DEFAULT_LANGUAGE, kindName, starName, TABLE_WORDS } from './words';
 import type {
 	ChartSnapshot,
 	DocPage,
+	Language,
 	TableLook,
 	TableSource,
 	TableSpec,
@@ -72,54 +76,6 @@ export interface TableContent {
 	/** What it says in place of rows when it has none. */
 	note?: string;
 }
-
-/** What each source is called in the editor: a table's name, its toolbar. */
-export const TABLE_SOURCE_NAMES: Record<TableSource, string> = {
-	messier: 'Messier objects',
-	stars: 'Stars'
-};
-
-type Language = NonNullable<TableSpec['language']>;
-
-/** The words a table sets on the page, in one language. */
-interface TableWords {
-	titles: Record<TableSource, string>;
-	headers: Record<TableSource, string[]>;
-	noChart: string;
-	notLoaded: string;
-	none: string;
-}
-
-const TABLE_WORDS: Record<Language, TableWords> = {
-	en: {
-		titles: { messier: 'Messier objects', stars: 'Stars' },
-		headers: {
-			messier: ['Object', 'Name', 'Type', 'Constellation', 'Mag'],
-			stars: ['№', 'Name', 'RA', 'Dec', 'Mag']
-		},
-		noChart: 'No chart to read',
-		notLoaded: 'The catalogue is not loaded',
-		none: 'None on this chart'
-	},
-	ru: {
-		titles: { messier: 'Объекты Мессье', stars: 'Звёзды' },
-		headers: {
-			messier: ['Объект', 'Название', 'Тип', 'Созвездие', 'Зв. вел.'],
-			stars: ['№', 'Название', 'α', 'δ', 'Зв. вел.']
-		},
-		noChart: 'Нет скайчарта',
-		notLoaded: 'Каталог не загружен',
-		none: 'На этом скайчарте нет'
-	}
-};
-
-/** The languages a table is set in. */
-export const TABLE_LANGUAGES: readonly Language[] = ['en', 'ru'];
-
-export const TABLE_LOOK_NAMES: Record<TableLook, string> = {
-	names: 'Names',
-	details: 'Details'
-};
 
 /** A table's look: `names` unless it says otherwise. */
 export function lookOf(spec: TableSpec): TableLook {
@@ -208,7 +164,7 @@ function starsOn(
  */
 export function tableContent(chart: ChartSnapshot | null, spec: TableSpec, sky: Sky): TableContent {
 	const rows = Math.max(MIN_TABLE_ROWS, Math.min(MAX_TABLE_ROWS, Math.round(spec.rows)));
-	const language = spec.language ?? 'en';
+	const language = spec.language ?? DEFAULT_LANGUAGE;
 	const words = TABLE_WORDS[language];
 	const title = words.titles[spec.source];
 	const messier = spec.source === 'messier';
@@ -480,12 +436,6 @@ export function blockLayout(
 	}
 	const content = tableContent(boundChart(page, block, pages), block.table, sky);
 	return layoutTable(content, block.style, widthMm, measure);
-}
-
-/** What a table is called: "Messier objects, names, 5 rows". */
-export function tableName(spec: TableSpec): string {
-	const look = TABLE_LOOK_NAMES[lookOf(spec)].toLowerCase();
-	return `${TABLE_SOURCE_NAMES[spec.source]}, ${look}, ${spec.rows} ${spec.rows === 1 ? 'row' : 'rows'}`;
 }
 
 /**

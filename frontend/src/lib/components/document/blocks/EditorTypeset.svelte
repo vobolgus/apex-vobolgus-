@@ -19,7 +19,7 @@
 	 * that reads a chart says which (`ReadsRow`).
 	 */
 	import { measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
-	import { tableName } from '$lib/document/table';
+	import { tableName } from '$lib/document/labels';
 	import { shownText } from '$lib/document/text';
 	import type { DocPage, Rect, TypesetBlock } from '$lib/document/types';
 	import type { EditorActions } from '../editor/actions';

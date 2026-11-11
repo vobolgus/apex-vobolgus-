@@ -18,7 +18,7 @@ import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
 import { chartsOf, layered, typesetOf } from './blocks';
 import { keptFrame } from './geometry';
 import { MAX_TABLE_ROWS, MIN_TABLE_ROWS, TABLE_LOOKS, TABLE_SOURCES } from './table';
-import { TEMPLATE_LANGUAGES, TEMPLATES, TEXT_ROLES } from './templates';
+import { TEMPLATES, TEXT_ROLES } from './templates';
 import {
 	fitTextFrame,
 	MAX_TEXT_CHARS,
@@ -28,6 +28,7 @@ import {
 	TEXT_FONTS,
 	TEXT_SIZES
 } from './text';
+import { DEFAULT_LANGUAGE, LANGUAGES } from './words';
 import type {
 	BlockCopy,
 	ChartBlock,
@@ -238,8 +239,8 @@ function parseTemplate(value: unknown): PageTemplate | null {
 	if (!isRecord(value)) return null;
 	const info = TEMPLATES.find((template) => template.id === value.id);
 	if (!info || info.id === 'charts') return null;
-	const language = TEMPLATE_LANGUAGES.find((code) => code === value.language);
-	return { id: info.id, language: language ?? TEMPLATE_LANGUAGES[0] };
+	const language = LANGUAGES.find((code) => code === value.language);
+	return { id: info.id, language: language ?? DEFAULT_LANGUAGE };
 }
 
 function isOrientation(value: unknown): value is PageOrientation {
@@ -414,9 +415,9 @@ export function parseTableSpec(value: unknown): TableSpec | null {
 	const rows = Math.max(MIN_TABLE_ROWS, Math.min(MAX_TABLE_ROWS, Math.round(value.rows)));
 	const look = TABLE_LOOKS.includes(value.look as TableLook) ? (value.look as TableLook) : 'names';
 	const spec: TableSpec = { source: value.source as TableSpec['source'], look, rows };
-	const language = TEMPLATE_LANGUAGES.find((code) => code === value.language);
+	const language = LANGUAGES.find((code) => code === value.language);
 	// English is the absence of a language, as for a template's words.
-	if (language && language !== TEMPLATE_LANGUAGES[0]) spec.language = language;
+	if (language && language !== DEFAULT_LANGUAGE) spec.language = language;
 	return spec;
 }
 

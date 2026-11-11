@@ -6,9 +6,14 @@
  */
 
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
-import type { TemplateId, TemplateLanguage } from './templates';
 
 export type PageOrientation = 'portrait' | 'landscape';
+
+/**
+ * A language the document sets its own words in (`words/`): what a template writes,
+ * what a table calls things. English or Russian.
+ */
+export type Language = 'en' | 'ru';
 
 /** Millimetres, page top-left origin, y down. */
 export interface Rect {
@@ -100,7 +105,7 @@ export interface TableSpec {
 	look?: TableLook;
 	rows: number;
 	/** The language of its title, its header and what it calls things; English when absent. */
-	language?: TemplateLanguage;
+	language?: Language;
 }
 
 /**
@@ -200,13 +205,16 @@ export interface TurnMemo {
 	manual: boolean;
 }
 
+/** A way to lay a page out again with text around its charts (`templates.ts`). */
+export type TemplateId = 'charts' | 'caption' | 'pair' | 'finder' | 'sheet';
+
 /**
  * The template a page was laid out as (`templates.ts`), and the language it wrote
  * in. Charts alone are no template to remember: that is the arranger's layout.
  */
 export interface PageTemplate {
 	id: Exclude<TemplateId, 'charts'>;
-	language: TemplateLanguage;
+	language: Language;
 }
 
 export interface DocPage {
