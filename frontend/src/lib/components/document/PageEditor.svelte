@@ -52,7 +52,7 @@
 		isChart,
 		typesetOf
 	} from '$lib/document/blocks';
-	import { MAX_ITEMS_PER_PAGE, MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
+	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
 	import {
 		contentBox,
 		fitFrame,
@@ -68,6 +68,7 @@
 		type SnapGuide
 	} from '$lib/document/geometry';
 	import { plural } from '$lib/document/labels';
+	import { MAX_ITEMS_PER_PAGE } from '$lib/document/page';
 	import {
 		anchoredFrame,
 		DEFAULT_TEXT_STYLE,

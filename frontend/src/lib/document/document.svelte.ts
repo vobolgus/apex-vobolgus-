@@ -7,7 +7,8 @@
  * `setFrame` on every move; `flush` writes a pending save at once. Nothing is
  * read from storage until `load` (call it on mount, so the server render and
  * hydration agree on an empty document). How the document is written and read back
- * is `storage.ts`'s.
+ * is `storage.ts`'s; what is done to one page (fitting a frame, placing a copy,
+ * remembering a layout) is `page.ts`'s.
  *
  * A block is put on a page, moved, taken off, copied and pasted by one method
  * whatever its kind (`addBlock`, `setFrame`, `moveBlock`, `removeBlock`, `copyBlock`,
@@ -30,17 +31,22 @@
  * text says and how it is set do not.
  */
 
-import { chartKind, planAdd, turnLayout, type PlacedChart } from './arrange';
-import { blockBounds, chartsOf, findBlock, insertBlock, layerIndex, typesetOf } from './blocks';
+import { chartKind, planAdd, turnLayout } from './arrange';
+import { chartsOf, findBlock, insertBlock, layerIndex, typesetOf } from './blocks';
+import { fitFrame, keptFrame, sameFrame } from './geometry';
 import {
-	clampPosition,
-	contentBox,
-	fitFrame,
-	GUTTER_MM,
-	keptFrame,
-	nearestFreePlace,
-	overlaps
-} from './geometry';
+	fittedFrame,
+	hasRoom,
+	laidPages,
+	MAX_ITEMS_PER_PAGE,
+	pageState,
+	pastePlace,
+	placeCharts,
+	setLayout,
+	setRotation,
+	templateParts,
+	turnedTextFrame
+} from './page';
 import {
 	browserStorage,
 	parseBlockCopy,
@@ -49,14 +55,7 @@ import {
 	writeDocument,
 	type DocumentStorage
 } from './storage';
-import {
-	anchoredFrame,
-	boundItem,
-	fitTextFrame,
-	MAX_TEXT_CHARS,
-	normalizeRotation,
-	MAX_TEXTS_PER_PAGE
-} from './text';
+import { anchoredFrame, boundItem, fitTextFrame, MAX_TEXT_CHARS } from './text';
 import { layTemplate, type LaidPage, type TemplateOptions } from './templates';
 import type {
 	BlockCopy,
@@ -66,14 +65,10 @@ import type {
 	DocBlock,
 	DocPage,
 	NewBlock,
-	PageLayout,
 	PageOrientation,
-	PageTemplate,
 	Rect,
 	TableSpec,
-	TextStyle,
-	TurnMemo,
-	TypesetBlock
+	TextStyle
 } from './types';
 
 /**
@@ -81,7 +76,6 @@ import type {
  * cannot be exported, so the editor does not build one.
  */
 export const MAX_PAGES = 100;
-export const MAX_ITEMS_PER_PAGE = 50;
 export const MAX_CHARTS = 200;
 const SAVE_DELAY_MS = 250;
 
@@ -99,8 +93,6 @@ export interface TypesetPatch {
 	rotation?: number;
 }
 
-/** How far a copy pasted with no room and no pointer stands off what is in its place, mm down and right. */
-const PASTE_OFFSET_MM = 5;
 export interface AddChartResult {
 	pageId: string;
 	blockId: string;
@@ -298,49 +290,23 @@ export class DocumentStore {
 		const options: TemplateOptions = { orientation, language, again: true };
 		if (height) options.height = height;
 		const laid = layTemplate(id, $state.snapshot(page), options);
-		if (laid.length !== 1) return false;
-		const [{ charts, texts, dropped }] = laid;
-		const own = chartsOf(page);
-		const type = typesetOf(page);
-		const items = charts.map((placed) =>
-			placed.chart ? undefined : own.find((item) => item.id === placed.id)
-		);
-		const roled = type.filter((text) => text.role !== undefined);
-		// Each laid text is one of the page's: the same part and words, of the same chart
-		// where the part belongs to one (a caption, a key).
-		const found = texts.map((placed) =>
-			roled.findIndex(
-				(text) =>
-					text.role === placed.role &&
-					sameWords(text, placed) &&
-					(placed.chartId === undefined || text.chartId === placed.chartId)
-			)
-		);
-		const each = (list: readonly unknown[]) => list.every((it, i) => list.indexOf(it) === i);
-		const whole =
-			!dropped?.length &&
-			items.length === own.length &&
-			items.every((item) => item !== undefined) &&
-			each(items) &&
-			found.length === roled.length &&
-			found.every((index) => index >= 0) &&
-			each(found);
-		if (!whole) return false;
+		const own = laid.length === 1 ? templateParts(page, laid[0]) : null;
+		if (!own) return false;
 
+		const [{ charts, texts }] = laid;
+		const type = typesetOf(page);
 		const from = page.orientation;
 		page.orientation = orientation;
-		const placed = items.map((item, i) => {
-			item!.frame = fitFrame(charts[i].frame, item!.chart.aspect, orientation);
-			return item!;
+		own.charts.forEach((item, i) => {
+			item.frame = fitFrame(charts[i].frame, item.chart.aspect, orientation);
 		});
-		page.blocks = [...placed, ...type];
+		page.blocks = [...own.charts, ...type];
 		for (const text of type) {
 			if (text.role === undefined) text.frame = turnedTextFrame(text, from, orientation);
 		}
-		texts.forEach((placed, i) => {
-			const text = roled[found[i]];
-			setRotation(text, placed.rotation ?? 0);
-			text.frame = fitTextFrame(placed.frame, orientation, text.rotation);
+		own.texts.forEach((text, i) => {
+			setRotation(text, texts[i].rotation ?? 0);
+			text.frame = fitTextFrame(texts[i].frame, orientation, text.rotation);
 		});
 		setLayout(page, { manual: true, template: page.template });
 		return true;
@@ -543,50 +509,7 @@ export class DocumentStore {
 		if (laid.some((part) => part.charts.length > MAX_ITEMS_PER_PAGE)) return null;
 
 		const before = $state.snapshot(page);
-		// A made chart gets its id here; the text that points at it by name follows.
-		const ids = made.map((chart) => ({ name: chart.id, id: createId() }));
-		const idOf = (name: string | undefined) => ids.find((it) => it.name === name)?.id ?? name;
-		const own = typesetOf(page).filter((text) => text.role === undefined);
-		const pages = laid.map((part, at): DocPage => {
-			const id = at === 0 ? page.id : createId();
-			const items = part.charts.map((entry): ChartBlock => {
-				const source = chartsOf(before).find((it) => it.id === entry.id);
-				const chart = { ...(entry.chart ?? source!.chart) };
-				if (entry.marks?.length) chart.marks = entry.marks.map((mark) => ({ ...mark }));
-				else delete chart.marks;
-				const item: ChartBlock = {
-					...source,
-					kind: 'chart',
-					id: idOf(entry.id)!,
-					chart,
-					frame: fitFrame(entry.frame, chart.aspect, part.orientation)
-				};
-				if (entry.closeUpOf !== undefined) item.closeUpOf = entry.closeUpOf;
-				return item;
-			});
-			const texts = [
-				...(at === 0 ? $state.snapshot(own) : []),
-				...part.texts.map((text) => {
-					const added: TypesetBlock = { ...text, id: createId() };
-					if (text.chartId !== undefined) added.chartId = idOf(text.chartId);
-					return added;
-				})
-			]
-				.slice(0, MAX_TEXTS_PER_PAGE)
-				.map((text) => ({
-					...text,
-					frame: fitTextFrame(text.frame, part.orientation, text.rotation)
-				}));
-			const next: DocPage = { id, orientation: part.orientation, blocks: [...items, ...texts] };
-			// Arranged by the arranger while it holds charts alone; by hand with text among them.
-			setLayout(
-				next,
-				texts.length > 0
-					? { manual: true, template: part.template }
-					: { layout: part.layout, template: part.template }
-			);
-			return next;
-		});
+		const pages = laidPages(before, laid, createId);
 		this.pages.splice(index, 1, ...pages);
 		this.#scheduleSave();
 		const added = pages.slice(1).map((next) => next.id);
@@ -688,159 +611,6 @@ export class DocumentStore {
 
 function emptyPage(orientation: PageOrientation): DocPage {
 	return { id: createId(), orientation, blocks: [] };
-}
-
-/** Whether `page` takes another block of `kind`: charts and type each have their limit. */
-function hasRoom(page: DocPage, kind: BlockKind): boolean {
-	return kind === 'chart'
-		? chartsOf(page).length < MAX_ITEMS_PER_PAGE
-		: typesetOf(page).length < MAX_TEXTS_PER_PAGE;
-}
-
-/**
- * `frame` as `block` may have it on a page turned `o`: a chart's at its aspect inside
- * the content box (`fitFrame`), a text's or a table's at its turn (`fitTextFrame`).
- */
-function fittedFrame(
-	block: Pick<ChartBlock, 'kind' | 'chart'> | Pick<TypesetBlock, 'kind' | 'rotation'>,
-	frame: Rect,
-	o: PageOrientation
-): Rect {
-	return block.kind === 'chart'
-		? fitFrame(frame, block.chart.aspect, o)
-		: fitTextFrame(frame, o, block.rotation);
-}
-
-/** Whether a page's text says what a template's does: a table has no words of its own. */
-function sameWords(
-	a: Pick<TypesetBlock, 'kind'> & { text?: string },
-	b: Pick<TypesetBlock, 'kind'> & { text?: string }
-): boolean {
-	return a.kind === b.kind && a.text === b.text;
-}
-
-/** Turn a text or a table to `degrees`; an upright one carries no `rotation`. */
-function setRotation(text: Pick<TypesetBlock, 'rotation'>, degrees: number) {
-	const rotation = normalizeRotation(degrees);
-	if (rotation === 0) delete text.rotation;
-	else text.rotation = rotation;
-}
-
-/**
- * Where a pasted `frame` (turned `rotation`, already the size it will be) goes on
- * `page`: see `pasteBlock`. What it takes up on the page is what is placed.
- */
-function pastePlace(
-	page: DocPage,
-	frame: Rect,
-	rotation: number,
-	at: { x: number; y: number } | undefined
-): Rect {
-	const box = contentBox(page.orientation);
-	const others = page.blocks.map(blockBounds);
-	const bounds = blockBounds({ frame, rotation });
-	const clear = !others.some((other) => overlaps(bounds, other, GUTTER_MM));
-	let place = clear ? bounds : nearestFreePlace(bounds, others, page.orientation);
-	if (!place && at) {
-		// No room: over what is there, under the pointer.
-		place = clampPosition({ ...bounds, x: at.x - bounds.w / 2, y: at.y - bounds.h / 2 }, box);
-	}
-	if (!place) {
-		// And with no pointer, off whatever lies exactly where it was, so that it shows.
-		place = bounds;
-		const taken = (it: Rect) =>
-			others.some((other) => Math.abs(other.x - it.x) < 0.5 && Math.abs(other.y - it.y) < 0.5);
-		for (let i = 0; i < MAX_ITEMS_PER_PAGE && taken(place); i++) {
-			const next = clampPosition(
-				{ ...place, x: place.x + PASTE_OFFSET_MM, y: place.y + PASTE_OFFSET_MM },
-				box
-			);
-			if (sameFrame(next, place)) break;
-			place = next;
-		}
-	}
-	return { ...frame, x: frame.x + place.x - bounds.x, y: frame.y + place.y - bounds.y };
-}
-
-/**
- * Put a page's charts in the arranger's order with its frames (copied), under the
- * type as ever; `added` is the chart Add brings (index −1). The charts keep their
- * identity.
- */
-function placeCharts(page: DocPage, plan: readonly PlacedChart[], added?: ChartBlock) {
-	const charts = chartsOf(page);
-	const placed = plan.map(({ index, frame }) => {
-		const item = index < 0 ? added! : charts[index];
-		item.frame = { ...frame };
-		return item;
-	});
-	page.blocks = [...placed, ...typesetOf(page)];
-}
-
-/**
- * Set how a page was laid out. An absent field is the default (automatic, no
- * layout, no memo, no template), so a change that passes only `manual` forgets the
- * layout (its frames are no longer the arranger's), the turn memo, and the template
- * the page was laid out as (it is no longer what that made).
- */
-function setLayout(
-	page: DocPage,
-	{
-		manual,
-		layout,
-		turnMemo,
-		template
-	}: { manual?: boolean; layout?: PageLayout; turnMemo?: TurnMemo; template?: PageTemplate }
-) {
-	if (manual) page.manual = true;
-	else delete page.manual;
-	if (layout) page.layout = layout;
-	else delete page.layout;
-	if (turnMemo) page.turnMemo = turnMemo;
-	else delete page.turnMemo;
-	if (template) page.template = { ...template };
-	else delete page.template;
-}
-
-/**
- * Where a text is on its page once the page is turned from `from` to `to`: it keeps
- * its place in the content box, which is as far across and down it as before, and
- * its share of the width; turning back puts it where it was.
- */
-function turnedTextFrame(
-	text: Pick<TypesetBlock, 'frame' | 'rotation'>,
-	from: PageOrientation,
-	to: PageOrientation
-): Rect {
-	const was = contentBox(from);
-	const box = contentBox(to);
-	const { x, y, w, h } = text.frame;
-	return fitTextFrame(
-		{
-			x: box.x + ((x - was.x) * box.w) / was.w,
-			y: box.y + ((y - was.y) * box.h) / was.h,
-			w: (w * box.w) / was.w,
-			h
-		},
-		to,
-		text.rotation
-	);
-}
-
-/** What `undo` of an Add compares: a page changed since the Add takes no undo. */
-function pageState(page: DocPage): string {
-	const { orientation, manual, layout, turnMemo } = page;
-	const items = chartsOf(page).map((it) => [it.id, it.frame]);
-	return JSON.stringify([orientation, items, !!manual, layout ?? null, turnMemo ?? null]);
-}
-
-function sameFrame(a: Rect, b: Rect): boolean {
-	return (
-		Math.abs(a.x - b.x) <= 1e-9 &&
-		Math.abs(a.y - b.y) <= 1e-9 &&
-		Math.abs(a.w - b.w) <= 1e-9 &&
-		Math.abs(a.h - b.h) <= 1e-9
-	);
 }
 
 /** `fn` the first time; false every time after. */

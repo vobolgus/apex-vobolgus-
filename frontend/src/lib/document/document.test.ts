@@ -3,13 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { aloneFrame } from './arrange';
 import { contentBox, GUTTER_MM, overlaps, rotatedBounds } from './geometry';
 import { chartsOf, isBlank, typesetOf } from './blocks';
-import {
-	createId,
-	DocumentStore,
-	MAX_CHARTS,
-	MAX_ITEMS_PER_PAGE,
-	MAX_PAGES
-} from './document.svelte';
+import { createId, DocumentStore, MAX_CHARTS, MAX_PAGES } from './document.svelte';
+import { MAX_ITEMS_PER_PAGE } from './page';
 import { DOCUMENT_STORAGE_KEY, type DocumentStorage } from './storage';
 import { layTemplate } from './templates';
 import { chart, expectInside, memoryStorage, saved, specOf, wordsOf } from './test-support';

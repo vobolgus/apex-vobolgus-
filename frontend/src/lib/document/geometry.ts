@@ -127,6 +127,16 @@ export function overlaps(a: Rect, b: Rect, gutter = 0): boolean {
 	);
 }
 
+/** Whether two frames are the same, to a rounding error. */
+export function sameFrame(a: Rect, b: Rect): boolean {
+	return (
+		Math.abs(a.x - b.x) <= 1e-9 &&
+		Math.abs(a.y - b.y) <= 1e-9 &&
+		Math.abs(a.w - b.w) <= 1e-9 &&
+		Math.abs(a.h - b.h) <= 1e-9
+	);
+}
+
 /**
  * The upright box around `frame` turned `degrees` about its centre: what a turned
  * text takes up on the page. The same centre; the frame itself when not turned.
