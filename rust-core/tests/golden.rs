@@ -6,7 +6,7 @@
 //! explicit ones to read when something breaks, and digests over sweeps of real
 //! catalogue stars and instants to catch what the explicit ones miss.
 
-use rust_core::planets::{Body, all_positions, body_color, position};
+use rust_core::planets::{Body, all_positions};
 use rust_core::{
     CameraConfig, DateTime, HipCatalog, MessierCatalog, PinholeProjection, StereoProjection,
     ViewKind, ViewProjection, get_sidereal_time, julian_date, ra_dec_to_unit_vector,
@@ -212,7 +212,7 @@ fn planet_positions_at_fixed_instants() {
         (Body::Neptune, 2460310.75, 6.207545812051263, -0.056281392810522496, [0.99556184482906, -0.07544773743920434, -0.05625168473800286], 7.78),
     ];
     for (body, jd, ra, dec, unit_vector, magnitude) in PINNED {
-        let actual = position(body, jd);
+        let actual = body.position(jd);
         assert_eq!(actual.body, body);
         assert!(
             same_f64(actual.ra_radians, ra)
@@ -245,7 +245,7 @@ fn planet_positions_over_two_centuries() {
         // Every five years and a bit from 1900, at a different hour each time.
         let jd = 2_415_020.5 + f64::from(step) * 1_826.262_5 + f64::from(step % 7) * 0.137;
         for body in bodies {
-            let p = position(body, jd);
+            let p = body.position(jd);
             digest.f64(p.ra_radians);
             digest.f64(p.dec_radians);
             p.unit_vector.iter().for_each(|&c| digest.f64(c));
@@ -268,7 +268,7 @@ fn planet_positions_over_two_centuries() {
             ]
         );
         for p in batch {
-            let single = position(p.body, jd);
+            let single = p.body.position(jd);
             assert!(same_f64(p.ra_radians, single.ra_radians));
             assert!(same_f64(p.dec_radians, single.dec_radians));
             assert_eq!(
@@ -299,7 +299,7 @@ fn body_colors() {
         Body::Uranus,
         Body::Neptune,
     ]
-    .map(body_color);
+    .map(Body::color);
     assert_eq!(
         colors,
         [
