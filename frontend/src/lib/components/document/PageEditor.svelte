@@ -52,10 +52,11 @@
 	import { MAX_PAGES, type DocumentStore } from '$lib/document/document.svelte';
 	import { plural } from '$lib/document/labels';
 	import { isModShortcut } from '$lib/shortcuts';
+	import { Announcer } from '$lib/ui/announcer.svelte';
 	import type { EditorActions } from './editor/actions';
 	import { BlockOperations } from './editor/block-operations.svelte';
 	import { ClipboardController } from './editor/clipboard.svelte';
-	import { Announcer, type EditorContext } from './editor/context.svelte';
+	import type { EditorContext } from './editor/context.svelte';
 	import { DragController } from './editor/drag.svelte';
 	import { EditorFocus } from './editor/focus';
 	import { PageOperations } from './editor/page-operations.svelte';
