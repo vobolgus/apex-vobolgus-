@@ -10,9 +10,10 @@
  */
 
 import { tick } from 'svelte';
+import { spokenKind } from '$lib/document/labels';
 import { clipboardCopy } from '$lib/document/storage';
 import type { BlockOperations } from './block-operations.svelte';
-import type { EditorContext } from './context.svelte';
+import type { EditorContext } from './context';
 import type { DragController } from './drag.svelte';
 import { wordsAsText } from './new-blocks';
 import type { Point } from './screen-geometry';
@@ -55,7 +56,7 @@ export class ClipboardController {
 		event.clipboardData?.setData(CLIP_TYPE, json);
 		event.clipboardData?.setData('text/plain', plain);
 		if (event.type === 'cut') this.#blocks.remove(block);
-		else announce(copy.kind === 'chart' ? 'Chart copied' : 'Text copied');
+		else announce(`${spokenKind(copy.kind)} copied`);
 	}
 
 	/** ⌘V on the page shown. The toast's Undo takes what was pasted off again. */
@@ -82,7 +83,7 @@ export class ClipboardController {
 			return;
 		}
 		if (!pasted) return;
-		const what = pasted.kind === 'chart' ? 'Chart' : 'Text';
+		const what = spokenKind(pasted.kind);
 		announce(`${what} pasted`);
 		notify(`${what} pasted`, () => {
 			store.removeBlock(page.id, pasted.id);

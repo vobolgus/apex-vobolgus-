@@ -1,12 +1,13 @@
 /**
  * What the editor calls things, in English: counts of pages and charts, one
- * spelling everywhere a page is named, what a table lists and how, and the names
+ * spelling everywhere a page is named, what a block is called aloud, what a table
+ * lists and how, and the names
  * of the languages a page is written in. The words set on a page, in each of
  * those languages, are in `words/`.
  */
 
 import { lookOf } from './table';
-import type { Language, TableLook, TableSource, TableSpec } from './types';
+import type { BlockKind, Language, TableLook, TableSource, TableSpec } from './types';
 
 /** "1 page", "3 pages", "0 charts". */
 export function plural(count: number, word: string): string {
@@ -16,6 +17,16 @@ export function plural(count: number, word: string): string {
 /** A page's charts in its name: "no charts", "1 chart", "3 charts". */
 export function chartCountLabel(count: number): string {
 	return count === 0 ? 'no charts' : plural(count, 'chart');
+}
+
+/** What a block is called when the editor speaks of it: a table is a text there. */
+export function spokenKind(kind: BlockKind): 'Chart' | 'Text' {
+	return kind === 'chart' ? 'Chart' : 'Text';
+}
+
+/** Why page `number` took no block of `kind` moved to it by the keys. */
+export function pageFullLabel(number: number, kind: BlockKind): string {
+	return kind === 'chart' ? `Page ${number} is full` : `Page ${number} holds no more text`;
 }
 
 /** A language by its name in English, as its buttons are named: "Russian". */

@@ -22,6 +22,7 @@ import {
 	type ResizeAnchor,
 	type SnapGuide
 } from '$lib/document/geometry';
+import { spokenKind } from '$lib/document/labels';
 import {
 	anchoredFrame,
 	fitTextFrame,
@@ -171,7 +172,7 @@ export function carrySession(store: DocumentStore, press: Press): DragSession {
 			if (!store.moveBlock(block.id, view.targetId, view.landing)) {
 				return { rest: 'return', say: `Page ${number} is full` };
 			}
-			const what = block.kind === 'chart' ? 'Chart' : 'Text';
+			const what = spokenKind(block.kind);
 			return { rest: 'settle', say: `${what} moved to page ${number}`, changedPage: true };
 		}
 	};

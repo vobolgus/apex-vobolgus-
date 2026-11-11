@@ -32,14 +32,15 @@
 		type LaidPage,
 		type TemplateInfo
 	} from '$lib/document/templates';
-	import type { DocPage, Language, PageOrientation, TextStyle } from '$lib/document/types';
+	import type { DocPage, Language, PageOrientation } from '$lib/document/types';
 	import { LANGUAGES } from '$lib/document/words';
 	import { catalog } from '$lib/state/catalog.svelte';
+	import { closesOnBackdrop } from '$lib/ui/dialog';
 	import EditorOrientation from '../EditorOrientation.svelte';
-	import { measuredLayout } from '../typeset.svelte';
+	import { measuredHeight } from '../typeset.svelte';
 	import FinderObjects from './FinderObjects.svelte';
 	import { closeUpOf, FinderChoice } from './finder.svelte';
-	import type { PickerAnchor } from './pick';
+	import type { PickerAnchor } from './pick.svelte';
 	import TemplateTile from './TemplateTile.svelte';
 	import { layFinder, previewOf, templateTiles, type Tile } from './tiles';
 
@@ -73,12 +74,8 @@
 	let fovDeg = $state(CLOSE_UP_FIELD_DEG);
 	/** Whether the Messier catalogue could not be had. */
 	let failed = $state(false);
-	/** True from the press on the backdrop to the click: a drag that ends there is no click. */
-	let pressedOutside = false;
 
 	const own = $derived(chartsOf(page));
-	const height = (text: string, style: TextStyle, width: number) =>
-		measuredLayout(text, style, width).height;
 
 	/** The chart a finder card would be made of, in the order the charts are taken. */
 	const sky = $derived(finderSky(swap ? [...own].reverse() : own));
@@ -87,7 +84,7 @@
 		() => catalog.messier
 	);
 	/** How the picker's controls have the templates laid out. */
-	const laying = $derived({ orientation, swap, height, language });
+	const laying = $derived({ orientation, swap, height: measuredHeight, language });
 
 	/** A finder card is shown with the brightest object on the sky, as an example. */
 	const tiles = $derived(
@@ -185,12 +182,6 @@
 		event.preventDefault();
 		back();
 	}
-
-	function handleClick(event: MouseEvent) {
-		// The content fills the dialog box, so a click on the dialog itself is on the backdrop.
-		if (pressedOutside && event.target === dialogEl) dialogEl?.close();
-		pressedOutside = false;
-	}
 </script>
 
 <dialog
@@ -202,9 +193,8 @@
 	style:top={place ? `${place.top}px` : undefined}
 	style:opacity={place ? undefined : 0}
 	onkeydown={handleKeydown}
-	onpointerdown={(event) => (pressedOutside = event.target === dialogEl)}
-	onclick={handleClick}
 	oncancel={handleCancel}
+	{@attach closesOnBackdrop(() => dialogEl?.close())}
 	{onclose}
 >
 	<div class="content">

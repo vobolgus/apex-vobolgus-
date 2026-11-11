@@ -11,17 +11,18 @@
 	import { chartCountLabel } from '$lib/document/labels';
 	import { chartsOf, typesetOf } from '$lib/document/blocks';
 	import type { DocPage } from '$lib/document/types';
+	import type { PageActions } from './editor/actions';
 
 	interface Props {
 		pages: readonly DocPage[];
 		currentId: string;
 		/** Whether the document has room for another page. */
 		canAdd?: boolean;
-		onselect: (pageId: string) => void;
-		onadd: () => void;
+		/** What a mini page and ⊕ ask of the editor: to show a page, to add one. */
+		actions: Pick<PageActions, 'show' | 'add'>;
 	}
 
-	let { pages, currentId, canAdd = true, onselect, onadd }: Props = $props();
+	let { pages, currentId, canAdd = true, actions }: Props = $props();
 
 	/** Height of a portrait mini page, px; a landscape one is this wide. */
 	const MINI_PX = 40;
@@ -74,7 +75,7 @@
 						aria-current={page.id === currentId ? 'page' : undefined}
 						aria-label="Go to page {index + 1}, {chartCountLabel(chartsOf(page).length)}"
 						title="Page {index + 1}"
-						onclick={() => onselect(page.id)}
+						onclick={() => actions.show(page.id)}
 					>
 						<span class="sheet-box">
 							<svg
@@ -131,7 +132,7 @@
 					aria-label="Add page"
 					title={canAdd ? 'Add page' : `A PDF document has at most ${MAX_PAGES} pages`}
 					disabled={!canAdd}
-					onclick={onadd}
+					onclick={() => actions.add()}
 				>
 					<span class="add-box">
 						<svg viewBox="0 0 16 16" aria-hidden="true">

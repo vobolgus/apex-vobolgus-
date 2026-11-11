@@ -126,7 +126,7 @@
 	}
 
 	function commit() {
-		if (editing) actions.blocks.commitText(block, typing.draft);
+		if (editing && block.kind === 'text') actions.blocks.commitText(block, typing.draft);
 	}
 </script>
 

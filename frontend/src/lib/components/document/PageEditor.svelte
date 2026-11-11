@@ -54,10 +54,11 @@
 	import { plural } from '$lib/document/labels';
 	import { isModShortcut } from '$lib/shortcuts';
 	import { Announcer } from '$lib/ui/announcer.svelte';
+	import { closesOnBackdrop } from '$lib/ui/dialog';
 	import type { EditorActions } from './editor/actions';
 	import { BlockOperations } from './editor/block-operations.svelte';
 	import { ClipboardController } from './editor/clipboard.svelte';
-	import type { EditorContext } from './editor/context.svelte';
+	import type { EditorContext } from './editor/context';
 	import { DragController } from './editor/drag.svelte';
 	import { EditorFocus } from './editor/focus';
 	import { PageOperations } from './editor/page-operations.svelte';
@@ -92,8 +93,6 @@
 	let animated = $state(false);
 	/** The strip's height, px: the toast, lodged in the dialog, sits above it. */
 	let stripHeight = $state(0);
-	/** True from the press on the backdrop to the click: a drag that ends there is no click. */
-	let pressedOnBackdrop = false;
 
 	const open = $derived(pageId !== null);
 
@@ -128,7 +127,7 @@
 	const pages = new PageOperations(editor, drag, blocks);
 	const clipboard = new ClipboardController(editor, drag, blocks);
 	/** What the pages, and the charts and texts on them, may ask for. */
-	const actions: EditorActions = { pages, pointer: drag, blocks };
+	const actions: EditorActions = { pages, pointer: drag, blocks, drag };
 
 	const current = $derived(stage.current);
 	const summary = $derived(
@@ -172,7 +171,7 @@
 		if (!open) return;
 		const onKeydown = (event: KeyboardEvent) => {
 			// Not while the template picker is over the editor: its keys are its own.
-			if (pages.picking) return;
+			if (pages.templates.picking) return;
 			if (event.target === document.body || event.target === document.documentElement) {
 				handleKeydown(event);
 			}
@@ -210,16 +209,6 @@
 			event.preventDefault();
 			focus.block(blocks.editingId);
 		}
-	}
-
-	function handleBackdropPointerDown(event: PointerEvent) {
-		pressedOnBackdrop = event.target === dialogEl;
-	}
-
-	function handleBackdropClick(event: MouseEvent) {
-		// The content fills the dialog box, so a click on the dialog itself is on the backdrop.
-		if (pressedOnBackdrop && event.target === dialogEl) closeEditor();
-		pressedOnBackdrop = false;
 	}
 
 	/** Keys on the dialog. They go no further: the generator's shortcuts are behind the modal. */
@@ -267,8 +256,7 @@
 	onkeydown={handleKeydown}
 	oncancel={handleCancel}
 	onclose={handleClose}
-	onpointerdown={handleBackdropPointerDown}
-	onclick={handleBackdropClick}
+	{@attach closesOnBackdrop(closeEditor)}
 	onclickcapture={(event) => drag.swallowClick(event)}
 	oncopy={(event) => clipboard.copy(event)}
 	oncut={(event) => clipboard.copy(event)}
@@ -308,11 +296,6 @@
 						box={slot.box}
 						labelHeight={EDITOR_LAYOUT.labelHeight}
 						narrow={stage.layout.narrow}
-						drag={drag.pageDrag(slot.page)}
-						returningId={drag.returningId}
-						settlingId={drag.settlingId}
-						carrying={drag.carrying}
-						editingId={blocks.editingId}
 						pages={stage.pages}
 						{hintId}
 						{textHintId}
@@ -325,8 +308,7 @@
 				pages={stage.pages}
 				currentId={current.id}
 				canAdd={store.canAddPage}
-				onselect={(selected) => stage.show(selected)}
-				onadd={() => pages.add()}
+				actions={actions.pages}
 			/>
 
 			<p class="sr-only" id={hintId}>
@@ -347,16 +329,16 @@
 	{/if}
 </dialog>
 
-{#if pages.picking && pages.pickedPage}
-	{@const pageId = pages.picking.pageId}
+{#if pages.templates.picking && pages.templates.page}
+	{@const pageId = pages.templates.picking.pageId}
 	<TemplatePicker
-		page={pages.pickedPage}
+		page={pages.templates.page}
 		number={store.pageIndex(pageId) + 1}
 		room={MAX_PAGES - store.pageCount}
-		anchor={pages.picking.anchor}
+		anchor={pages.templates.picking.anchor}
 		placement="under"
 		onapply={(template, laid) => pages.applyTemplate(pageId, template, laid)}
-		onclose={() => (pages.picking = null)}
+		onclose={pages.templates.close}
 	/>
 {/if}
 

@@ -8,28 +8,26 @@
 import { tick } from 'svelte';
 import { isBlank } from '$lib/document/blocks';
 import type { LaidPage, TemplateInfo } from '$lib/document/templates';
-import type { DocPage, PageOrientation } from '$lib/document/types';
-import type { TemplatePick } from '../templates/pick';
-import { measuredLayout } from '../typeset.svelte';
+import type { PageOrientation } from '$lib/document/types';
+import { TemplatePicking } from '../templates/pick.svelte';
+import { measuredHeight } from '../typeset.svelte';
 import type { PageActions } from './actions';
 import type { BlockOperations } from './block-operations.svelte';
-import type { EditorContext } from './context.svelte';
+import type { EditorContext } from './context';
 import type { DragController } from './drag.svelte';
 
 export class PageOperations implements PageActions {
 	readonly #editor: EditorContext;
 	readonly #drag: DragController;
 	readonly #blocks: BlockOperations;
-	/** Set while the template picker is open: the page, and the button it stands under. */
-	picking = $state<TemplatePick | null>(null);
-	/** The page the picker lays out, while it is still there. */
-	readonly pickedPage: DocPage | undefined;
+	/** The template picker, while it is open: it stands under the button that asked for it. */
+	readonly templates: TemplatePicking;
 
 	constructor(editor: EditorContext, drag: DragController, blocks: BlockOperations) {
 		this.#editor = editor;
 		this.#drag = drag;
 		this.#blocks = blocks;
-		this.pickedPage = $derived(this.picking ? editor.store.page(this.picking.pageId) : undefined);
+		this.templates = new TemplatePicking(() => editor.store);
 	}
 
 	show(pageId: string): void {
@@ -72,11 +70,7 @@ export class PageOperations implements PageActions {
 	 */
 	setOrientation(pageId: string, orientation: PageOrientation): void {
 		if (this.#drag.active) return;
-		this.#editor.store.setOrientation(
-			pageId,
-			orientation,
-			(text, style, width) => measuredLayout(text, style, width).height
-		);
+		this.#editor.store.setOrientation(pageId, orientation, measuredHeight);
 	}
 
 	/** Open the template picker for a page, under the button that asked for it. */
@@ -84,21 +78,18 @@ export class PageOperations implements PageActions {
 		if (this.#drag.active) return;
 		this.#blocks.editingId = null;
 		const { left, top, right, bottom } = button.getBoundingClientRect();
-		this.picking = { pageId, anchor: { left, top, right, bottom } };
+		this.templates.open(pageId, { left, top, right, bottom });
 	}
 
 	/** The picker's choice: the page laid out as `template`, on as many pages as `laid` has. */
 	applyTemplate(pageId: string, template: TemplateInfo, laid: LaidPage[]): void {
-		const { store, focus, announce, notify } = this.#editor;
-		const number = store.pageIndex(pageId) + 1;
-		const restore = store.layPage(pageId, laid);
-		if (!restore) return;
-		const pages = laid.length > 1 ? `, on ${laid.length} pages` : '';
-		const message = `Page ${number} laid out as “${template.name}”${pages}`;
-		announce(message);
-		notify(message, () => {
-			if (!restore() || !this.#editor.isOpen) return;
-			announce(`Page ${number} as it was`);
+		const { focus, announce, notify } = this.#editor;
+		const applied = this.templates.apply(pageId, template, laid);
+		if (!applied) return;
+		announce(applied.message);
+		notify(applied.message, () => {
+			if (!applied.restore() || !this.#editor.isOpen) return;
+			announce(applied.restored);
 			void tick().then(() => focus.paper());
 		});
 		void tick().then(() => focus.paper());

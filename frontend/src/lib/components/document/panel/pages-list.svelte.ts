@@ -12,7 +12,9 @@
 
 import { tick } from 'svelte';
 import type { DocumentStore } from '$lib/document/document.svelte';
+import { Announcer } from '$lib/ui/announcer.svelte';
 import type { Box, Landing, LandingTarget } from '../flight/flight';
+import type { PickerAnchor } from '../templates/pick.svelte';
 import { flash, growIn, makeRoom, reducedMotion, shrinkOut } from './list-motion';
 
 /** What a page in the list asks of the panel. */
@@ -46,7 +48,7 @@ export class PagesList {
 	/** The list, once it is there. */
 	element = $state<HTMLOListElement>();
 	/** Polite live region: a page added from ⊕ has no other cue but the flash. */
-	announcement = $state('');
+	readonly voice = new Announcer();
 	/**
 	 * A page that came to lie under a pointer which did not move: the one ⊕ just
 	 * added, where ⊕ itself was a moment ago. Until the pointer does move it is not
@@ -110,7 +112,7 @@ export class PagesList {
 		const { store } = this.#host;
 		if (!store.canAddPage) return;
 		const pageId = store.addPage();
-		this.announce(`Page ${store.pageIndex(pageId) + 1} added`);
+		this.voice.say(`Page ${store.pageIndex(pageId) + 1} added`);
 		// A click from the keyboard has no place of its own (detail 0): wait for the first move.
 		this.#quietUntilPointerMoves(
 			pageId,
@@ -145,12 +147,6 @@ export class PagesList {
 			return this.#removeNow(pageId, index, hadFocus);
 		});
 	};
-
-	announce(message: string): void {
-		// Cleared first, so the same words twice are read twice.
-		this.announcement = '';
-		void tick().then(() => (this.announcement = message));
-	}
 
 	async #removeNow(pageId: string, index: number, hadFocus: boolean): Promise<void> {
 		const undo = this.#host.store.removePage(pageId);
@@ -244,6 +240,20 @@ export class PagesList {
 			if (id) boxes[id] = chart.getBoundingClientRect();
 		}
 		return boxes;
+	}
+
+	// === The template picker ===
+
+	/**
+	 * Where a page's template picker stands, for the button on its thumbnail that
+	 * asked for it: beside the panel, at the height of the thumbnail.
+	 */
+	pickerAnchor(button: HTMLElement): PickerAnchor | null {
+		const thumb = button.closest('.thumb-wrap');
+		const dock = button.closest('.dock');
+		if (!thumb || !dock) return null;
+		const { top, bottom, left } = thumb.getBoundingClientRect();
+		return { left, top, bottom, right: dock.getBoundingClientRect().right };
 	}
 
 	// === The list's edges ===

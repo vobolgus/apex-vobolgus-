@@ -8,6 +8,7 @@
 	 * back to where it was. A click on the backdrop closes it too.
 	 */
 	import { SHORTCUTS, keyLabel, spokenKeys } from '$lib/shortcuts';
+	import { closesOnBackdrop } from '$lib/ui/dialog';
 
 	interface Props {
 		/** Open state; the dialog clears it when it closes itself (Escape, ×, backdrop). */
@@ -23,24 +24,12 @@
 
 	const id = $props.id();
 	let dialogEl = $state<HTMLDialogElement>();
-	/** The press began on the backdrop: a text selection dragged out onto it is no click on it. */
-	let pressedOnBackdrop = false;
 
 	$effect(() => {
 		if (!dialogEl) return;
 		if (open && !dialogEl.open) dialogEl.showModal();
 		else if (!open && dialogEl.open) dialogEl.close();
 	});
-
-	function handlePointerDown(event: PointerEvent) {
-		pressedOnBackdrop = event.target === dialogEl;
-	}
-
-	function handleClick(event: MouseEvent) {
-		// The dialog box has no padding, so a click on the dialog itself is a click on the backdrop.
-		if (pressedOnBackdrop && event.target === dialogEl) open = false;
-		pressedOnBackdrop = false;
-	}
 </script>
 
 <!-- Escape is the keyboard way out, handled natively; the backdrop click only mirrors it for the pointer. -->
@@ -49,8 +38,7 @@
 	class="about"
 	aria-labelledby="{id}-title"
 	onclose={() => (open = false)}
-	onpointerdown={handlePointerDown}
-	onclick={handleClick}
+	{@attach closesOnBackdrop(() => (open = false))}
 >
 	<div class="content">
 		<!-- First in the dialog, so showModal() puts the focus here and not on a link in the text. -->

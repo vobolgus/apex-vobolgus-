@@ -18,9 +18,9 @@ import { findBlock, isChart } from '$lib/document/blocks';
 import type { ResizeAnchor, SnapGuide } from '$lib/document/geometry';
 import type { DocBlock, DocPage, TypesetBlock } from '$lib/document/types';
 import { prefersReducedMotion } from '$lib/ui/motion';
-import type { PointerActions, TextSide } from './actions';
+import type { DragState, PointerActions, TextSide } from './actions';
 import { holdBlock } from './block-geometry';
-import type { EditorContext } from './context.svelte';
+import type { EditorContext } from './context';
 import {
 	carrySession,
 	cornerResizeSession,
@@ -65,7 +65,7 @@ function isSide(handle: ResizeAnchor | TextSide): handle is TextSide {
 	return handle === 'w' || handle === 'e';
 }
 
-export class DragController implements PointerActions {
+export class DragController implements PointerActions, DragState {
 	readonly #editor: EditorContext;
 	#active: Active | null = null;
 	/** What the drag going on shows; null at rest, and until a press has become a drag. */

@@ -15,7 +15,7 @@
 	import type { DocumentStore } from '$lib/document/document.svelte';
 	import type { Box, Landing, LandingTarget } from '../flight/flight';
 	import type { LaidPage, TemplateInfo } from '$lib/document/templates';
-	import type { TemplatePick } from '../templates/pick';
+	import { TemplatePicking } from '../templates/pick.svelte';
 	import TemplatePicker from '../templates/TemplatePicker.svelte';
 	import { slideIn } from './list-motion';
 	import PageCell from './PageCell.svelte';
@@ -66,8 +66,7 @@
 	});
 
 	/** The page being laid out as a template, and where its picker stands. */
-	let picking = $state<TemplatePick | null>(null);
-	const pickedPage = $derived(picking ? store.page(picking.pageId) : undefined);
+	const templates = new TemplatePicking(() => store);
 
 	const cell: PageCellActions = {
 		open: (pageId) => onopen(pageId),
@@ -78,21 +77,17 @@
 
 	/** Open the template picker for a page, beside the panel at the height of its thumbnail. */
 	function pickTemplate(event: MouseEvent, pageId: string) {
-		const thumb = (event.currentTarget as HTMLElement).closest('.thumb-wrap');
-		const dock = (event.currentTarget as HTMLElement).closest('.dock');
-		if (!thumb || !dock) return;
-		const { top, bottom, left } = thumb.getBoundingClientRect();
-		picking = { pageId, anchor: { left, top, bottom, right: dock.getBoundingClientRect().right } };
+		const anchor = list.pickerAnchor(event.currentTarget as HTMLElement);
+		if (anchor) templates.open(pageId, anchor);
 	}
 
 	function applyTemplate(pageId: string, template: TemplateInfo, laid: LaidPage[]) {
-		const number = store.pageIndex(pageId) + 1;
-		const undo = store.layPage(pageId, laid);
-		if (!undo) return;
+		const applied = templates.apply(pageId, template, laid);
+		if (!applied) return;
 		store.selectedPageId = pageId;
-		const pages = laid.length > 1 ? `, on ${laid.length} pages` : '';
-		notify(`Page ${number} laid out as “${template.name}”${pages}`, () => {
-			if (undo()) list.announcement = `Page ${number} as it was`;
+		notify(applied.message, () => {
+			// Said as it is, not cleared first: the toast's own words came just before.
+			if (applied.restore()) list.voice.message = applied.restored;
 		});
 	}
 
@@ -177,19 +172,19 @@
 				<span class="count" aria-hidden="true">{count}</span>
 			{/if}
 		</button>
-		<p class="sr-only" role="status">{list.announcement}</p>
+		<p class="sr-only" role="status">{list.voice.message}</p>
 	</div>
 {/if}
 
-{#if picking && pickedPage}
-	{@const pageId = picking.pageId}
+{#if templates.picking && templates.page}
+	{@const pageId = templates.picking.pageId}
 	<TemplatePicker
-		page={pickedPage}
+		page={templates.page}
 		number={store.pageIndex(pageId) + 1}
 		room={MAX_PAGES - store.pageCount}
-		anchor={picking.anchor}
+		anchor={templates.picking.anchor}
 		onapply={(template, laid) => applyTemplate(pageId, template, laid)}
-		onclose={() => (picking = null)}
+		onclose={templates.close}
 	/>
 {/if}
 

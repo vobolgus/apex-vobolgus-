@@ -15,15 +15,24 @@ import { tick } from 'svelte';
 import { loadMessier } from '$lib/api/catalog';
 import { chartsOf, findBlock, isChart, layerIndex } from '$lib/document/blocks';
 import { contentBox, stepSize } from '$lib/document/geometry';
+import { pageFullLabel, spokenKind } from '$lib/document/labels';
 import { hasRoom } from '$lib/document/page';
 import { lookOf } from '$lib/document/table';
 import { DEFAULT_TEXT_STYLE, quarterTurn, stepTextSize } from '$lib/document/text';
-import type { DocBlock, DocPage, TableSpec, TextStyle, TypesetBlock } from '$lib/document/types';
+import type {
+	DocBlock,
+	DocPage,
+	TableBlock,
+	TableSpec,
+	TextBlock,
+	TextStyle,
+	TypesetBlock
+} from '$lib/document/types';
 import { likedTableWidth } from '../typeset.svelte';
 import type { BlockActions } from './actions';
 import { frameOnPage, nudgedFrame } from './block-geometry';
 import { blockCommand, repeatsWhenHeld, type BlockCommand } from './block-keys';
-import type { EditorContext } from './context.svelte';
+import type { EditorContext } from './context';
 import type { DragController } from './drag.svelte';
 import { newTable, newText } from './new-blocks';
 import { spokenSize, type Point } from './screen-geometry';
@@ -117,7 +126,8 @@ export class BlockOperations implements BlockActions {
 			case 'remove':
 				return this.remove(block);
 			case 'edit':
-				if (!isChart(block)) this.edit(block);
+				// A table's words are read from its chart: there is nothing in it to type.
+				if (block.kind === 'text') this.edit(block);
 				return;
 			case 'turn':
 				if (!isChart(block)) this.turn(block, command.direction);
@@ -167,11 +177,11 @@ export class BlockOperations implements BlockActions {
 			return;
 		}
 		if (!store.moveBlock(block.id, target.id, frameOnPage(block, target))) {
-			announce(isChart(block) ? `Page ${number} is full` : `Page ${number} holds no more text`);
+			announce(pageFullLabel(number, block.kind));
 			return;
 		}
 		stage.show(target.id, false, true);
-		announce(`${isChart(block) ? 'Chart' : 'Text'} moved to page ${number}`);
+		announce(`${spokenKind(block.kind)} moved to page ${number}`);
 		void tick().then(() => focus.block(block.id));
 	}
 
@@ -186,7 +196,7 @@ export class BlockOperations implements BlockActions {
 		// A text or a table stays where it is while a drag goes on.
 		if (!page || (!isChart(block) && this.#drag.active)) return;
 		const pageId = page.id;
-		const what = isChart(block) ? 'Chart' : 'Text';
+		const what = spokenKind(block.kind);
 		const at = layerIndex(page, block.id);
 		if (this.editingId === block.id) this.editingId = null;
 		const restore = store.removeBlock(pageId, block.id);
@@ -220,13 +230,12 @@ export class BlockOperations implements BlockActions {
 		this.#editor.store.updateTypeset(page.id, block.id, { style });
 	}
 
-	/** A table's words are read from its chart: there is nothing in it to type. */
-	edit(block: TypesetBlock): void {
-		if (!this.#drag.active && block.kind === 'text') this.editingId = block.id;
+	edit(block: TextBlock): void {
+		if (!this.#drag.active) this.editingId = block.id;
 	}
 
 	/** Typing is over. A text left empty is taken off the page: there is nothing of it to keep. */
-	commitText(block: TypesetBlock, value: string): void {
+	commitText(block: TextBlock, value: string): void {
 		const { store, focus } = this.#editor;
 		if (this.editingId === block.id) this.editingId = null;
 		const page = this.#pageOf(block.id);
@@ -237,7 +246,7 @@ export class BlockOperations implements BlockActions {
 			void tick().then(() => {
 				if (!focus.isInside()) focus.paper();
 			});
-		} else if (block.kind === 'text' && value !== block.text) {
+		} else if (value !== block.text) {
 			store.updateTypeset(page.id, block.id, { text: value });
 		}
 	}
@@ -268,9 +277,8 @@ export class BlockOperations implements BlockActions {
 	 * What it lists and how it looks decide how wide it likes to be, so those two
 	 * set its width again; the rows leave the width as it was made.
 	 */
-	async setTable(block: TypesetBlock, table: TableSpec): Promise<void> {
+	async setTable(block: TableBlock, table: TableSpec): Promise<void> {
 		const { store } = this.#editor;
-		if (block.kind !== 'table') return;
 		if (table.source === 'messier') await loadMessier();
 		const page = this.#pageOf(block.id);
 		if (!page || this.#drag.active) return;

@@ -15,7 +15,7 @@
 	import EditorTypeset from './blocks/EditorTypeset.svelte';
 	import { linkedChartId } from './blocks/reads';
 	import type { EditorActions } from './editor/actions';
-	import { blockState, type PageDrag } from './editor/drag-view';
+	import { blockState } from './editor/drag-view';
 	import type { Box, SlotRole } from './editor/screen-geometry';
 	import PageGuides from './PageGuides.svelte';
 	import PageLabel from './PageLabel.svelte';
@@ -33,20 +33,14 @@
 		labelHeight: number;
 		/** Narrow layout: the neighbours peek in at the edges, without their labels. */
 		narrow: boolean;
-		drag: PageDrag | null;
-		/** A block easing back after a drag that was let go off every page. */
-		returningId: string | null;
-		/** A block coming to rest after it was let go over a page. */
-		settlingId: string | null;
-		/** A block is being carried somewhere in the editor: the others go quiet. */
-		carrying: boolean;
-		/** The text being typed in. */
-		editingId: string | null;
 		/** The document's pages: a text may read a chart on another of them. */
 		pages: readonly DocPage[];
 		hintId: string;
 		textHintId: string;
-		/** What the page and what is on it ask of the editor. */
+		/**
+		 * What the page and what is on it ask of the editor, and what they read of it: the
+		 * drag going on (`actions.drag`) and the text being typed in (`actions.blocks`).
+		 */
 		actions: EditorActions;
 	}
 
@@ -59,11 +53,6 @@
 		box,
 		labelHeight,
 		narrow,
-		drag,
-		returningId,
-		settlingId,
-		carrying,
-		editingId,
 		pages,
 		hintId,
 		textHintId,
@@ -84,8 +73,13 @@
 	/** Screen px per mm. */
 	const scale = $derived(box.width / size.w);
 
+	/** What of the drag going on this page draws. */
+	const drag = $derived(actions.drag.pageDrag(page));
+	const carrying = $derived(actions.drag.carrying);
+	const editingId = $derived(actions.blocks.editingId);
+
 	function stateOf(blockId: string) {
-		return blockState(blockId, drag, settlingId, returningId);
+		return blockState(blockId, drag, actions.drag.settlingId, actions.drag.returningId);
 	}
 
 	/**
