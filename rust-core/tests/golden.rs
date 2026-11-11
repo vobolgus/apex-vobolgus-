@@ -5,13 +5,96 @@
 //! away, but not all of it. So every value here is compared by its bits: a few
 //! explicit ones to read when something breaks, and digests over sweeps of real
 //! catalogue stars and instants to catch what the explicit ones miss.
+//!
+//! Two things keep that from being the whole story:
+//!
+//! - The trigonometry is the platform's libm, and two of those differ in the last
+//!   bit now and then. A value that passed through it is therefore held bit for bit
+//!   only where it was recorded (`RECORDED_HERE`); elsewhere it is held to a part
+//!   in 10^12 (f64) or 10^5 (f32), and a digest of such values is not held at all.
+//!   The counts of points seen, and everything that is plain arithmetic or the
+//!   catalogues' own data, are held everywhere.
+//! - The crate behind these tests may be reshaped. Its names and signatures are
+//!   known to `subject` alone, so that a change to the API changes those lines and
+//!   never a case or a table.
 
-use rust_core::planets::{Body, all_positions};
-use rust_core::{
-    CameraConfig, DateTime, HipCatalog, MessierCatalog, MessierKind, MessierObject,
-    PinholeProjection, ProjectionError, Star, StereoProjection, ViewKind, ViewProjection,
-    julian_date, ra_dec_to_unit_vector, sidereal_time, vernal_equinox_hour_angle,
+/// The only lines that know the crate's own names; all else goes through them.
+mod subject {
+    pub use rust_core::planets::{Body, all_positions};
+    pub use rust_core::{
+        CameraConfig, DateTime, HipCatalog, MessierCatalog, MessierKind, MessierObject,
+        PinholeProjection, ProjectionError, Star, StereoPoint, StereoProjection, ViewKind,
+        ViewProjection, julian_date, sidereal_time, vernal_equinox_hour_angle,
+    };
+
+    /// A direction of the equatorial frame as the cases write it: `(x, y, z)`.
+    pub type Point = (f32, f32, f32);
+
+    /// A preview camera: projection, right, up, forward, field of view, width, height.
+    pub type View = (ViewKind, [f64; 3], [f64; 3], [f64; 3], f64, f64, f64);
+
+    /// The unit vector of a right ascension and a declination, in radians.
+    pub fn unit_vector(ra: f32, dec: f32) -> Point {
+        rust_core::ra_dec_to_unit_vector(ra, dec)
+    }
+
+    /// The stars with `min_mag <= v_mag <= max_mag`, no lower bound with `None`.
+    pub fn stars(
+        catalog: &HipCatalog,
+        max_mag: f32,
+        min_mag: Option<f32>,
+    ) -> impl Iterator<Item = &Star> {
+        catalog.stars(max_mag, min_mag)
+    }
+
+    /// The Messier objects with `min_mag <= v_mag <= max_mag`.
+    pub fn messier_in_magnitude_range(
+        catalog: &MessierCatalog,
+        min_mag: f32,
+        max_mag: f32,
+    ) -> impl Iterator<Item = &MessierObject> {
+        catalog.in_magnitude_range(min_mag, max_mag)
+    }
+
+    /// Where the observer's sky puts a point.
+    pub fn stereo_project(stereo: &StereoProjection, (x, y, z): Point) -> Option<StereoPoint> {
+        stereo.project(x, y, z)
+    }
+
+    /// Where the pinhole camera puts a point, in px.
+    pub fn pinhole_project(pinhole: &PinholeProjection, (x, y, z): Point) -> Option<(f32, f32)> {
+        pinhole.project(x, y, z)
+    }
+
+    /// The preview camera of a `View`, or why there is none.
+    pub fn view(
+        (kind, right, up, forward, fov, width, height): View,
+    ) -> Result<ViewProjection, ProjectionError> {
+        ViewProjection::new(kind, right, up, forward, fov, width, height)
+    }
+
+    /// Where the preview camera puts a point, chart-normalised.
+    pub fn view_normalized(view: &ViewProjection, (x, y, z): Point) -> Option<(f64, f64)> {
+        view.normalized(f64::from(x), f64::from(y), f64::from(z))
+    }
+
+    /// Where the preview camera puts a point, in px.
+    pub fn view_project(view: &ViewProjection, (x, y, z): Point) -> Option<(f32, f32)> {
+        view.project(x, y, z)
+    }
+}
+
+use subject::{
+    Body, CameraConfig, DateTime, HipCatalog, MessierCatalog, MessierKind, MessierObject,
+    PinholeProjection, Point, ProjectionError, Star, StereoProjection, View, ViewKind,
+    ViewProjection, all_positions, julian_date, messier_in_magnitude_range, pinhole_project,
+    sidereal_time, stars, stereo_project, unit_vector, vernal_equinox_hour_angle, view,
+    view_normalized, view_project,
 };
+
+/// Where the bit patterns of the values that pass through libm were recorded: see
+/// the module docs.
+const RECORDED_HERE: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// FNV-1a over the bits of what it is fed: the same values in the same order give
 /// the same number, and anything else almost surely does not.
@@ -68,13 +151,32 @@ fn same_f32(actual: f32, expected: f32) -> bool {
     actual.to_bits() == expected.to_bits()
 }
 
+/// `actual` is the pinned `expected`, a value that passed through libm: bit for bit
+/// where it was recorded, to a part in 10^12 elsewhere.
+fn near_f64(actual: f64, expected: f64) -> bool {
+    same_f64(actual, expected)
+        || (!RECORDED_HERE && (actual - expected).abs() <= 1e-12 * expected.abs().max(1.0))
+}
+
+/// `near_f64` for an `f32`, to a part in 10^5 elsewhere.
+fn near_f32(actual: f32, expected: f32) -> bool {
+    same_f32(actual, expected)
+        || (!RECORDED_HERE && (actual - expected).abs() <= 1e-5 * expected.abs().max(1.0))
+}
+
+/// A digest over values that passed through libm is `pinned`, where it was recorded.
+fn assert_libm_digest(digest: &Digest, pinned: u64, what: &str) {
+    if RECORDED_HERE {
+        assert_eq!(digest.0, pinned, "{what} digest moved: {:#018x}", digest.0);
+    }
+}
+
 /// The points every projection is swept over: the catalogue's stars to magnitude
 /// 4.5 as charts draw them, and a few that test the edges (the poles, a vector
 /// that is not of unit length, the origin).
-fn sweep_points() -> Vec<(f32, f32, f32)> {
+fn sweep_points() -> Vec<Point> {
     let catalog = HipCatalog::new();
-    catalog
-        .stars(4.5, None)
+    stars(&catalog, 4.5, None)
         .map(|star| (star.x, star.y, star.z))
         .chain([
             (0.0, 0.0, 1.0),
@@ -176,9 +278,9 @@ fn unit_vectors() {
         ((-0.3, -1.5), (0.06757783, -0.020904273, -0.997495)),
     ];
     for ((ra, dec), (x, y, z)) in PINNED {
-        let actual = ra_dec_to_unit_vector(ra, dec);
+        let actual = unit_vector(ra, dec);
         assert!(
-            same_f32(actual.0, x) && same_f32(actual.1, y) && same_f32(actual.2, z),
+            near_f32(actual.0, x) && near_f32(actual.1, y) && near_f32(actual.2, z),
             "ra_dec_to_unit_vector({ra}, {dec}) = {actual:?}, pinned {:?}",
             (x, y, z)
         );
@@ -215,11 +317,11 @@ fn planet_positions_at_fixed_instants() {
         let actual = body.position(jd);
         assert_eq!(actual.body, body);
         assert!(
-            same_f64(actual.ra_radians, ra)
-                && same_f64(actual.dec_radians, dec)
-                && same_f64(actual.unit_vector[0], unit_vector[0])
-                && same_f64(actual.unit_vector[1], unit_vector[1])
-                && same_f64(actual.unit_vector[2], unit_vector[2])
+            near_f64(actual.ra_radians, ra)
+                && near_f64(actual.dec_radians, dec)
+                && near_f64(actual.unit_vector[0], unit_vector[0])
+                && near_f64(actual.unit_vector[1], unit_vector[1])
+                && near_f64(actual.unit_vector[2], unit_vector[2])
                 && same_f64(actual.magnitude, magnitude),
             "{body:?} at JD {jd:?}: {actual:?}"
         );
@@ -278,11 +380,7 @@ fn planet_positions_over_two_centuries() {
             assert!(same_f64(p.magnitude, single.magnitude));
         }
     }
-    assert_eq!(
-        digest.0, 0xec95_27e9_cf18_8201,
-        "planet digest moved: {:#018x}",
-        digest.0
-    );
+    assert_libm_digest(&digest, 0xec95_27e9_cf18_8201, "planet");
 }
 
 #[test]
@@ -330,8 +428,8 @@ fn stereo_projection_sweep() {
     let mut visible = 0;
     for (latitude, longitude, at) in observers {
         let stereo = StereoProjection::new(latitude, longitude, at);
-        for &(x, y, z) in &points {
-            match stereo.project(x, y, z) {
+        for &point in &points {
+            match stereo_project(&stereo, point) {
                 Some(p) => {
                     visible += 1;
                     digest.some();
@@ -348,23 +446,17 @@ fn stereo_projection_sweep() {
         (926, 1934),
         "points swept and points seen"
     );
-    assert_eq!(
-        digest.0, 0xe27b_1aa4_0f51_c2ce,
-        "stereo digest moved: {:#018x}",
-        digest.0
-    );
+    assert_libm_digest(&digest, 0xe27b_1aa4_0f51_c2ce, "stereo");
 
     // Vega over Moscow on the backend's default date.
     let vega = (0.125_096_47, -0.769_413_1, 0.626_381_93);
-    let p = StereoProjection::new(55.75, 37.62, DateTime::new(2024, 6, 14, 6, 10, 0))
-        .project(vega.0, vega.1, vega.2)
-        .expect("Vega is up");
+    let observer = StereoProjection::new(55.75, 37.62, DateTime::new(2024, 6, 14, 6, 10, 0));
+    let p = stereo_project(&observer, vega).expect("Vega is up");
     let pinned: [f32; 5] = [-0.24660607, 0.93404615, 0.9660522, 1.8289254, 0.899953];
     let actual = [p.x, p.y, p.radius, p.angle, p.zenith];
-    assert_eq!(
-        actual.map(f32::to_bits),
-        pinned.map(f32::to_bits),
-        "Vega: {actual:?}"
+    assert!(
+        actual.iter().zip(pinned).all(|(&a, p)| near_f32(a, p)),
+        "Vega: {actual:?}, pinned {pinned:?}"
     );
 }
 
@@ -383,7 +475,7 @@ fn camera_configs() {
         assert!(
             camera.width == width
                 && camera.height == pinned_height
-                && same_f64(camera.focal_length, focal),
+                && near_f64(camera.focal_length, focal),
             "from_fov_and_aspect({fov}, {aspect}, {height}) = {camera:?}"
         );
     }
@@ -420,8 +512,8 @@ fn pinhole_projection_sweep() {
             for tilt in tilts {
                 // A camera that cannot be set up sees nothing.
                 let pinhole = PinholeProjection::new(direction, tilt, *camera).ok();
-                for &(x, y, z) in &points {
-                    match pinhole.and_then(|pinhole| pinhole.project(x, y, z)) {
+                for &point in &points {
+                    match pinhole.and_then(|pinhole| pinhole_project(&pinhole, point)) {
                         Some((px, py)) => {
                             visible += 1;
                             digest.some();
@@ -435,35 +527,26 @@ fn pinhole_projection_sweep() {
         }
     }
     assert_eq!(visible, 3717, "points seen");
-    assert_eq!(
-        digest.0, 0x17f5_26e6_513a_c294,
-        "pinhole digest moved: {:#018x}",
-        digest.0
-    );
+    assert_libm_digest(&digest, 0x17f5_26e6_513a_c294, "pinhole");
 
     // Betelgeuse in a 60° frame on Orion, tilted.
     let camera = CameraConfig::from_fov_and_aspect(60.0, 1.5, 800);
-    let (px, py) = PinholeProjection::new([0.08, 0.99, 0.05], 12.5, camera)
-        .expect("a valid camera")
-        .project(0.020_889_85, 0.991_435_2, 0.128_917_84)
+    let orion = PinholeProjection::new([0.08, 0.99, 0.05], 12.5, camera).expect("a valid camera");
+    let (px, py) = pinhole_project(&orion, (0.020_889_85, 0.991_435_2, 0.128_917_84))
         .expect("Betelgeuse is in the frame");
-    assert_eq!(
-        [px, py].map(f32::to_bits),
-        [549.1191f32, 287.177].map(f32::to_bits),
+    assert!(
+        near_f32(px, 549.1191) && near_f32(py, 287.177),
         "Betelgeuse: {:?}",
         (px, py)
     );
 }
 
-/// A preview camera: projection, right, up, forward, field of view, width, height.
-type View = (ViewKind, [f64; 3], [f64; 3], [f64; 3], f64, f64, f64);
-
 const X: [f64; 3] = [1.0, 0.0, 0.0];
 const Y: [f64; 3] = [0.0, 1.0, 0.0];
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
 
-fn make_view((kind, right, up, forward, fov, width, height): View) -> ViewProjection {
-    ViewProjection::new(kind, right, up, forward, fov, width, height).expect("a valid view")
+fn make_view(spec: View) -> ViewProjection {
+    view(spec).expect("a valid view")
 }
 
 #[test]
@@ -494,8 +577,8 @@ fn view_projection_sweep() {
         let (half_w, half_h) = view.half_extent();
         digest.f64(half_w);
         digest.f64(half_h);
-        for &(x, y, z) in &points {
-            match view.normalized(f64::from(x), f64::from(y), f64::from(z)) {
+        for &point in &points {
+            match view_normalized(&view, point) {
                 Some((nx, ny)) => {
                     digest.some();
                     digest.f64(nx);
@@ -503,7 +586,7 @@ fn view_projection_sweep() {
                 }
                 None => digest.none(),
             }
-            match view.project(x, y, z) {
+            match view_project(&view, point) {
                 Some((px, py)) => {
                     visible += 1;
                     digest.some();
@@ -525,11 +608,7 @@ fn view_projection_sweep() {
         }
     }
     assert_eq!(visible, 3145, "points seen");
-    assert_eq!(
-        digest.0, 0x02df_e20e_3b24_03d3,
-        "view digest moved: {:#018x}",
-        digest.0
-    );
+    assert_libm_digest(&digest, 0x02df_e20e_3b24_03d3, "view");
 }
 
 #[test]
@@ -544,9 +623,10 @@ fn degenerate_views_are_refused() {
         ((ViewKind::Stereo, X, Y, Z, 90.0, 0.0, 10.0), ProjectionError::InvalidSize),
         ((ViewKind::Pinhole, X, Y, Z, 90.0, 10.0, f64::INFINITY), ProjectionError::InvalidSize),
     ];
-    for ((kind, right, up, forward, fov, width, height), error) in refused {
+    for (spec, error) in refused {
+        let (kind, right, up, forward, fov, width, height) = spec;
         assert_eq!(
-            ViewProjection::new(kind, right, up, forward, fov, width, height).map(|_| ()),
+            view(spec).map(|_| ()),
             Err(error),
             "{kind:?} {right:?} {up:?} {forward:?} {fov} {width}x{height}"
         );
@@ -556,7 +636,7 @@ fn degenerate_views_are_refused() {
 #[test]
 fn hipparcos_catalogue() {
     let catalog = HipCatalog::new();
-    let all: Vec<&Star> = catalog.stars(f32::INFINITY, None).collect();
+    let all: Vec<&Star> = stars(&catalog, f32::INFINITY, None).collect();
     let mut digest = Digest::new();
     for star in &all {
         digest.i32(star.hip_id);
@@ -572,19 +652,18 @@ fn hipparcos_catalogue() {
     );
 
     let counts = [
-        catalog.stars(4.0, None).count(),
-        catalog.stars(6.5, None).count(),
-        catalog.stars(6.5, Some(3.0)).count(),
+        stars(&catalog, 4.0, None).count(),
+        stars(&catalog, 6.5, None).count(),
+        stars(&catalog, 6.5, Some(3.0)).count(),
         // Both bounds are inclusive: Polaris is 1.97.
-        catalog.stars(1.97, Some(1.97)).count(),
-        catalog.stars(-2.0, None).count(),
-        catalog.stars(4.0, Some(1.0)).count(),
-        catalog.stars(f32::NAN, None).count(),
+        stars(&catalog, 1.97, Some(1.97)).count(),
+        stars(&catalog, -2.0, None).count(),
+        stars(&catalog, 4.0, Some(1.0)).count(),
+        stars(&catalog, f32::NAN, None).count(),
     ];
     assert_eq!(counts, [518, 8870, 8698, 1, 0, 503, 0]);
 
-    let polaris = catalog
-        .stars(2.0, Some(1.9))
+    let polaris = stars(&catalog, 2.0, Some(1.9))
         .find(|star| star.hip_id == 11767)
         .expect("Polaris is in the catalogue");
     assert_eq!(
@@ -701,9 +780,9 @@ fn messier_catalogue() {
     ];
     assert_eq!(by_constellation, [15, 11, 7, 0]);
     let by_magnitude = [
-        catalog.in_magnitude_range(0.0, 6.0).count(),
-        catalog.in_magnitude_range(8.0, 9.0).count(),
-        catalog.in_magnitude_range(9.0, 8.0).count(),
+        messier_in_magnitude_range(&catalog, 0.0, 6.0).count(),
+        messier_in_magnitude_range(&catalog, 8.0, 9.0).count(),
+        messier_in_magnitude_range(&catalog, 9.0, 8.0).count(),
     ];
     assert_eq!(by_magnitude, [28, 25, 0]);
 }
