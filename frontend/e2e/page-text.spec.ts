@@ -352,7 +352,10 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 	await expect(nearest).toHaveText('Nearest · 2');
 	const badges = editor.locator('.slot[data-role="current"] .badge');
 	await expect(badges).toHaveText(['1', '2']);
-	await expect(editor.locator('.item.is-linked')).toHaveAttribute('data-item-id', 'e2e-frame');
+	await expect(editor.locator('[data-kind="chart"].is-linked')).toHaveAttribute(
+		'data-item-id',
+		'e2e-frame'
+	);
 
 	// Told the disc, it reads the disc from where it is.
 	await reads.getByRole('button', { name: 'Read chart 1' }).click();
@@ -361,7 +364,10 @@ test('on a page with two charts a text reads the nearest, or the one it is told 
 		'aria-pressed',
 		'true'
 	);
-	await expect(editor.locator('.item.is-linked')).toHaveAttribute('data-item-id', 'e2e-disc');
+	await expect(editor.locator('[data-kind="chart"].is-linked')).toHaveAttribute(
+		'data-item-id',
+		'e2e-disc'
+	);
 	await expect.poll(async () => (await savedTexts(page))[0].chartId).toBe('e2e-disc');
 
 	// And the nearest again.

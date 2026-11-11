@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SnapGuide } from '$lib/document/geometry';
-import { pageDrag, type DragView } from './drag-view';
+import { blockState, pageDrag, type DragView } from './drag-view';
 
 const GUIDE: SnapGuide = { axis: 'x', at: 12, from: 12, to: 285 };
 
@@ -79,5 +79,27 @@ describe('pageDrag', () => {
 		expect(pageDrag('p2', null, flash)).toBeNull();
 		// A drag's own lines take their place.
 		expect(pageDrag('p1', carried({ targetId: 'p3' }), flash)!.guides).toEqual([]);
+	});
+});
+
+describe('blockState', () => {
+	const drag = pageDrag('p1', carried({ kind: 'resizing', targetId: 'p1' }), null);
+
+	it('is the drag’s for the block it carries, resizes or turns', () => {
+		expect(blockState('a', drag, null, null)).toBe('resizing');
+		expect(blockState('a', pageDrag('p1', carried(), null), null, null)).toBe('moving');
+	});
+
+	it('is at rest for every other block, on the page the drag is over too', () => {
+		expect(blockState('b', drag, null, null)).toBe('idle');
+		expect(blockState('a', pageDrag('p2', carried(), null), null, null)).toBe('idle');
+		expect(blockState('a', null, null, null)).toBe('idle');
+	});
+
+	it('comes to rest, or eases back, once let go', () => {
+		expect(blockState('a', null, 'a', null)).toBe('settling');
+		expect(blockState('a', null, null, 'a')).toBe('returning');
+		// The drag in hand comes first: a block picked up again as it lands is carried.
+		expect(blockState('a', drag, 'a', 'a')).toBe('resizing');
 	});
 });

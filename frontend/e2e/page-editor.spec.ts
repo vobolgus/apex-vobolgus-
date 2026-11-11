@@ -158,7 +158,7 @@ test('a chart on a neighbouring page can be dragged onto the current one', async
 	await expect(current).toBeVisible();
 
 	// Page 1 is now the neighbour on the left; its charts are pictures, not buttons.
-	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .chart');
+	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .body');
 	await drag(page, centre(await settledBox(side)), centre(await settledBox(current)));
 
 	await expect
@@ -177,7 +177,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 	const current = editor.getByRole('group', { name: 'Page 2, A4 portrait, no charts' });
 	await expect(current).toBeVisible();
 	const item = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"]');
-	const from = centre(await settledBox(item.locator('.chart')));
+	const from = centre(await settledBox(item.locator('.body')));
 	const over = centre(await settledBox(current));
 
 	await page.mouse.move(from.x, from.y);
@@ -221,7 +221,7 @@ test('a chart dragged from a neighbouring page is in sight over the current one 
 test('a click on a neighbour’s chart, without a drag, turns to that page', async ({ page }) => {
 	const editor = await seedAndOpen(page);
 	await editor.getByRole('button', { name: 'Show page 2, no charts' }).click();
-	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .chart');
+	const side = editor.locator('.slot[data-role="prev"] [data-item-id="e2e-a"] .body');
 	await page.mouse.click(...(Object.values(centre(await settledBox(side))) as [number, number]));
 	await expect(editor.getByRole('group', { name: 'Page 1, A4 portrait, 2 charts' })).toBeVisible();
 	expect((await savedPages(page)).map((items) => items.length)).toEqual([2, 0]);
@@ -280,7 +280,7 @@ test('a chart in the hand follows the pointer off the paper, and is brought onto
 	// Its shadow is a box-shadow on a layer of its own, not a filter (which smears in Safari).
 	const look = await item.evaluate((el) => ({
 		filter: getComputedStyle(el).filter,
-		shadow: getComputedStyle(el.querySelector('.chart')!).boxShadow
+		shadow: getComputedStyle(el.querySelector('.body')!).boxShadow
 	}));
 	expect(look.filter).toBe('none');
 	expect(look.shadow).not.toBe('none');

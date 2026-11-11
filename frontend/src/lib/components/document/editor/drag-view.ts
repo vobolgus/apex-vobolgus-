@@ -1,6 +1,7 @@
 /**
  * What a drag looks like while it goes on: the one view the session keeps
- * (`DragView`), and the part of it each page on the stage draws (`PageDrag`).
+ * (`DragView`), the part of it each page on the stage draws (`PageDrag`), and what
+ * each block on it is doing meanwhile (`BlockState`).
  */
 
 import type { SnapGuide } from '$lib/document/geometry';
@@ -51,6 +52,25 @@ export interface PageDrag {
 	guides: SnapGuide[];
 	/** The block would land on this page if dropped now. */
 	target: boolean;
+}
+
+/**
+ * What a block is doing: carried on a page or off every page, resized or turned,
+ * easing back after it was let go off every page, coming to rest after it was let
+ * go over one; or nothing.
+ */
+export type BlockState = DragView['kind'] | 'idle' | 'returning' | 'settling';
+
+/** What the block `blockId` is doing, by its page's drag and the blocks the last drag let go. */
+export function blockState(
+	blockId: string,
+	drag: PageDrag | null,
+	settlingId: string | null,
+	returningId: string | null
+): BlockState {
+	if (drag?.blockId === blockId) return drag.kind;
+	if (settlingId === blockId) return 'settling';
+	return returningId === blockId ? 'returning' : 'idle';
 }
 
 /** What the page `pageId` draws for the drag going on, or for the guides of the last nudge. */
