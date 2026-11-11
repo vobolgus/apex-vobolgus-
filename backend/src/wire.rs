@@ -371,7 +371,7 @@ fn a_projection_goes_by_the_name_the_page_is_told() {
 fn an_object_is_a_member_a_line_under_its_own_comment() {
     /// A thing.
     #[derive(TS)]
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "only its declaration is written, from the type")]
     struct Thing {
         /// Its name,
         /// in "full".
@@ -382,7 +382,7 @@ fn an_object_is_a_member_a_line_under_its_own_comment() {
         rows: Vec<Vec<Kind>>,
     }
     #[derive(TS)]
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "only its declaration is written, from the type")]
     #[ts(rename_all = "lowercase")]
     enum Kind {
         One,

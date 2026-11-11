@@ -40,14 +40,15 @@ mod state;
 mod static_site;
 mod svg;
 
-// The pins are tables of cases, some a few hundred lines long, with small helpers
-// that take a fixture whole: written to be read down, and not to be reshaped.
 #[cfg(test)]
 #[allow(
     clippy::format_push_string,
     clippy::needless_pass_by_value,
     clippy::needless_raw_string_hashes,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    reason = "the pins are tables of cases, some a few hundred lines long, with small \
+              helpers that take a fixture whole: written to be read down, and not to be \
+              reshaped"
 )]
 mod golden;
 

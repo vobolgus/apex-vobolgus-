@@ -114,7 +114,7 @@ impl From<Direction> for SegmentPoint {
 #[cfg_attr(test, derive(ts_rs::TS))]
 pub(crate) struct ConstellationSegments {
     /// The constellation's abbreviation in capitals: "ORI".
-    abbr: String,
+    abbr: &'static str,
     /// The lines, each a run of points joined in order.
     segments: Vec<Vec<SegmentPoint>>,
 }
@@ -136,12 +136,12 @@ pub(crate) fn constellation_boundaries() -> Vec<ConstellationSegments> {
                 })
                 .collect();
             ConstellationSegments {
-                abbr: abbr.clone(),
+                abbr: abbr.as_str(),
                 segments,
             }
         })
         .collect();
-    result.sort_by(|a, b| a.abbr.cmp(&b.abbr));
+    result.sort_by(|a, b| a.abbr.cmp(b.abbr));
     result
 }
 
@@ -169,13 +169,13 @@ pub(crate) fn constellation_figures(catalog: &HipCatalog) -> Vec<ConstellationSe
                     (points.len() >= 2).then_some(points)
                 })
                 .collect();
-            (!segments.is_empty()).then(|| ConstellationSegments {
-                abbr: abbr.clone(),
+            (!segments.is_empty()).then_some(ConstellationSegments {
+                abbr: abbr.as_str(),
                 segments,
             })
         })
         .collect();
-    result.sort_by(|a, b| a.abbr.cmp(&b.abbr));
+    result.sort_by(|a, b| a.abbr.cmp(b.abbr));
     result
 }
 

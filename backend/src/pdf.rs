@@ -103,7 +103,9 @@ pub(crate) fn from_pages(pages: impl IntoIterator<Item = PdfPage>) -> Result<Vec
         let mut renumbered = HashMap::new();
         let chunk = chunk.renumber(|old| *renumbered.entry(old).or_insert_with(|| alloc.bump()));
         // The page's own XObject is one of the chunk's objects, so it has a new number.
-        let xobject = renumbered[&xobject];
+        let xobject = *renumbered
+            .get(&xobject)
+            .expect("the page's XObject is one of the chunk's objects, all renumbered above");
 
         let page_id = alloc.bump();
         let content_id = alloc.bump();
