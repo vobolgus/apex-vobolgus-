@@ -12,6 +12,11 @@
 //!
 //! Each item has one path, through the module that defines it:
 //! `rust_core::catalog::HipCatalog`, `rust_core::projections::ViewProjection`.
+//!
+//! The API is deliberately wider than the backend's use of it: the catalogues'
+//! lookups and filters, the suggested colours of the bodies and of the Messier
+//! kinds, and a camera of a given focal length are there for any chart drawn from
+//! this crate, and are pinned with the rest (`tests/golden.rs`).
 
 pub mod catalog;
 pub mod coords;

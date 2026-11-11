@@ -174,10 +174,15 @@ impl MessierCatalog {
         &self,
         constellation: &str,
     ) -> impl Iterator<Item = &MessierObject> + use<'_> {
-        let const_upper = constellation.to_uppercase();
-        self.objects
-            .iter()
-            .filter(move |o| o.constellation.to_uppercase() == const_upper)
+        let wanted = constellation.to_uppercase();
+        // Each object's abbreviation in capitals, as `to_uppercase` spells it, but
+        // compared a character at a time instead of copied for every object.
+        self.objects.iter().filter(move |o| {
+            o.constellation
+                .chars()
+                .flat_map(char::to_uppercase)
+                .eq(wanted.chars())
+        })
     }
 
     /// The objects whose visual magnitude is in `magnitudes`: `0.0..=6.0` for those

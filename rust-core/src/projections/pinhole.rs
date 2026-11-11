@@ -1,13 +1,11 @@
 //! The pinhole camera of a chart drawn without the preview's view: a frame centred
 //! on a direction of the sky, turned by a tilt, with its focal length in px.
 
-use serde::{Deserialize, Serialize};
-
 use super::{Project, ProjectionError};
 use crate::coords::Direction;
 
 /// The frame of a pinhole camera: its size and focal length in px.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct CameraConfig {
     /// Frame width, px.
     pub width: u32,

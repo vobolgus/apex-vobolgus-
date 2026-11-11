@@ -1,8 +1,6 @@
 //! The observer's stereographic sky: the horizon system of a place and an instant,
 //! projected from the nadir onto the plane of the horizon.
 
-use serde::{Deserialize, Serialize};
-
 use crate::coords::Direction;
 use crate::time::{DateTime, vernal_equinox_hour_angle};
 
@@ -11,7 +9,7 @@ use crate::time::{DateTime, vernal_equinox_hour_angle};
 const MAX_ZENITH: f64 = std::f64::consts::PI / 1.9;
 
 /// A point of the stereographic sky.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct StereoPoint {
     /// Position on the plane of the horizon towards the south point, in units of
     /// the sphere's radius (the horizon is the circle of radius 2):

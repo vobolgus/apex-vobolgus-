@@ -1,13 +1,11 @@
 //! Calendar time on the astronomer's clocks: the Julian Date of a calendar day and
 //! the sidereal time that turns the sky.
 
-use serde::{Deserialize, Serialize};
-
 /// A calendar date and time of day in UT, to the second.
 ///
 /// Years are numbered astronomically (1 BC is year 0). Dates up to 1582 October 4
 /// are read in the Julian calendar, later ones in the Gregorian.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct DateTime {
     /// Year, astronomical numbering.
     pub year: i32,
@@ -68,7 +66,11 @@ pub fn julian_date(year: i32, month: u32, day: u32) -> f64 {
 /// the mean sidereal time at Greenwich: the Python program this was ported from
 /// declared the parameter without using it, and charts are kept as it drew them.
 #[must_use]
-pub fn sidereal_time(_longitude_rad: f64, date_time: DateTime) -> f64 {
+#[expect(
+    unused_variables,
+    reason = "the longitude is declared as the Python original declared it, and not applied"
+)]
+pub fn sidereal_time(longitude_rad: f64, date_time: DateTime) -> f64 {
     // Параметр longitude объявлен, но пока не используется.
     // Мы повторяем это поведение для 100% математической идентичности.
 
