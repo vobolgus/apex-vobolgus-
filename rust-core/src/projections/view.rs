@@ -30,8 +30,20 @@ pub enum ViewKind {
     Pinhole,
 }
 
-/// The preview's camera: a basis of the equatorial frame (`x` to RA 0h, `z` to the
-/// north celestial pole), a projection, a field of view and the chart's size in px.
+/// The preview camera's axes in the equatorial frame (`x` to RA 0h, `z` to the
+/// north celestial pole), each of any length.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewBasis {
+    /// The screen's right.
+    pub right: [f64; 3],
+    /// The screen's up.
+    pub up: [f64; 3],
+    /// Towards the chart centre.
+    pub forward: [f64; 3],
+}
+
+/// The preview's camera: a basis of the equatorial frame, a projection, a field of
+/// view and the chart's size in px.
 #[derive(Debug, Clone, Copy)]
 pub struct ViewProjection {
     kind: ViewKind,
@@ -48,8 +60,8 @@ pub struct ViewProjection {
 
 impl ViewProjection {
     /// `fov_deg` is the field of view across the disc for `Stereo` (180° shows a
-    /// hemisphere) and the horizontal one for `Pinhole`. `width` and `height` are the
-    /// chart size in px. The basis vectors may be of any length.
+    /// hemisphere) and the horizontal one for `Pinhole`. `(width, height)` is the
+    /// chart size in px.
     ///
     /// # Errors
     ///
@@ -59,16 +71,13 @@ impl ViewProjection {
     /// view the projection cannot show.
     pub fn new(
         kind: ViewKind,
-        right: [f64; 3],
-        up: [f64; 3],
-        forward: [f64; 3],
+        basis: ViewBasis,
         fov_deg: f64,
-        width: f64,
-        height: f64,
+        (width, height): (f64, f64),
     ) -> Result<Self, ProjectionError> {
-        let right = normalize(right).ok_or(ProjectionError::DegenerateDirection)?;
-        let up = normalize(up).ok_or(ProjectionError::DegenerateDirection)?;
-        let forward = normalize(forward).ok_or(ProjectionError::DegenerateDirection)?;
+        let right = normalize(basis.right).ok_or(ProjectionError::DegenerateDirection)?;
+        let up = normalize(basis.up).ok_or(ProjectionError::DegenerateDirection)?;
+        let forward = normalize(basis.forward).ok_or(ProjectionError::DegenerateDirection)?;
         if !(width > 0.0 && height > 0.0 && width.is_finite() && height.is_finite()) {
             return Err(ProjectionError::InvalidSize);
         }
@@ -206,6 +215,11 @@ mod tests {
     const RIGHT: [f64; 3] = [1.0, 0.0, 0.0];
     const UP: [f64; 3] = [0.0, 1.0, 0.0];
     const FORWARD: [f64; 3] = [0.0, 0.0, 1.0];
+    const BASIS: ViewBasis = ViewBasis {
+        right: RIGHT,
+        up: UP,
+        forward: FORWARD,
+    };
 
     fn unit_at(angle_deg: f64, towards: [f64; 3]) -> Direction {
         let a = angle_deg.to_radians();
@@ -218,8 +232,7 @@ mod tests {
 
     #[test]
     fn stereo_puts_the_fov_edge_on_the_disc_edge() {
-        let view = ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 120.0, 1000.0, 1000.0)
-            .unwrap();
+        let view = ViewProjection::new(ViewKind::Stereo, BASIS, 120.0, (1000.0, 1000.0)).unwrap();
         let point = unit_at(0.0, RIGHT);
         assert_eq!(view.project(point), Some((500.0, 500.0)));
         let point = unit_at(60.0, RIGHT);
@@ -235,8 +248,7 @@ mod tests {
 
     #[test]
     fn pinhole_fov_is_horizontal_and_the_vertical_follows_the_aspect() {
-        let view = ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 90.0, 1600.0, 900.0)
-            .unwrap();
+        let view = ViewProjection::new(ViewKind::Pinhole, BASIS, 90.0, (1600.0, 900.0)).unwrap();
         let point = unit_at(45.0, RIGHT);
         let (px, _) = view.project(point).unwrap();
         assert!((px - 1600.0).abs() < 1e-2);
@@ -250,16 +262,11 @@ mod tests {
     #[test]
     fn the_basis_carries_the_handedness() {
         let mirrored = [-1.0, 0.0, 0.0];
-        let view = ViewProjection::new(
-            ViewKind::Pinhole,
-            mirrored,
-            UP,
-            FORWARD,
-            90.0,
-            1000.0,
-            1000.0,
-        )
-        .unwrap();
+        let basis = ViewBasis {
+            right: mirrored,
+            ..BASIS
+        };
+        let view = ViewProjection::new(ViewKind::Pinhole, basis, 90.0, (1000.0, 1000.0)).unwrap();
         let point = unit_at(20.0, RIGHT);
         let (px, _) = view.project(point).unwrap();
         assert!(px < 500.0);
@@ -268,14 +275,11 @@ mod tests {
     #[test]
     fn points_behind_or_far_off_the_chart_do_not_project() {
         let pinhole =
-            ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 60.0, 1000.0, 1000.0)
-                .unwrap();
+            ViewProjection::new(ViewKind::Pinhole, BASIS, 60.0, (1000.0, 1000.0)).unwrap();
         assert_eq!(pinhole.project(Direction::new(0.0, 0.0, -1.0)), None);
         let point = unit_at(89.0, RIGHT);
         assert_eq!(pinhole.project(point), None);
-        let stereo =
-            ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 180.0, 1000.0, 1000.0)
-                .unwrap();
+        let stereo = ViewProjection::new(ViewKind::Stereo, BASIS, 180.0, (1000.0, 1000.0)).unwrap();
         assert_eq!(stereo.project(Direction::new(0.0, 0.0, -1.0)), None);
     }
 
@@ -283,16 +287,24 @@ mod tests {
     fn rejects_a_degenerate_view() {
         let zero = [0.0, 0.0, 0.0];
         assert_eq!(
-            ViewProjection::new(ViewKind::Stereo, zero, UP, FORWARD, 90.0, 10.0, 10.0).unwrap_err(),
+            ViewProjection::new(
+                ViewKind::Stereo,
+                ViewBasis {
+                    right: zero,
+                    ..BASIS
+                },
+                90.0,
+                (10.0, 10.0)
+            )
+            .unwrap_err(),
             ProjectionError::DegenerateDirection
         );
         assert_eq!(
-            ViewProjection::new(ViewKind::Pinhole, RIGHT, UP, FORWARD, 180.0, 10.0, 10.0)
-                .unwrap_err(),
+            ViewProjection::new(ViewKind::Pinhole, BASIS, 180.0, (10.0, 10.0)).unwrap_err(),
             ProjectionError::InvalidFieldOfView
         );
         assert_eq!(
-            ViewProjection::new(ViewKind::Stereo, RIGHT, UP, FORWARD, 90.0, 0.0, 10.0).unwrap_err(),
+            ViewProjection::new(ViewKind::Stereo, BASIS, 90.0, (0.0, 10.0)).unwrap_err(),
             ProjectionError::InvalidSize
         );
     }

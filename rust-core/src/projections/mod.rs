@@ -19,7 +19,7 @@ use crate::coords::Direction;
 
 pub use self::pinhole::{CameraConfig, PinholeProjection};
 pub use self::stereo::{StereoPoint, StereoProjection};
-pub use self::view::{ViewKind, ViewProjection};
+pub use self::view::{ViewBasis, ViewKind, ViewProjection};
 
 /// Where a direction on the sky lands on a chart, if it lands at all.
 pub trait Project {

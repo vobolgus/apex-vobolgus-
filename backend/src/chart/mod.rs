@@ -38,7 +38,7 @@ mod tests;
 use std::str::FromStr;
 
 use rust_core::catalog::{HipCatalog, Star};
-use rust_core::projections::{ViewKind, ViewProjection};
+use rust_core::projections::{ViewBasis, ViewKind, ViewProjection};
 use thiserror::Error;
 
 use self::scene::Scene;
@@ -219,14 +219,16 @@ fn camera(
     if view.px.is_some_and(|px| !(px > 0.0 && px <= MAX_VIEW_PX)) {
         return Err(ChartError::ViewPx);
     }
+    let basis = ViewBasis {
+        right: view.right,
+        up: view.up,
+        forward: view.forward,
+    };
     ViewProjection::new(
         projection.into(),
-        view.right,
-        view.up,
-        view.forward,
+        basis,
         fov_deg.map_or(projection.default_view_fov(), f64::from),
-        view.width,
-        view.height,
+        (view.width, view.height),
     )
     .map_err(|_| ChartError::NoCamera)
 }
@@ -281,7 +283,7 @@ impl Chart {
             .config
             .magnitude_limit
             .unwrap_or(DEFAULT_MAGNITUDE_LIMIT);
-        let stars: Vec<&Star> = catalog.stars(mag_limit, None).collect();
+        let stars: Vec<&Star> = catalog.stars(..=mag_limit).collect();
 
         frame::open(svg, &scene, placement);
 

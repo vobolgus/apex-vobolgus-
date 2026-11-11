@@ -143,13 +143,13 @@ impl CatalogCache {
     /// The stars of `/api/catalog/bright`, to its default limit.
     pub(crate) fn bright(&self, catalog: &HipCatalog) -> &CachedJson {
         self.bright
-            .get_or_init(|| CachedJson::new(&payload::stars(catalog, BRIGHT_MAX_MAG, None)))
+            .get_or_init(|| CachedJson::new(&payload::stars(catalog, ..=BRIGHT_MAX_MAG)))
     }
 
     /// The stars of `/api/catalog/full`, to its default limit.
     pub(crate) fn full(&self, catalog: &HipCatalog) -> &CachedJson {
         self.full
-            .get_or_init(|| CachedJson::new(&payload::stars(catalog, FULL_MAX_MAG, None)))
+            .get_or_init(|| CachedJson::new(&payload::stars(catalog, ..=FULL_MAX_MAG)))
     }
 
     /// The stick figures of `/api/constellations`.

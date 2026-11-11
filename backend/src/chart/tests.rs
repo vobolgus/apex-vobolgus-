@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use rust_core::catalog::{HipCatalog, Star};
 use rust_core::planets::{Body, all_positions};
-use rust_core::projections::{Project, ViewKind, ViewProjection};
+use rust_core::projections::{Project, ViewBasis, ViewKind, ViewProjection};
 use rust_core::time::julian_date;
 
 use super::*;
@@ -257,7 +257,7 @@ fn view_keeps_only_the_stars_on_the_chart_at_the_preview_size() {
 fn view_follows_the_basis_it_is_given() {
     // Betelgeuse (HIP 27989) is east of Rigel (HIP 24436): right of it with this basis.
     let catalog = hip_catalog();
-    let stars: Vec<&Star> = catalog.stars(1.0, None).collect();
+    let stars: Vec<&Star> = catalog.stars(..=1.0).collect();
     let find = |hip: i32| stars.iter().find(|s| s.hip_id == hip).unwrap();
     let (betelgeuse, rigel) = (find(27989), find(24436));
     let cfg = view_config("pinhole");
@@ -617,14 +617,19 @@ fn golden_view_projection_matches_the_preview() {
         } else {
             ViewKind::Pinhole
         };
+        let basis = ViewBasis {
+            right: vec3(&case["right"]),
+            up: vec3(&case["up"]),
+            forward: vec3(&case["forward"]),
+        };
         let view = ViewProjection::new(
             kind,
-            vec3(&case["right"]),
-            vec3(&case["up"]),
-            vec3(&case["forward"]),
+            basis,
             case["fov_deg"].as_f64().unwrap(),
-            case["width"].as_f64().unwrap(),
-            case["height"].as_f64().unwrap(),
+            (
+                case["width"].as_f64().unwrap(),
+                case["height"].as_f64().unwrap(),
+            ),
         )
         .unwrap_or_else(|_| panic!("{name}: the golden camera must be valid"));
         let (half_w, half_h) = view.half_extent();

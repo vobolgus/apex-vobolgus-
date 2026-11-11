@@ -20,10 +20,13 @@
 
 /// The only lines that know the crate's own names; all else goes through them.
 mod subject {
+    use std::ops::Bound;
+
     pub use rust_core::catalog::{HipCatalog, MessierCatalog, MessierKind, MessierObject, Star};
     use rust_core::coords::Direction;
     pub use rust_core::planets::{Body, all_positions};
     use rust_core::projections::Project;
+    use rust_core::projections::ViewBasis;
     pub use rust_core::projections::{
         CameraConfig, PinholeProjection, ProjectionError, StereoPoint, StereoProjection, ViewKind,
         ViewProjection,
@@ -48,7 +51,8 @@ mod subject {
         max_mag: f32,
         min_mag: Option<f32>,
     ) -> impl Iterator<Item = &Star> {
-        catalog.stars(max_mag, min_mag)
+        let brightest = min_mag.map_or(Bound::Unbounded, Bound::Included);
+        catalog.stars((brightest, Bound::Included(max_mag)))
     }
 
     /// The Messier objects with `min_mag <= v_mag <= max_mag`.
@@ -57,7 +61,7 @@ mod subject {
         min_mag: f32,
         max_mag: f32,
     ) -> impl Iterator<Item = &MessierObject> {
-        catalog.in_magnitude_range(min_mag, max_mag)
+        catalog.in_magnitude_range(min_mag..=max_mag)
     }
 
     /// Where the observer's sky puts a point.
@@ -74,7 +78,7 @@ mod subject {
     pub fn view(
         (kind, right, up, forward, fov, width, height): View,
     ) -> Result<ViewProjection, ProjectionError> {
-        ViewProjection::new(kind, right, up, forward, fov, width, height)
+        ViewProjection::new(kind, ViewBasis { right, up, forward }, fov, (width, height))
     }
 
     /// Where the preview camera puts a point, chart-normalised.

@@ -94,15 +94,12 @@ const CHARTED: [Body; 9] = [
 
 /// The geocentric positions of the bodies a star map shows, at a Julian Date in UT.
 ///
-/// The returned vector contains 9 geocentric bodies in this order: Sun,
-/// Mercury, Venus, Moon, Mars, Jupiter, Saturn, Uranus, Neptune. Earth is
-/// intentionally excluded because geocentric Earth coordinates are degenerate.
+/// The 9 geocentric bodies come in this order: Sun, Mercury, Venus, Moon, Mars,
+/// Jupiter, Saturn, Uranus, Neptune. Earth is intentionally excluded because
+/// geocentric Earth coordinates are degenerate.
 #[must_use]
-pub fn all_positions(jd_ut: f64) -> Vec<PlanetPosition> {
-    CHARTED
-        .into_iter()
-        .map(|body| body.position(jd_ut))
-        .collect()
+pub fn all_positions(jd_ut: f64) -> [PlanetPosition; 9] {
+    CHARTED.map(|body| body.position(jd_ut))
 }
 
 impl Body {

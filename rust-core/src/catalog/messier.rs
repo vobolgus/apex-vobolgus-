@@ -1,6 +1,7 @@
 //! The 110 objects of Messier's catalogue.
 
 use std::fmt;
+use std::ops::RangeBounds;
 
 use serde::{Deserialize, Serialize};
 
@@ -179,15 +180,15 @@ impl MessierCatalog {
             .filter(move |o| o.constellation.to_uppercase() == const_upper)
     }
 
-    /// The objects with `min_mag <= v_mag <= max_mag`.
+    /// The objects whose visual magnitude is in `magnitudes`: `0.0..=6.0` for those
+    /// from 0 to 6.
     pub fn in_magnitude_range(
         &self,
-        min_mag: f32,
-        max_mag: f32,
+        magnitudes: impl RangeBounds<f32>,
     ) -> impl Iterator<Item = &MessierObject> {
         self.objects
             .iter()
-            .filter(move |o| o.v_mag >= min_mag && o.v_mag <= max_mag)
+            .filter(move |o| magnitudes.contains(&o.v_mag))
     }
 }
 
@@ -222,7 +223,7 @@ mod tests {
         assert_eq!(ori_objects, ori_objects_lower);
 
         // Фильтрация по звездной величине
-        let bright_messier: Vec<&MessierObject> = catalog.in_magnitude_range(0.0, 6.0).collect();
+        let bright_messier: Vec<&MessierObject> = catalog.in_magnitude_range(0.0..=6.0).collect();
         assert!(bright_messier.len() < 110);
         for obj in bright_messier {
             assert!(obj.v_mag >= 0.0 && obj.v_mag <= 6.0);

@@ -4,6 +4,8 @@
 //! Every default answer is kept ready (`crate::cached`); only a slice of the stars
 //! a client names for itself is worked out per request.
 
+use std::ops::Bound;
+
 use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
@@ -32,8 +34,9 @@ impl CatalogQuery {
 
     /// The stars asked for, worked out on the spot and not cached.
     fn slice(&self, state: &AppState, default_max_mag: f32) -> Response {
-        let max_mag = self.max_mag.unwrap_or(default_max_mag);
-        Json(payload::stars(&state.hip_catalog, max_mag, self.min_mag)).into_response()
+        let faintest = Bound::Included(self.max_mag.unwrap_or(default_max_mag));
+        let brightest = self.min_mag.map_or(Bound::Unbounded, Bound::Included);
+        Json(payload::stars(&state.hip_catalog, (brightest, faintest))).into_response()
     }
 }
 

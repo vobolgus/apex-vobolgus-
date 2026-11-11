@@ -1,5 +1,7 @@
 //! The Hipparcos stars to magnitude 6.5.
 
+use std::ops::RangeBounds;
+
 use serde::{Deserialize, Serialize};
 
 use super::CatalogError;
@@ -67,12 +69,13 @@ impl HipCatalog {
         })
     }
 
-    /// The stars with `min_mag <= v_mag <= max_mag` (no lower bound with `None`),
-    /// in the order of the table, without copying them.
-    pub fn stars(&self, max_mag: f32, min_mag: Option<f32>) -> impl Iterator<Item = &Star> {
+    /// The stars whose visual magnitude is in `magnitudes`, in the order of the
+    /// table, without copying them: `..=6.5` for every star to 6.5, `3.0..=5.0` for
+    /// those from 3 to 5. A bound that is NaN lets no star through.
+    pub fn stars(&self, magnitudes: impl RangeBounds<f32>) -> impl Iterator<Item = &Star> {
         self.stars
             .iter()
-            .filter(move |s| s.v_mag <= max_mag && min_mag.is_none_or(|min| s.v_mag >= min))
+            .filter(move |s| magnitudes.contains(&s.v_mag))
     }
 }
 
@@ -83,20 +86,20 @@ mod tests {
     #[test]
     fn test_hip_catalog_loading() {
         let catalog = HipCatalog::new();
-        let stars: Vec<&Star> = catalog.stars(6.5, None).collect();
+        let stars: Vec<&Star> = catalog.stars(..=6.5).collect();
         // Должно быть загружено ~8870 звезд ярче 6.5 звездной величины
         assert!(!stars.is_empty());
         assert!(stars.len() > 8000 && stars.len() < 9000);
 
         // Проверяем фильтрацию по звездным величинам
-        let bright_stars: Vec<&Star> = catalog.stars(2.0, None).collect();
+        let bright_stars: Vec<&Star> = catalog.stars(..=2.0).collect();
         assert!(bright_stars.len() < stars.len());
         for star in bright_stars {
             assert!(star.v_mag <= 2.0);
         }
 
         // Проверяем диапазон min_mag .. max_mag
-        for star in catalog.stars(5.0, Some(3.0)) {
+        for star in catalog.stars(3.0..=5.0) {
             assert!(star.v_mag >= 3.0 && star.v_mag <= 5.0);
         }
     }

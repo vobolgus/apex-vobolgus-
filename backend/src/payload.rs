@@ -4,6 +4,7 @@
 //! The page's TypeScript is written from these same types (`crate::wire`).
 
 use std::collections::HashMap;
+use std::ops::RangeBounds;
 
 use rust_core::catalog::{HipCatalog, MessierCatalog, Star};
 use rust_core::coords::{Direction, ra_dec_to_unit_vector};
@@ -43,12 +44,9 @@ impl From<&Star> for CatalogStar {
     }
 }
 
-/// The stars with `min_mag <= v_mag <= max_mag`, as the catalog routes send them.
-pub(crate) fn stars(catalog: &HipCatalog, max_mag: f32, min_mag: Option<f32>) -> Vec<CatalogStar> {
-    catalog
-        .stars(max_mag, min_mag)
-        .map(CatalogStar::from)
-        .collect()
+/// The stars whose visual magnitude is in `magnitudes`, as the catalog routes send them.
+pub(crate) fn stars(catalog: &HipCatalog, magnitudes: impl RangeBounds<f32>) -> Vec<CatalogStar> {
+    catalog.stars(magnitudes).map(CatalogStar::from).collect()
 }
 
 /// A Messier object as `/api/catalog/messier` sends it: what to call it and where it is.
@@ -152,7 +150,7 @@ pub(crate) fn constellation_boundaries() -> Vec<ConstellationSegments> {
 /// nothing left to join is left out altogether.
 pub(crate) fn constellation_figures(catalog: &HipCatalog) -> Vec<ConstellationSegments> {
     let stars: HashMap<i32, &Star> = catalog
-        .stars(FIGURE_MAX_MAG, None)
+        .stars(..=FIGURE_MAX_MAG)
         .map(|star| (star.hip_id, star))
         .collect();
 

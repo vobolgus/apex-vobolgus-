@@ -64,7 +64,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, mag_limit: f32) {
     let effective_mag_limit = f64::from(mag_limit * mag_scale.max(0.1));
 
     for planet in all_positions(jd_ut) {
-        if planet.body == Body::Earth || planet.magnitude > effective_mag_limit {
+        if planet.magnitude > effective_mag_limit {
             continue;
         }
 
