@@ -1,9 +1,10 @@
 //! A star chart as SVG.
 //!
 //! A chart starts as a `RenderConfig`, the JSON a client sends. [`Chart::try_from`]
-//! checks it and works out the camera it asks for; a [`Chart`] can only be one that
-//! can be drawn. [`Chart::to_svg`] then draws it, a layer at a time, each in a
-//! module of its own:
+//! checks it and works out what it asks for: the camera, the instant, every default
+//! of a setting left out. A [`Chart`] can only be one that can be drawn, and holds
+//! nothing that would have to be worked out again. [`Chart::to_svg`] then draws it,
+//! a layer at a time, each in a module of its own:
 //!
 //! - `frame`: the root element, the background, the sky's fill, clip and outline,
 //!   the horizon;
@@ -12,14 +13,14 @@
 //! - `stars`, `planets`, `marks`;
 //! - `labels`: the compass points, the observer's place and time, the footer.
 //!
-//! They all draw against a `scene::Scene` (the canvas and the camera, worked out
-//! once) into a `crate::svg::SvgWriter`, and curves go through `polyline`.
+//! They all draw against a `scene::Scene` (the canvas, worked out once, and what
+//! the chart holds) into a `crate::svg::SvgWriter`, and curves go through `polyline`.
 //!
-//! There are three kinds of chart. With a `view` the chart is the generator
-//! preview's own picture: its camera, its size, its star sizes, so the export shows
-//! what the screen shows. Without one it is the observer's: for `stereo` the whole
-//! sky over a place at an instant, north up, with its horizon; for `pinhole` a
-//! camera aimed at a constellation or a direction.
+//! There are three kinds of chart, the three of `scene::Sky`. With a `view` the
+//! chart is the generator preview's own picture: its camera, its size, its star
+//! sizes, so the export shows what the screen shows. Without one it is the
+//! observer's: for `stereo` the whole sky over a place at an instant, north up, with
+//! its horizon; for `pinhole` a camera aimed at a constellation or a direction.
 
 mod constellations;
 mod frame;
@@ -38,12 +39,15 @@ mod tests;
 use std::str::FromStr;
 
 use rust_core::catalog::{HipCatalog, Star};
-use rust_core::projections::{ViewBasis, ViewKind, ViewProjection};
+use rust_core::projections::{StereoProjection, ViewBasis, ViewKind, ViewProjection};
+use rust_core::time::DateTime;
 use thiserror::Error;
 
-use self::scene::Scene;
+use self::labels::Info;
+use self::scene::{Scene, Sky};
+use self::time::{DEFAULT_TIME, DEFAULT_TIME_TEXT, parse_datetime};
 use crate::limits::{MAX_MAGNITUDE_LIMIT, MAX_MARKS, MAX_VIEW_PX, MAX_VIEW_SIZE_PX};
-use crate::request::{RenderConfig, SkyMark, ViewConfig};
+use crate::request::{LayersConfig, RenderConfig, SkyMark, StyleConfig, ViewConfig};
 use crate::svg::SvgWriter;
 
 /// The faintest star drawn when the chart names no limit: everything the catalogue's
@@ -73,14 +77,19 @@ impl Projection {
     }
 }
 
+/// A name that is neither of the two projections there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("projection must be 'stereo' or 'pinhole'")]
+pub(crate) struct UnknownProjection;
+
 impl FromStr for Projection {
-    type Err = ChartError;
+    type Err = UnknownProjection;
 
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         match name {
             "stereo" => Ok(Self::Stereo),
             "pinhole" => Ok(Self::Pinhole),
-            _ => Err(ChartError::UnknownProjection),
+            _ => Err(UnknownProjection),
         }
     }
 }
@@ -94,12 +103,21 @@ impl From<Projection> for ViewKind {
     }
 }
 
+impl From<ViewKind> for Projection {
+    fn from(kind: ViewKind) -> Self {
+        match kind {
+            ViewKind::Stereo => Self::Stereo,
+            ViewKind::Pinhole => Self::Pinhole,
+        }
+    }
+}
+
 /// Why a `RenderConfig` is not a chart. Each is the plain-text message of a 400.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub(crate) enum ChartError {
     /// `projection` is neither of the two there are.
-    #[error("projection must be 'stereo' or 'pinhole'")]
-    UnknownProjection,
+    #[error(transparent)]
+    UnknownProjection(#[from] UnknownProjection),
     /// Neither a view nor a whole observer: nothing says where the chart looks.
     #[error("latitude and longitude are required without a view")]
     NoObserver,
@@ -145,16 +163,44 @@ pub(crate) struct Placement {
     pub(crate) height: f64,
 }
 
-/// A chart that can be drawn: a `RenderConfig` that passed every check, with the
-/// projection it names and the camera of its view.
+/// A chart that can be drawn: a `RenderConfig` that passed every check, read into
+/// what it asks for, with every setting it left out at its default.
 #[derive(Debug, Clone)]
 pub(crate) struct Chart {
-    /// The settings as they were sent.
-    config: RenderConfig,
-    /// What `config.projection` names.
-    projection: Projection,
-    /// The camera of `config.view`, when there is one.
-    view: Option<ViewProjection>,
+    /// How the sky falls on the chart: the kind of chart, with its camera set up.
+    sky: Sky,
+    /// Length of one preview px in chart units (`view.px`): everything sized in preview
+    /// px (star and planet radii, line widths, text) is multiplied by it. 1 without a view.
+    px: f32,
+    /// The instant the chart is drawn for, UT.
+    time: DateTime,
+    /// The faintest star drawn, visual magnitude.
+    magnitude_limit: f32,
+    /// What is drawn besides the stars.
+    layers: LayersConfig,
+    /// The chart's colours, font and star sizes.
+    style: StyleConfig,
+    /// The one constellation drawn, by abbreviation; all of them when `None`.
+    constellation: Option<String>,
+    /// Places ringed on the chart.
+    marks: Vec<SkyMark>,
+    /// The place and time printed in the corner, when the chart prints them.
+    info: Option<Info>,
+    /// A line of text centred under the chart.
+    footer: Option<String>,
+}
+
+/// Where a chart looks from, once it is known to look from somewhere.
+enum Viewpoint<'c> {
+    /// The generator preview's camera.
+    Preview(&'c ViewConfig),
+    /// An observer on the globe, degrees north and east.
+    Observer {
+        /// Degrees north.
+        latitude: f32,
+        /// Degrees east.
+        longitude: f32,
+    },
 }
 
 /// The checks every chart passes before it is drawn, alone and in a document, in
@@ -164,9 +210,14 @@ impl TryFrom<RenderConfig> for Chart {
 
     fn try_from(config: RenderConfig) -> Result<Self, Self::Error> {
         let projection: Projection = config.projection.parse()?;
-        if config.view.is_none() && (config.latitude.is_none() || config.longitude.is_none()) {
-            return Err(ChartError::NoObserver);
-        }
+        let viewpoint = match (&config.view, config.latitude, config.longitude) {
+            (Some(view), _, _) => Viewpoint::Preview(view),
+            (None, Some(latitude), Some(longitude)) => Viewpoint::Observer {
+                latitude,
+                longitude,
+            },
+            (None, _, _) => return Err(ChartError::NoObserver),
+        };
         if config
             .latitude
             .is_some_and(|latitude| !(-90.0..=90.0).contains(&latitude))
@@ -179,11 +230,24 @@ impl TryFrom<RenderConfig> for Chart {
         {
             return Err(ChartError::Longitude);
         }
-        let view = config
-            .view
-            .as_ref()
-            .map(|view| camera(view, projection, config.fov_deg))
-            .transpose()?;
+        // Парсим время
+        let time = config
+            .datetime
+            .as_deref()
+            .and_then(parse_datetime)
+            .unwrap_or(DEFAULT_TIME);
+        let sky = match viewpoint {
+            Viewpoint::Preview(view) => Sky::View(camera(view, projection, config.fov_deg)?),
+            Viewpoint::Observer {
+                latitude,
+                longitude,
+            } => match projection {
+                Projection::Stereo => {
+                    Sky::Horizon(StereoProjection::new(latitude, longitude, time))
+                }
+                Projection::Pinhole => Sky::camera(&config),
+            },
+        };
         if config.marks.len() > MAX_MARKS {
             return Err(ChartError::TooManyMarks);
         }
@@ -196,12 +260,41 @@ impl TryFrom<RenderConfig> for Chart {
         {
             return Err(ChartError::MagnitudeLimit);
         }
+
+        let info = config
+            .latitude
+            .zip(config.longitude)
+            .filter(|_| config.print_info.unwrap_or(false))
+            .map(|(latitude, longitude)| Info {
+                latitude,
+                longitude,
+                time: config
+                    .datetime
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_TIME_TEXT.to_owned()),
+            });
         Ok(Self {
-            config,
-            projection,
-            view,
+            sky,
+            px: preview_px(&config),
+            time,
+            magnitude_limit: config.magnitude_limit.unwrap_or(DEFAULT_MAGNITUDE_LIMIT),
+            info,
+            layers: config.layers,
+            style: config.style,
+            constellation: config.constellation,
+            marks: config.marks,
+            footer: config.footer_text,
         })
     }
+}
+
+/// Length of one preview px in chart units (`view.px`); 1 without a view.
+fn preview_px(config: &RenderConfig) -> f32 {
+    config
+        .view
+        .as_ref()
+        .and_then(|view| view.px)
+        .map_or(1.0, |px| px as f32)
 }
 
 /// The preview camera `view` describes, for a chart in `projection` with the field
@@ -245,7 +338,10 @@ impl Chart {
     /// The preview camera of the chart's view, if it has one.
     #[cfg(test)]
     pub(crate) fn view(&self) -> Option<&ViewProjection> {
-        self.view.as_ref()
+        match &self.sky {
+            Sky::View(view) => Some(view),
+            Sky::Horizon(_) | Sky::Camera { .. } => None,
+        }
     }
 
     /// The chart as a standalone SVG document.
@@ -279,10 +375,7 @@ impl Chart {
         placement: Option<Placement>,
     ) {
         let scene = Scene::new(self, id_prefix);
-        let mag_limit = self
-            .config
-            .magnitude_limit
-            .unwrap_or(DEFAULT_MAGNITUDE_LIMIT);
+        let mag_limit = self.magnitude_limit;
         let stars: Vec<&Star> = catalog.stars(..=mag_limit).collect();
 
         frame::open(svg, &scene, placement);

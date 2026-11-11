@@ -63,8 +63,8 @@ fn galactic_equator_point(l_rad: f32) -> Direction {
 
 /// The grid and the reference lines the chart's layers ask for, under everything else.
 pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    let layers = &scene.config.layers;
-    let grid_color = &scene.config.style.grid_color;
+    let layers = scene.layers;
+    let grid_color = &scene.style.grid_color;
     // Line widths are preview px.
     let px = scene.px;
 

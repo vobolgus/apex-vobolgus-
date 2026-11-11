@@ -2,13 +2,23 @@
 //! observer's place and time, the footer.
 
 use super::scene::Scene;
-use super::time::DEFAULT_TIME_TEXT;
 use crate::svg::SvgWriter;
+
+/// What the info line in a chart's corner says: the observer's place and the time.
+#[derive(Debug, Clone)]
+pub(super) struct Info {
+    /// The observer's latitude, degrees north.
+    pub(super) latitude: f32,
+    /// The observer's longitude, degrees east.
+    pub(super) longitude: f32,
+    /// The time as the request gave it, or the default instant's text.
+    pub(super) time: String,
+}
 
 /// N, S, W and E round the horizon of the observer's chart, north at the top and in red.
 pub(super) fn draw_compass(svg: &mut SvgWriter, scene: &Scene<'_>) {
     let (center_x, center_y) = (scene.center_x, scene.center_y);
-    let font_family = &scene.config.style.font_family;
+    let font_family = &scene.style.font_family;
     let label_r = scene.sky_radius + 12.0;
     write!(
         svg,
@@ -44,15 +54,12 @@ pub(super) fn draw_compass(svg: &mut SvgWriter, scene: &Scene<'_>) {
 /// and the observer is known.
 // 8. Печать информации на карте
 pub(super) fn draw_info(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    let config = scene.config;
-    if !config.print_info.unwrap_or(false) {
-        return;
-    }
-    let (Some(lat_deg), Some(lon_deg)) = (config.latitude, config.longitude) else {
+    let Some(info) = scene.info else {
         return;
     };
+    let (lat_deg, lon_deg) = (info.latitude, info.longitude);
     let px = scene.px;
-    let font_family = &config.style.font_family;
+    let font_family = &scene.style.font_family;
 
     let lat_str = format!(
         "{:.2}° {}",
@@ -77,7 +84,7 @@ pub(super) fn draw_info(svg: &mut SvgWriter, scene: &Scene<'_>) {
         lon_str
     );
 
-    let dt_display = config.datetime.as_deref().unwrap_or(DEFAULT_TIME_TEXT);
+    let dt_display = &info.time;
     write!(
         svg,
         r##"<text x="{}" y="{}" fill="#A0A0A0" font-family="{}" font-size="{}" opacity="0.8">Time: {} UTC</text>"##,
@@ -92,7 +99,7 @@ pub(super) fn draw_info(svg: &mut SvgWriter, scene: &Scene<'_>) {
 /// The footer: a line of the client's own under the chart.
 // 9. Подвал
 pub(super) fn draw_footer(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    let Some(footer) = &scene.config.footer_text else {
+    let Some(footer) = scene.footer else {
         return;
     };
     let px = scene.px;
@@ -101,7 +108,7 @@ pub(super) fn draw_footer(svg: &mut SvgWriter, scene: &Scene<'_>) {
         r##"<text x="{}" y="{}" fill="#606060" font-family="{}" font-size="{}" text-anchor="middle">{}</text>"##,
         scene.width / 2.0,
         scene.height - 15.0 * px,
-        scene.config.style.font_family,
+        scene.style.font_family,
         10.0 * px,
         footer
     );

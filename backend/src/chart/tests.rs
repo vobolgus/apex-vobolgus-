@@ -795,14 +795,14 @@ fn a_projection_is_one_of_two_names() {
     assert_eq!("stereo".parse(), Ok(Projection::Stereo));
     assert_eq!("pinhole".parse(), Ok(Projection::Pinhole));
     for name in ["Stereo", "mercator", ""] {
-        assert_eq!(
-            name.parse::<Projection>(),
-            Err(ChartError::UnknownProjection)
-        );
+        assert_eq!(name.parse::<Projection>(), Err(UnknownProjection));
     }
     let mut config = sound_config();
     config.projection = "mercator".to_string();
-    assert_eq!(refused(config), ChartError::UnknownProjection);
+    assert_eq!(
+        refused(config),
+        ChartError::UnknownProjection(UnknownProjection)
+    );
 }
 
 #[test]

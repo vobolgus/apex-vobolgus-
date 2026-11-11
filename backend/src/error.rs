@@ -84,6 +84,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::chart::UnknownProjection;
 
     #[test]
     fn the_429_says_when_to_come_back() {
@@ -97,7 +98,7 @@ mod tests {
 
     #[test]
     fn a_request_at_fault_is_a_400_and_the_server_s_own_failure_a_500() {
-        let refused = ApiError::from(ChartError::UnknownProjection);
+        let refused = ApiError::from(ChartError::from(UnknownProjection));
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             refused.to_string(),

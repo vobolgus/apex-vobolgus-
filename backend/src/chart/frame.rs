@@ -8,7 +8,7 @@ use crate::svg::SvgWriter;
 /// Opens the chart: its root `<svg>`, the background, the sky's fill and the group
 /// everything on the sky is drawn in, clipped to the sky's edge.
 pub(super) fn open(svg: &mut SvgWriter, scene: &Scene<'_>, placement: Option<Placement>) {
-    let style = &scene.config.style;
+    let style = scene.style;
     let (width, height) = (scene.width, scene.height);
     let sky_mask = format!("{}sky-mask", scene.id_prefix);
 
@@ -34,7 +34,7 @@ pub(super) fn open(svg: &mut SvgWriter, scene: &Scene<'_>, placement: Option<Pla
         );
     }
 
-    match scene.projection {
+    match scene.projection() {
         // Для стереографической проекции создаем clip-path
         Projection::Stereo => {
             let (center_x, center_y, sky_radius) =
@@ -58,7 +58,7 @@ pub(super) fn open(svg: &mut SvgWriter, scene: &Scene<'_>, placement: Option<Pla
                     r#"<rect width="100%" height="100%" fill="{chart_color}" />"#
                 );
             }
-            if scene.has_view {
+            if scene.has_view() {
                 // Lines run past the frame; keep them off the page around it in a PDF.
                 write!(
                     svg,
@@ -85,11 +85,11 @@ pub(super) fn close(svg: &mut SvgWriter) {
 /// The sky's edge, 1 preview px wide and inset by half of that, so the chart's own
 /// viewport does not clip half of the stroke away.
 pub(super) fn draw_outline(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    let Some(outline) = &scene.config.style.chart_outline else {
+    let Some(outline) = &scene.style.chart_outline else {
         return;
     };
     let stroke = scene.px;
-    match scene.projection {
+    match scene.projection() {
         Projection::Stereo => write!(
             svg,
             r#"<circle cx="{}" cy="{}" r="{}" fill="none" stroke="{}" stroke-width="{}" />"#,
@@ -114,11 +114,11 @@ pub(super) fn draw_outline(svg: &mut SvgWriter, scene: &Scene<'_>) {
 
 /// The cross at the zenith of the observer's horizon chart, when its layer is on.
 pub(super) fn draw_zenith(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    if !scene.config.layers.zenith {
+    if !scene.layers.zenith {
         return;
     }
     let (center_x, center_y) = (scene.center_x, scene.center_y);
-    let grid_color = &scene.config.style.grid_color;
+    let grid_color = &scene.style.grid_color;
     write!(
         svg,
         r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1.0" stroke-opacity="0.5" />"#,
@@ -144,6 +144,6 @@ pub(super) fn draw_horizon(svg: &mut SvgWriter, scene: &Scene<'_>) {
     write!(
         svg,
         r#"<circle cx="{}" cy="{}" r="{}" fill="none" stroke="{}" stroke-width="2.5" />"#,
-        scene.center_x, scene.center_y, scene.sky_radius, scene.config.style.grid_color
+        scene.center_x, scene.center_y, scene.sky_radius, scene.style.grid_color
     );
 }

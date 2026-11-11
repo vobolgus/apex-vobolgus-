@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use svg2pdf::usvg;
 
 use super::*;
+use crate::chart::UnknownProjection;
 use crate::pdf::svg_options;
 use crate::request::{DocumentRule, DocumentTextLine, TextAnchor, TextFont};
 
@@ -625,7 +626,7 @@ fn a_refusal_names_the_page_and_what_is_on_it() {
     let refusal = DocumentError::Item {
         page: 3,
         item: 2,
-        fault: ItemError::Chart(ChartError::UnknownProjection),
+        fault: ItemError::Chart(ChartError::UnknownProjection(UnknownProjection)),
     };
     assert_eq!(
         refusal.to_string(),
@@ -638,7 +639,7 @@ fn a_refusal_names_the_page_and_what_is_on_it() {
         DocumentError::Item {
             page: 1,
             item: 2,
-            fault: ItemError::Chart(ChartError::UnknownProjection),
+            fault: ItemError::Chart(ChartError::UnknownProjection(UnknownProjection)),
         }
     );
     assert_eq!(

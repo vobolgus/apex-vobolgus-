@@ -50,12 +50,11 @@ fn planet_radius(position: &PlanetPosition, magnitude_scale: f32) -> f32 {
 /// The bodies brighter than the chart's limit, each with its name when the chart
 /// names its constellations.
 pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, mag_limit: f32) {
-    let config = scene.config;
-    if !config.layers.planets {
+    if !scene.layers.planets {
         return;
     }
     let (px, time) = (scene.px, scene.time);
-    let mag_scale = config.style.magnitude_scale;
+    let mag_scale = scene.style.magnitude_scale;
 
     let time_fraction =
         (f64::from(time.hour) + f64::from(time.minute) / 60.0 + f64::from(time.second) / 3600.0)
@@ -88,7 +87,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, mag_limit: f32) {
                 0.5 * px
             );
 
-            if config.layers.constellation_names {
+            if scene.layers.constellation_names {
                 write!(
                     svg,
                     r#"<text data-planet-label="{}" x="{:.2}" y="{:.2}" fill="{}" font-family="{}" font-size="{}" text-anchor="start">{}</text>"#,
@@ -96,7 +95,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, mag_limit: f32) {
                     cx + r + 4.0 * px,
                     cy - r - 2.0 * px,
                     color,
-                    config.style.font_family,
+                    scene.style.font_family,
                     10.0 * px,
                     label
                 );

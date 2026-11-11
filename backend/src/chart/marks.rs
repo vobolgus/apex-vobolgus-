@@ -35,7 +35,7 @@ pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>) {
         width: 1.5 * scene.px,
         opacity: "1",
     };
-    for mark in &scene.config.marks {
+    for mark in scene.marks {
         polyline::draw(
             svg,
             ring_points(mark.ra_deg, mark.dec_deg, mark.radius_deg),

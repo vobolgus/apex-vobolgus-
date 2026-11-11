@@ -13,28 +13,28 @@ use crate::svg::SvgWriter;
 
 /// The constellations of `table` a chart draws: the one it names, or all of them.
 fn chosen<'t, T>(
-    target: Option<&'t String>,
+    target: Option<&'t str>,
     table: &'t HashMap<String, T>,
 ) -> impl Iterator<Item = (&'t String, &'t T)> {
     table
         .iter()
-        .filter(move |(abbr, _)| target.is_none_or(|target| target == *abbr))
+        .filter(move |(abbr, _)| target.is_none_or(|target| target == abbr.as_str()))
 }
 
 /// IAU boundaries, each polygon edge traced as a great-circle arc like the preview's.
 pub(super) fn draw_boundaries(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    if !scene.config.layers.constellation_boundaries {
+    if !scene.layers.constellation_boundaries {
         return;
     }
 
     // The preview's CONSTELLATION_BOUNDARY_STYLE.
     let style = PolylineStyle {
-        stroke: &scene.config.style.constellation_line_color,
+        stroke: &scene.style.constellation_line_color,
         width: 0.4 * scene.px,
         opacity: "0.15",
     };
 
-    for (_, polygons) in chosen(scene.config.constellation.as_ref(), boundaries()) {
+    for (_, polygons) in chosen(scene.constellation, boundaries()) {
         for polygon in polygons {
             let vertices: Vec<Direction> = polygon
                 .iter()
@@ -54,19 +54,19 @@ pub(super) fn draw_boundaries(svg: &mut SvgWriter, scene: &Scene<'_>) {
 /// The stick figures: a line between two stars is drawn when the chart has both, that
 /// is when both are brighter than its magnitude limit.
 pub(super) fn draw_figures(svg: &mut SvgWriter, scene: &Scene<'_>, stars: &[&Star]) {
-    if !scene.config.layers.constellations {
+    if !scene.layers.constellations {
         return;
     }
     let stars: HashMap<i32, &Star> = stars.iter().map(|star| (star.hip_id, *star)).collect();
 
     // The preview's CONSTELLATION_LINE_STYLE.
     let style = PolylineStyle {
-        stroke: &scene.config.style.constellation_line_color,
+        stroke: &scene.style.constellation_line_color,
         width: 0.6 * scene.px,
         opacity: "0.35",
     };
 
-    for (_, figure) in chosen(scene.config.constellation.as_ref(), figures()) {
+    for (_, figure) in chosen(scene.constellation, figures()) {
         for line in &figure.lines {
             for pair in line.windows(2) {
                 if let (Some(&s1), Some(&s2)) = (stars.get(&pair[0]), stars.get(&pair[1])) {
@@ -85,13 +85,13 @@ pub(super) fn draw_figures(svg: &mut SvgWriter, scene: &Scene<'_>, stars: &[&Sta
 
 /// Each constellation's name under its centre, in Russian where there is one.
 pub(super) fn draw_names(svg: &mut SvgWriter, scene: &Scene<'_>) {
-    if !scene.config.layers.constellation_names {
+    if !scene.layers.constellation_names {
         return;
     }
     let px = scene.px;
-    let font_family = &scene.config.style.font_family;
+    let font_family = &scene.style.font_family;
 
-    for (abbr, figure) in chosen(scene.config.constellation.as_ref(), figures()) {
+    for (abbr, figure) in chosen(scene.constellation, figures()) {
         if let Some((x, y)) = scene.project(figure.center.into()) {
             let ru_name = localized_name(abbr, &figure.name);
             write!(

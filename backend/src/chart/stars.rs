@@ -24,12 +24,12 @@ fn observer_star_radius(v_mag: f32, magnitude_scale: f32) -> f32 {
 
 /// Every star of `stars` that reaches the chart.
 pub(super) fn draw(svg: &mut SvgWriter, scene: &Scene<'_>, stars: &[&Star]) {
-    let star_color = &scene.config.style.star_color;
-    let mag_scale = scene.config.style.magnitude_scale;
+    let star_color = &scene.style.star_color;
+    let mag_scale = scene.style.magnitude_scale;
 
     for &star in stars {
         if let Some((cx, cy)) = scene.project(star.into()) {
-            let r = if scene.has_view {
+            let r = if scene.has_view() {
                 preview_star_radius(star.v_mag) * mag_scale
             } else {
                 observer_star_radius(star.v_mag, mag_scale)
