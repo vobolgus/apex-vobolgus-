@@ -6,8 +6,8 @@ import {
 	clearPreviewCache,
 	documentRequest,
 	exportDocument,
-	itemPreviewUrl,
-	itemRenderConfig,
+	chartPreviewUrl,
+	chartRenderConfig,
 	PAPER_STYLE,
 	PREVIEW_CACHE_LIMIT,
 	snapshotChart,
@@ -94,11 +94,11 @@ describe('snapshotChart', () => {
 	});
 });
 
-describe('itemRenderConfig', () => {
+describe('chartRenderConfig', () => {
 	it("is the preview's config at the frame size in mm, stars fixed in mm, on paper", () => {
 		const item = stereoItem();
 		const preview = buildRenderConfig(VIEW, LAYERS, new Date(CREATED));
-		expect(itemRenderConfig(item)).toEqual({
+		expect(chartRenderConfig(item)).toEqual({
 			...preview,
 			view: { ...preview.view, width: 93, height: 93, px: PRINT_MM_PER_PREVIEW_PX },
 			style: {
@@ -111,12 +111,12 @@ describe('itemRenderConfig', () => {
 	});
 
 	it('draws the planets at the time the chart was added', () => {
-		expect(itemRenderConfig(stereoItem()).datetime).toBe(CREATED);
+		expect(chartRenderConfig(stereoItem()).datetime).toBe(CREATED);
 	});
 
 	it('sizes a pinhole chart by its frame', () => {
 		const item = pinholeItem();
-		const config = itemRenderConfig(item);
+		const config = chartRenderConfig(item);
 		expect(config.projection).toBe('pinhole');
 		expect(config.fov_deg).toBe(100);
 		expect(config.view.width).toBe(160);
@@ -126,13 +126,13 @@ describe('itemRenderConfig', () => {
 	it('leaves the item alone', () => {
 		const item = stereoItem();
 		const before = JSON.stringify(item);
-		itemRenderConfig(item);
+		chartRenderConfig(item);
 		expect(JSON.stringify(item)).toBe(before);
 	});
 
 	it('only adds px and the paper colours to what the preview sends', () => {
 		const preview = buildRenderConfig(VIEW, LAYERS, new Date(CREATED));
-		const config = itemRenderConfig(stereoItem());
+		const config = chartRenderConfig(stereoItem());
 		expect(Object.keys(config)).toEqual(Object.keys(preview));
 		expect(Object.keys(config.view)).toEqual([...Object.keys(preview.view), 'px']);
 		expect(Object.keys(config.style)).toEqual([...Object.keys(preview.style), 'chart_outline']);
@@ -147,16 +147,16 @@ describe('itemRenderConfig', () => {
 
 describe('marks', () => {
 	it('sends the places ringed on a chart, and no marks at all for a chart with none', () => {
-		expect(itemRenderConfig(stereoItem())).not.toHaveProperty('marks');
+		expect(chartRenderConfig(stereoItem())).not.toHaveProperty('marks');
 		const item = stereoItem();
 		item.chart = { ...item.chart, marks: [{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }] };
-		expect(itemRenderConfig(item).marks).toEqual([
+		expect(chartRenderConfig(item).marks).toEqual([
 			{ ra_deg: 56.85, dec_deg: 24.12, radius_deg: 10 }
 		]);
 		// The rest of the config is what it is without them: the mark is all that differs.
-		const { marks: _marks, ...rest } = itemRenderConfig(item);
-		expect(rest).toEqual(itemRenderConfig(stereoItem()));
-		expect(itemRenderConfig({ ...item, chart: { ...item.chart, marks: [] } })).not.toHaveProperty(
+		const { marks: _marks, ...rest } = chartRenderConfig(item);
+		expect(rest).toEqual(chartRenderConfig(stereoItem()));
+		expect(chartRenderConfig({ ...item, chart: { ...item.chart, marks: [] } })).not.toHaveProperty(
 			'marks'
 		);
 	});
@@ -398,14 +398,14 @@ describe('documentRequest', () => {
 				y_mm: 12,
 				width_mm: 93,
 				height_mm: 93,
-				config: itemRenderConfig(stereoItem())
+				config: chartRenderConfig(stereoItem())
 			},
 			{
 				x_mm: 20,
 				y_mm: 120,
 				width_mm: 160,
 				height_mm: 160 / (16 / 9),
-				config: itemRenderConfig(pinholeItem())
+				config: chartRenderConfig(pinholeItem())
 			}
 		]);
 		// Thumbnails stay on this side.
@@ -518,24 +518,24 @@ describe('backend calls', () => {
 		});
 	});
 
-	describe('itemPreviewUrl', () => {
+	describe('chartPreviewUrl', () => {
 		it("fetches the chart's SVG with its config and returns an object URL", async () => {
 			const fetchMock = mockFetch();
 			const item = stereoItem();
-			await expect(itemPreviewUrl(item)).resolves.toBe('blob:test/0');
+			await expect(chartPreviewUrl(item)).resolves.toBe('blob:test/0');
 			const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 			expect(url).toBe('/api/export?format=svg');
 			expect(init.method).toBe('POST');
-			expect(JSON.parse(init.body as string)).toEqual(itemRenderConfig(item));
+			expect(JSON.parse(init.body as string)).toEqual(chartRenderConfig(item));
 		});
 
 		it('caches by config: a move hits, a resize fetches again', async () => {
 			const fetchMock = mockFetch();
-			const first = await itemPreviewUrl(stereoItem({ x: 12, y: 12, w: 93, h: 93 }));
-			const moved = await itemPreviewUrl(stereoItem({ x: 100, y: 150, w: 93, h: 93 }));
+			const first = await chartPreviewUrl(stereoItem({ x: 12, y: 12, w: 93, h: 93 }));
+			const moved = await chartPreviewUrl(stereoItem({ x: 100, y: 150, w: 93, h: 93 }));
 			expect(moved).toBe(first);
 			expect(fetchMock).toHaveBeenCalledTimes(1);
-			const resized = await itemPreviewUrl(stereoItem({ x: 12, y: 12, w: 120, h: 120 }));
+			const resized = await chartPreviewUrl(stereoItem({ x: 12, y: 12, w: 120, h: 120 }));
 			expect(resized).not.toBe(first);
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
@@ -543,8 +543,8 @@ describe('backend calls', () => {
 		it('shares one request between concurrent callers', async () => {
 			const fetchMock = mockFetch();
 			const [a, b] = await Promise.all([
-				itemPreviewUrl(stereoItem()),
-				itemPreviewUrl(stereoItem())
+				chartPreviewUrl(stereoItem()),
+				chartPreviewUrl(stereoItem())
 			]);
 			expect(a).toBe(b);
 			expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -553,19 +553,19 @@ describe('backend calls', () => {
 		it('revokes the least recently used preview beyond the cap', async () => {
 			const fetchMock = mockFetch();
 			const sized = (w: number) => stereoItem({ x: 12, y: 12, w, h: w });
-			const firstUrl = await itemPreviewUrl(sized(40));
-			for (let i = 1; i < PREVIEW_CACHE_LIMIT; i++) await itemPreviewUrl(sized(40 + i));
+			const firstUrl = await chartPreviewUrl(sized(40));
+			for (let i = 1; i < PREVIEW_CACHE_LIMIT; i++) await chartPreviewUrl(sized(40 + i));
 			// Touch the first so the second becomes the oldest.
-			await itemPreviewUrl(sized(40));
+			await chartPreviewUrl(sized(40));
 			expect(revoked).toEqual([]);
 
-			await itemPreviewUrl(sized(500));
+			await chartPreviewUrl(sized(500));
 			await Promise.resolve();
 			expect(revoked).toEqual(['blob:test/1']);
 			expect(fetchMock).toHaveBeenCalledTimes(PREVIEW_CACHE_LIMIT + 1);
 			// The first is still cached, the evicted one is fetched again.
-			await expect(itemPreviewUrl(sized(40))).resolves.toBe(firstUrl);
-			await itemPreviewUrl(sized(41));
+			await expect(chartPreviewUrl(sized(40))).resolves.toBe(firstUrl);
+			await chartPreviewUrl(sized(41));
 			expect(fetchMock).toHaveBeenCalledTimes(PREVIEW_CACHE_LIMIT + 2);
 		});
 
@@ -574,13 +574,13 @@ describe('backend calls', () => {
 			const shown = { images: [{ src: 'blob:test/0' }] };
 			vi.stubGlobal('document', shown);
 			const sized = (w: number) => stereoItem({ x: 12, y: 12, w, h: w });
-			for (let i = 0; i <= PREVIEW_CACHE_LIMIT; i++) await itemPreviewUrl(sized(40 + i));
+			for (let i = 0; i <= PREVIEW_CACHE_LIMIT; i++) await chartPreviewUrl(sized(40 + i));
 			await Promise.resolve();
 			// The oldest went out of the cache, but a page still draws it.
 			expect(revoked).toEqual([]);
 
 			shown.images = [];
-			await itemPreviewUrl(sized(500));
+			await chartPreviewUrl(sized(500));
 			await Promise.resolve();
 			expect(revoked).toEqual(['blob:test/0', 'blob:test/1']);
 		});
@@ -590,16 +590,16 @@ describe('backend calls', () => {
 			const fetchMock = mockFetch(() =>
 				fail ? { ok: false, status: 502, text: async () => '' } : okResponse()
 			);
-			await expect(itemPreviewUrl(stereoItem())).rejects.toThrow('502');
+			await expect(chartPreviewUrl(stereoItem())).rejects.toThrow('502');
 			fail = false;
-			await expect(itemPreviewUrl(stereoItem())).resolves.toBe('blob:test/0');
+			await expect(chartPreviewUrl(stereoItem())).resolves.toBe('blob:test/0');
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
 
 		it('revokes every URL when the cache is cleared', async () => {
 			mockFetch();
-			await itemPreviewUrl(stereoItem());
-			await itemPreviewUrl(pinholeItem());
+			await chartPreviewUrl(stereoItem());
+			await chartPreviewUrl(pinholeItem());
 			clearPreviewCache();
 			await Promise.resolve();
 			expect(revoked.sort()).toEqual(['blob:test/0', 'blob:test/1']);

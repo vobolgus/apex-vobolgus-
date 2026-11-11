@@ -8,7 +8,7 @@
  */
 
 import { untrack } from 'svelte';
-import { itemPreviewUrl } from '$lib/document/render';
+import { chartPreviewUrl } from '$lib/document/render';
 import type { ChartBlock } from '$lib/document/types';
 
 export class ChartPreview {
@@ -29,7 +29,7 @@ export class ChartPreview {
 			void this.#reload;
 			const snapshot = untrack(() => $state.snapshot(this.#chart())) as ChartBlock;
 			let live = true;
-			itemPreviewUrl(snapshot)
+			chartPreviewUrl(snapshot)
 				.then(preload)
 				.then(
 					(url) => {

@@ -218,7 +218,7 @@
 			bind:this={pagesPanel}
 			bind:footprint={panelFootprintPx}
 			store={documentStore}
-			pendingItemId={flight.pendingId}
+			pendingBlockId={flight.pendingId}
 			animated={motionReady}
 			onopen={openEditor}
 			{notify}

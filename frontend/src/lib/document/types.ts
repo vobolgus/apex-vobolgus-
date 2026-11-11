@@ -127,7 +127,7 @@ interface TypesetBase extends BlockBase {
 	 * a block without one is the page's owner's, and no template touches it.
 	 */
 	role?: TextRole;
-	/** The chart its fields read; the nearest one on its page when absent or gone (`boundItem`). */
+	/** The chart its fields read; the nearest one on its page when absent or gone (`boundChartBlock`). */
 	chartId?: string;
 }
 

@@ -247,7 +247,7 @@ type Reader = Pick<TypesetBlock, 'chartId' | 'frame' | 'rotation'>;
  * charts as near (a text across two of them), the one whose centre is nearer, then
  * the earlier on the page.
  */
-export function boundItem(
+export function boundChartBlock(
 	page: Pick<DocPage, 'blocks'>,
 	text: Reader,
 	pages?: Sheets
@@ -283,7 +283,7 @@ export function boundChart(
 	text: Reader,
 	pages?: Sheets
 ): ChartSnapshot | null {
-	return boundItem(page, text, pages)?.chart ?? null;
+	return boundChartBlock(page, text, pages)?.chart ?? null;
 }
 
 /** What a text shows: its fields read from its chart. */

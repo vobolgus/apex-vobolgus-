@@ -9,7 +9,7 @@
 	 * scaled down lose them too, so either way the sheet looked empty. Redrawn when
 	 * a chart's frame changes and once the star catalogue has loaded.
 	 *
-	 * `pendingItemId` names a chart that is on its way here (Add to PDF flies a copy
+	 * `pendingBlockId` names a chart that is on its way here (Add to PDF flies a copy
 	 * of it from the preview): its place on the sheet is kept, empty, until the copy
 	 * lands on it, and then it is drawn. The copy is this same drawing, so nothing
 	 * changes under the eye at that moment.
@@ -32,12 +32,12 @@
 		/** Screen px per mm. */
 		scale: number;
 		/** The chart still in the air, whose place stays empty for now. */
-		pendingItemId?: string | null;
+		pendingBlockId?: string | null;
 		/** The document's pages, for a text that reads a chart on another page. */
 		pages?: readonly DocPage[];
 	}
 
-	let { page, scale, pendingItemId = null, pages }: Props = $props();
+	let { page, scale, pendingBlockId = null, pages }: Props = $props();
 
 	/** The pinhole frame's rounded corner, in mm on the page. */
 	const cornerMm = PINHOLE_CORNER_RADIUS * PRINT_MM_PER_PREVIEW_PX;
@@ -57,7 +57,7 @@
 		{@const h = item.frame.h * scale}
 		<div
 			class="chart"
-			class:pending={item.id === pendingItemId}
+			class:pending={item.id === pendingBlockId}
 			data-item-id={item.id}
 			style:left="{item.frame.x * scale}px"
 			style:top="{item.frame.y * scale}px"
@@ -65,7 +65,7 @@
 			style:height="{h}px"
 			style:--corner={round ? '50%' : `${cornerMm * scale}px`}
 		>
-			{#if item.id !== pendingItemId}
+			{#if item.id !== pendingBlockId}
 				<canvas
 					{@attach (canvas) =>
 						drawChartThumbnail(

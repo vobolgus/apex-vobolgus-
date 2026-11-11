@@ -31,7 +31,7 @@
 		/** Out: how far the panel reaches into the chart area from its left edge, px (0 with no pages). */
 		footprint?: number;
 		/** A chart still flying to its page (Add to PDF): its place there stays empty until it lands. */
-		pendingItemId?: string | null;
+		pendingBlockId?: string | null;
 		/** The page has settled after its load: a panel that appears from here on slides in. */
 		animated?: boolean;
 	}
@@ -42,7 +42,7 @@
 		notify,
 		onemptied,
 		footprint = $bindable(0),
-		pendingItemId = null,
+		pendingBlockId = null,
 		animated = false
 	}: Props = $props();
 
@@ -139,7 +139,7 @@
 						selected={store.selectedPageId === page.id}
 						quiet={page.id === list.quietPageId}
 						pages={store.pages}
-						{pendingItemId}
+						{pendingBlockId}
 						actions={cell}
 					/>
 				{/each}

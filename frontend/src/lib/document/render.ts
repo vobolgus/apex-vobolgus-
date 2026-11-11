@@ -117,7 +117,7 @@ export function snapshotChart(
 }
 
 /** The preview's config for the chart, sized in mm with stars fixed in mm, on paper. */
-export function itemRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): RenderConfig {
+export function chartRenderConfig(item: Pick<ChartBlock, 'chart' | 'frame'>): RenderConfig {
 	const { chart, frame } = item;
 	const config = buildRenderConfig(chart.view, chart.layers, new Date(chart.createdAt));
 	const drawn: RenderConfig = {
@@ -223,7 +223,7 @@ export function documentRequest(
 					y_mm: item.frame.y,
 					width_mm: item.frame.w,
 					height_mm: item.frame.h,
-					config: itemRenderConfig(item)
+					config: chartRenderConfig(item)
 				})),
 				texts: typesetOf(page).map((text) => textRequest(page, text, measure, sky, pages))
 			};
@@ -300,8 +300,8 @@ const retired = new Set<string>();
  * config (the position on the page does not matter). Rejects when the backend
  * fails; a failure is not cached, so the next call tries again.
  */
-export function itemPreviewUrl(item: Pick<ChartBlock, 'chart' | 'frame'>): Promise<string> {
-	const body = JSON.stringify(itemRenderConfig(item));
+export function chartPreviewUrl(item: Pick<ChartBlock, 'chart' | 'frame'>): Promise<string> {
+	const body = JSON.stringify(chartRenderConfig(item));
 	const cached = previews.get(body);
 	if (cached) {
 		previews.delete(body);

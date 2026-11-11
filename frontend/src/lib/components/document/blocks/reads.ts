@@ -3,13 +3,13 @@
  * its toolbar, and the numbers on its page's charts while it is selected.
  *
  * A block reads the chart nearest to it unless it was told one (`chartId`), on its
- * page or on another (`boundItem`). Which one is a question only for words that read
+ * page or on another (`boundChartBlock`). Which one is a question only for words that read
  * a chart (a table's, a text's with fields), and only with a choice to make: two
  * charts on its page, or charts on other pages.
  */
 
 import { chartsOf } from '$lib/document/blocks';
-import { boundItem, hasFields } from '$lib/document/text';
+import { boundChartBlock, hasFields } from '$lib/document/text';
 import type { DocPage, TypesetBlock } from '$lib/document/types';
 
 /** A chart on another page, to read: its id, and what to call it. */
@@ -54,7 +54,7 @@ export function readingOf(
 	others: readonly ChartChoice[]
 ): Reading {
 	const charts = chartsOf(page);
-	const id = boundItem(page, block, pages)?.id;
+	const id = boundChartBlock(page, block, pages)?.id;
 	const at = charts.findIndex((item) => item.id === id);
 	return {
 		at: at < 0 ? null : at,
@@ -78,5 +78,5 @@ export function linkedChartId(
 	if (!selected || chartsOf(page).length < 2) return null;
 	const words = selected.kind === 'text' ? selected.text : '';
 	if (!readsAChart(selected, words) && editingId !== selected.id) return null;
-	return boundItem(page, selected, pages)?.id ?? null;
+	return boundChartBlock(page, selected, pages)?.id ?? null;
 }

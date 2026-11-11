@@ -220,7 +220,7 @@ export class PagesList {
 		if (!cell) return null;
 		const reduce = reducedMotion();
 		cell.scrollIntoView?.({ block: 'nearest', behavior: reduce || landing ? 'auto' : 'smooth' });
-		const target = landing ? chartTarget(cell, landing.itemId) : null;
+		const target = landing ? chartTarget(cell, landing.blockId) : null;
 		if (landing && !reduce) {
 			// The first page arrives with the panel, which slides in with it (`growIn` leaves it be).
 			if (landing.newPage) growIn(cell, this.element);
@@ -306,9 +306,9 @@ function slideOffset(inside: HTMLElement): number {
  * to a stop. Measured with the panel's slide taken out, so a panel still on its
  * way in gives the place it is heading for.
  */
-function chartTarget(cell: HTMLElement, itemId: string): LandingTarget | null {
+function chartTarget(cell: HTMLElement, blockId: string): LandingTarget | null {
 	const chart = Array.from(cell.querySelectorAll<HTMLElement>('.chart')).find(
-		(element) => element.dataset.itemId === itemId
+		(element) => element.dataset.itemId === blockId
 	);
 	if (!chart) return null;
 	const rect = chart.getBoundingClientRect();

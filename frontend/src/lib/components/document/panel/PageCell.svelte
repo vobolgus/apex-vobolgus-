@@ -26,11 +26,11 @@
 		/** The document's pages: a text may read a chart on another of them. */
 		pages: readonly DocPage[];
 		/** A chart still flying to its page (Add to PDF): its place there stays empty until it lands. */
-		pendingItemId: string | null;
+		pendingBlockId: string | null;
 		actions: PageCellActions;
 	}
 
-	let { page, index, selected, quiet, pages, pendingItemId, actions }: Props = $props();
+	let { page, index, selected, quiet, pages, pendingBlockId, actions }: Props = $props();
 
 	/**
 	 * Every page is this wide, whichever way it is turned: a landscape page is drawn
@@ -57,7 +57,7 @@
 			onclick={() => actions.open(page.id)}
 			onkeydown={(event) => actions.keydown(event, page.id)}
 		>
-			<PageThumbnail {page} {scale} {pendingItemId} {pages} />
+			<PageThumbnail {page} {scale} {pendingBlockId} {pages} />
 		</button>
 		<button
 			class="remove"

@@ -73,7 +73,7 @@ interface FlightCopy {
 /** What the copy's flight leads from: the chart that was added and where it was on screen. */
 interface Departure {
 	pageId: string;
-	itemId: string;
+	blockId: string;
 	newPage: boolean;
 	chart: ChartSnapshot;
 	canvasBox: Box | null;
@@ -119,7 +119,7 @@ export class PdfFlight {
 		void this.land();
 		// And where the charts already on the pages are: this one may move them to make room.
 		const before = this.#host.panel?.chartBoxes();
-		const { pageId, blockId: itemId, newPage, relaid, undo } = store.addChart(chart, thumb);
+		const { pageId, blockId, newPage, relaid, undo } = store.addChart(chart, thumb);
 		store.selectedPageId = pageId;
 		const flying =
 			canvasBox !== null &&
@@ -127,18 +127,18 @@ export class PdfFlight {
 			typeof canvas?.animate === 'function' &&
 			!prefersReducedMotion();
 		// Before the thumbnail is drawn: the chart's place on it stays empty until the copy lands.
-		if (flying) this.pendingId = itemId;
+		if (flying) this.pendingId = blockId;
 		const added = `Added to page ${store.pageIndex(pageId) + 1}`;
 		this.#host.announce(added);
 		this.#host.notify(relaid ? `${added}, layout updated` : added, () => {
 			// Taken back mid-flight: the copy has nowhere to land.
-			if (this.pendingId === itemId) {
+			if (this.pendingId === blockId) {
 				this.pendingId = null;
 				this.copy = null;
 			}
 			if (undo()) this.#host.announce('Add to PDF undone');
 		});
-		void this.#lead({ pageId, itemId, newPage, chart, canvasBox, flying, before });
+		void this.#lead({ pageId, blockId, newPage, chart, canvasBox, flying, before });
 	};
 
 	/** The copy has arrived (or must make way): the thumbnail draws the chart, then the copy goes. */
@@ -215,12 +215,12 @@ export class PdfFlight {
 	 * simply reveals the page.
 	 */
 	async #lead(departure: Departure): Promise<void> {
-		const { pageId, itemId, newPage, chart, canvasBox, flying, before } = departure;
+		const { pageId, blockId, newPage, chart, canvasBox, flying, before } = departure;
 		const target = await this.#host.panel?.reveal(
 			pageId,
-			flying ? { itemId, newPage, ms: PDF_FLIGHT_MS, before } : undefined
+			flying ? { blockId, newPage, ms: PDF_FLIGHT_MS, before } : undefined
 		);
-		if (!flying || this.pendingId !== itemId) return;
+		if (!flying || this.pendingId !== blockId) return;
 		if (!target || !canvasBox) {
 			this.pendingId = null;
 			return;

@@ -83,7 +83,7 @@ describe('PdfFlight.add', () => {
 		// Its place stays empty until the copy lands there.
 		expect(flight.pendingId).toBe(block.id);
 		expect(pages.reveal).toHaveBeenCalledWith(page.id, {
-			itemId: block.id,
+			blockId: block.id,
 			newPage: true,
 			ms: PDF_FLIGHT_MS,
 			before: pages.boxes

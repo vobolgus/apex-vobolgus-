@@ -24,7 +24,7 @@ export interface Box {
 
 /** A chart on its way to a page, as the pages panel needs to know it. */
 export interface Landing {
-	itemId: string;
+	blockId: string;
 	/** The chart opened a page of its own, which makes its entrance as the copy flies. */
 	newPage: boolean;
 	/** How long the copy is in the air: the page's flash waits for it. */

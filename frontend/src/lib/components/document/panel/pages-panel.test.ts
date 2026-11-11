@@ -10,7 +10,7 @@ const preview = vi.hoisted(() => ({
 	url: vi.fn<(item: ChartBlock) => Promise<string>>(() => Promise.resolve('blob:preview'))
 }));
 
-vi.mock('$lib/document/render', () => ({ itemPreviewUrl: preview.url }));
+vi.mock('$lib/document/render', () => ({ chartPreviewUrl: preview.url }));
 
 // jsdom has no ResizeObserver, which `bind:offsetWidth` (the panel's footprint) uses.
 beforeAll(() => {

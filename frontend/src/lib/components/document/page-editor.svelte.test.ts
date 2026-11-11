@@ -11,7 +11,7 @@ import PageEditor from './PageEditor.svelte';
 
 // No backend here: every preview is one made-up URL.
 vi.mock('$lib/document/render', () => ({
-	itemPreviewUrl: () => Promise.resolve('blob:preview')
+	chartPreviewUrl: () => Promise.resolve('blob:preview')
 }));
 
 // jsdom has no modal dialogs: model showModal() and close() by the open attribute.

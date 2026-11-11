@@ -55,7 +55,7 @@ import {
 	writeDocument,
 	type DocumentStorage
 } from './storage';
-import { anchoredFrame, boundItem, fitTextFrame, MAX_TEXT_CHARS } from './text';
+import { anchoredFrame, boundChartBlock, fitTextFrame, MAX_TEXT_CHARS } from './text';
 import { layTemplate, type LaidPage, type TemplateOptions } from './templates';
 import type {
 	BlockCopy,
@@ -380,7 +380,7 @@ export class DocumentStore {
 		const moved = $state.snapshot(from.blocks[index]);
 		if (!hasRoom(to, moved.kind)) return false;
 		if (moved.kind !== 'chart') {
-			const read = boundItem(from, moved, this.pages);
+			const read = boundChartBlock(from, moved, this.pages);
 			if (chartsOf(to).length === 0 && read) moved.chartId = read.id;
 		}
 		from.blocks.splice(index, 1);

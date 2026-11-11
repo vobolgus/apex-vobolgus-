@@ -145,7 +145,7 @@ export function makeRoom(cell: HTMLElement, landing: Landing): void {
 	if (!landing.before) return;
 	for (const chart of cell.querySelectorAll<HTMLElement>('.chart')) {
 		const id = chart.dataset.itemId;
-		const before = id && id !== landing.itemId ? landing.before[id] : undefined;
+		const before = id && id !== landing.blockId ? landing.before[id] : undefined;
 		if (!before || typeof chart.animate !== 'function') continue;
 		const frames = settleKeyframes(before, chart.getBoundingClientRect());
 		if (frames) chart.animate(frames, { duration: landing.ms, easing: PDF_FLIGHT_EASING });
