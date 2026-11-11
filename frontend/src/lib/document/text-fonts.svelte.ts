@@ -10,8 +10,18 @@
  */
 
 import { base } from '$app/paths';
-import { FONT_FAMILY, layoutText, type Measure, type TextLayout } from './text';
-import type { TextFont, TextStyle } from './types';
+import { loadMessier } from '$lib/api/catalog';
+import { catalog } from '$lib/stores.svelte';
+import { blockLayout, narrowestTableWidth, tableContent, tableWidth } from './table';
+import {
+	boundChart,
+	FONT_FAMILY,
+	layoutText,
+	type Measure,
+	type Sheets,
+	type TextLayout
+} from './text';
+import type { DocPage, DocText, TextFont, TextStyle } from './types';
 
 type FaceKey = `${TextFont}-${'regular' | 'bold'}${'' | '-italic'}`;
 
@@ -124,4 +134,49 @@ export const measureText: Measure = (text, style) => {
 export function measuredLayout(text: string, style: TextStyle, widthMm: number): TextLayout {
 	void textFonts.epoch;
 	return layoutText(text, style, widthMm, measureText);
+}
+
+/**
+ * What a block shows, laid out `widthMm` wide (its own width when not given): a
+ * text with its fields read from its chart, or a table read from it and from the
+ * catalogues. Made again when a face or a catalogue arrives; a table of Messier
+ * objects asks for their catalogue on the way. `pages` is the document, for a block
+ * that reads a chart on another page than its own.
+ */
+export function shownLayout(
+	page: Pick<DocPage, 'items'>,
+	text: DocText,
+	widthMm: number = text.frame.w,
+	pages?: Sheets
+): TextLayout {
+	void textFonts.epoch;
+	if (text.table?.source === 'messier' && catalog.messier.length === 0) void loadMessier();
+	const sky = { messier: catalog.messier, stars: catalog.stars };
+	return blockLayout(page, text, widthMm, measureText, sky, pages);
+}
+
+/** The width a table likes to be (`tableWidth`), with the loaded faces and catalogues, mm. */
+export function likedTableWidth(
+	page: Pick<DocPage, 'items'>,
+	text: Pick<DocText, 'table' | 'style' | 'chartId' | 'frame'>,
+	pages?: Sheets
+): number {
+	void textFonts.epoch;
+	if (!text.table) return text.frame.w;
+	const sky = { messier: catalog.messier, stars: catalog.stars };
+	const chart = boundChart(page, { ...text, id: '', text: '' }, pages);
+	return tableWidth(tableContent(chart, text.table, sky), text.style, measureText);
+}
+
+/** The narrowest a table can be made with nothing of it outside its width (`narrowestTableWidth`), mm. */
+export function leastTableWidth(
+	page: Pick<DocPage, 'items'>,
+	text: Pick<DocText, 'table' | 'style' | 'chartId' | 'frame'>,
+	pages?: Sheets
+): number {
+	void textFonts.epoch;
+	if (!text.table) return 0;
+	const sky = { messier: catalog.messier, stars: catalog.stars };
+	const chart = boundChart(page, { ...text, id: '', text: '' }, pages);
+	return narrowestTableWidth(tableContent(chart, text.table, sky), text.style, measureText);
 }

@@ -14,6 +14,11 @@
  *
  * A page with text on it is hand-arranged too: the arranger lays out charts, and
  * would lay them over the text. A turn moves a page's text with the content box.
+ *
+ * A page a template laid out remembers which (`template`) while it is what the
+ * template made: a turn then lays it out as that template does the other way.
+ * Whatever adds, removes or moves a chart or a text there by hand forgets it; what a
+ * text says and how it is set do not.
  */
 
 import type { ProjectionMode } from '$lib/state/projection-transition.svelte';
@@ -31,6 +36,7 @@ import {
 } from './geometry';
 import {
 	anchoredFrame,
+	boundItem,
 	fitTextFrame,
 	MAX_TEXT_CHARS,
 	normalizeRotation,
@@ -40,7 +46,15 @@ import {
 	TEXT_FONTS,
 	TEXT_SIZES
 } from './text';
-import { TEXT_ROLES, type LaidPage } from './templates';
+import { MAX_TABLE_ROWS, MIN_TABLE_ROWS, TABLE_LOOKS, TABLE_SOURCES } from './table';
+import {
+	layTemplate,
+	TEMPLATE_LANGUAGES,
+	TEMPLATES,
+	TEXT_ROLES,
+	type LaidPage,
+	type TemplateOptions
+} from './templates';
 import type {
 	ChartSnapshot,
 	DocItem,
@@ -49,8 +63,11 @@ import type {
 	LayoutTree,
 	PageLayout,
 	PageOrientation,
+	PageTemplate,
 	Rect,
 	SkyMark,
+	TableLook,
+	TableSpec,
 	TextRole,
 	TextStyle,
 	TurnMemo
@@ -76,7 +93,14 @@ export type DocumentStorage = Pick<Storage, 'getItem' | 'setItem'>;
  */
 export type BlockCopy =
 	| { kind: 'chart'; chart: ChartSnapshot; frame: Rect }
-	| { kind: 'text'; text: string; style: TextStyle; frame: Rect; rotation?: number };
+	| {
+			kind: 'text';
+			text: string;
+			style: TextStyle;
+			frame: Rect;
+			rotation?: number;
+			table?: TableSpec;
+	  };
 
 /** How far a copy pasted with no room and no pointer stands off what is in its place, mm down and right. */
 const PASTE_OFFSET_MM = 5;
@@ -237,32 +261,97 @@ export class DocumentStore {
 	/**
 	 * Turn a page; its charts are laid out again on it (`turnLayout`): rows become
 	 * columns, and turning back restores the page as it was.
+	 *
+	 * A page that is still what a template made of it (`template`) is laid out by
+	 * that template for the new orientation instead (`#turnTemplate`). `height` is the
+	 * measure for its text, as the picker brings one to `layTemplate`; without it a
+	 * text is as tall as the lines it was typed in, until the editor says otherwise
+	 * (`setTextHeight`).
 	 */
-	setOrientation(id: string, orientation: PageOrientation): void {
+	setOrientation(
+		id: string,
+		orientation: PageOrientation,
+		height?: TemplateOptions['height']
+	): void {
 		const page = this.page(id);
 		if (!page || page.orientation === orientation) return;
+		if (page.template && this.#turnTemplate(page, orientation, height)) {
+			this.#scheduleSave();
+			return;
+		}
 		const plan = turnLayout($state.snapshot(page), orientation);
-		const from = contentBox(page.orientation);
-		const to = contentBox(orientation);
+		const from = page.orientation;
 		page.orientation = orientation;
 		page.items = placeItems(page.items, plan.items);
-		// Text keeps its place in the content box, which is as far across and down it
-		// as before, and its share of the width; turning back puts it where it was.
-		for (const text of page.texts ?? []) {
-			const { x, y, w, h } = text.frame;
-			text.frame = fitTextFrame(
-				{
-					x: to.x + ((x - from.x) * to.w) / from.w,
-					y: to.y + ((y - from.y) * to.h) / from.h,
-					w: (w * to.w) / from.w,
-					h
-				},
-				orientation,
-				text.rotation
-			);
-		}
+		for (const text of page.texts ?? []) text.frame = turnedTextFrame(text, from, orientation);
 		setLayout(page, hasText(page) ? { ...plan, manual: true } : plan);
 		this.#scheduleSave();
+	}
+
+	/**
+	 * Turn a page as the template that made it lays it out the other way
+	 * (`layTemplate`, `again`): the charts in the template's places, its texts where it
+	 * puts them with their words, faces and ids kept, and the owner's own texts (no
+	 * `role`) moved with the content box as on any turn. The layout is the template's
+	 * for the orientation and nothing else, so turning back gives the page it was.
+	 *
+	 * False, and nothing is touched, when the template would not make this one page of
+	 * it: charts that would go on further pages, a chart to make or to drop, or a text
+	 * of the template it does not find as it is (told to read another chart since).
+	 * The page is then turned like any other, and forgets the template.
+	 */
+	#turnTemplate(
+		page: DocPage,
+		orientation: PageOrientation,
+		height: TemplateOptions['height']
+	): boolean {
+		const { id, language } = page.template!;
+		const options: TemplateOptions = { orientation, language, again: true };
+		if (height) options.height = height;
+		const laid = layTemplate(id, $state.snapshot(page), options);
+		if (laid.length !== 1) return false;
+		const [{ charts, texts, dropped }] = laid;
+		const items = charts.map((placed) =>
+			placed.chart ? undefined : page.items.find((item) => item.id === placed.id)
+		);
+		const roled = (page.texts ?? []).filter((text) => text.role !== undefined);
+		// Each laid text is one of the page's: the same part and words, of the same chart
+		// where the part belongs to one (a caption, a key).
+		const found = texts.map((placed) =>
+			roled.findIndex(
+				(text) =>
+					text.role === placed.role &&
+					text.text === placed.text &&
+					(placed.chartId === undefined || text.chartId === placed.chartId)
+			)
+		);
+		const each = (list: readonly unknown[]) => list.every((it, i) => list.indexOf(it) === i);
+		const whole =
+			!dropped?.length &&
+			items.length === page.items.length &&
+			items.every((item) => item !== undefined) &&
+			each(items) &&
+			found.length === roled.length &&
+			found.every((index) => index >= 0) &&
+			each(found);
+		if (!whole) return false;
+
+		const from = page.orientation;
+		page.orientation = orientation;
+		page.items = items.map((item, i) => {
+			item!.frame = fitFrame(charts[i].frame, item!.chart.aspect, orientation);
+			return item!;
+		});
+		for (const text of page.texts ?? []) {
+			if (text.role === undefined) text.frame = turnedTextFrame(text, from, orientation);
+		}
+		texts.forEach((placed, i) => {
+			const text = roled[found[i]];
+			setRotation(text, placed.rotation ?? 0);
+			text.frame = fitTextFrame(placed.frame, orientation, text.rotation);
+		});
+		setLayout(page, { manual: true, template: page.template });
+		return true;
 	}
 
 	/**
@@ -365,20 +454,25 @@ export class DocumentStore {
 			frame?: Rect;
 			chartId?: string | null;
 			rotation?: number;
+			table?: TableSpec;
 		}
 	): boolean {
 		const page = this.page(pageId);
 		const text = page?.texts?.find((it) => it.id === textId);
 		if (!page || !text) return false;
+		const { frame, rotation } = text;
 		if (patch.text !== undefined) text.text = patch.text.slice(0, MAX_TEXT_CHARS);
 		if (patch.style) text.style = { ...patch.style };
+		if (patch.table && text.table) text.table = tableSpec(patch.table) ?? text.table;
 		if (patch.rotation !== undefined) setRotation(text, patch.rotation);
 		if (patch.frame || patch.rotation !== undefined) {
 			text.frame = fitTextFrame(patch.frame ?? text.frame, page.orientation, text.rotation);
 		}
 		if (patch.chartId === null) delete text.chartId;
 		else if (patch.chartId !== undefined) text.chartId = patch.chartId;
-		setLayout(page, { manual: true });
+		// Moved or turned, the page is no longer as its template left it; typed in, it is.
+		const moved = !sameFrame(text.frame, frame) || text.rotation !== rotation;
+		setLayout(page, { manual: true, template: moved ? undefined : page.template });
 		this.#scheduleSave();
 		return true;
 	}
@@ -386,7 +480,8 @@ export class DocumentStore {
 	/**
 	 * The height a text turned out to be when it was laid out: only the box kept for
 	 * it follows, from its own top-left corner down (`anchoredFrame`); nothing on the
-	 * page has been arranged, and a turn of the page is not forgotten.
+	 * page has been arranged, and neither a turn of the page nor its template is
+	 * forgotten.
 	 */
 	setTextHeight(pageId: string, textId: string, height: number): void {
 		const page = this.page(pageId);
@@ -403,8 +498,10 @@ export class DocumentStore {
 
 	/**
 	 * Move a text to `toPageId` (on top of its text) at `frame`, fitted like
-	 * `updateText`. A page holding `MAX_TEXTS_PER_PAGE` takes no more. Its fields
-	 * read the chart nearest to where it lands.
+	 * `updateText`. A page holding `MAX_TEXTS_PER_PAGE` takes no more. A text told
+	 * which chart to read goes on reading it, from the other page; one that read the
+	 * nearest reads the nearest where it lands, and on a page with no chart the one it
+	 * read before, so that a table moved to a page of its own still lists its sky.
 	 */
 	moveText(textId: string, toPageId: string, frame: Rect): boolean {
 		const from = this.pages.find((page) => page.texts?.some((it) => it.id === textId));
@@ -414,7 +511,8 @@ export class DocumentStore {
 		if ((to.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) return false;
 		const index = from.texts!.findIndex((it) => it.id === textId);
 		const moved = $state.snapshot(from.texts![index]);
-		delete moved.chartId;
+		const read = boundItem(from, moved, this.pages);
+		if (to.items.length === 0 && read) moved.chartId = read.id;
 		from.texts!.splice(index, 1);
 		setLayout(from, { manual: from.manual });
 		to.texts = [
@@ -461,7 +559,8 @@ export class DocumentStore {
 	 * the page's place, the rest follow it as new pages, each with the charts named
 	 * for it. A chart the template made (a finder card's close-up) is added; one it
 	 * drops (the close-up before it) goes. Text a template put on the page before
-	 * goes; the text its owner added stays on the first. Nothing happens, and null
+	 * goes; the text its owner added stays on the first. Each page remembers the
+	 * template that made it (`LaidPage.template`), for a turn. Nothing happens, and null
 	 * comes back, when `laid` does not account for the page's charts each once, or the
 	 * document has no room for the pages or the charts. The returned function puts the
 	 * page back as it was and takes the new ones away (once, while they are all still
@@ -522,7 +621,12 @@ export class DocumentStore {
 				}));
 			if (texts.length > 0) next.texts = texts;
 			// Arranged by the arranger while it holds charts alone; by hand with text among them.
-			setLayout(next, texts.length > 0 ? { manual: true } : { layout: part.layout });
+			setLayout(
+				next,
+				texts.length > 0
+					? { manual: true, template: part.template }
+					: { layout: part.layout, template: part.template }
+			);
 			return next;
 		});
 		this.pages.splice(index, 1, ...pages);
@@ -550,9 +654,10 @@ export class DocumentStore {
 			}
 			const text = page.texts?.find((it) => it.id === id);
 			if (text) {
-				const { text: words, style, frame, rotation } = $state.snapshot(text);
+				const { text: words, style, frame, rotation, table } = $state.snapshot(text);
 				const copy: BlockCopy = { kind: 'text', text: words, style, frame };
 				if (rotation) copy.rotation = rotation;
+				if (table) copy.table = table;
 				return copy;
 			}
 		}
@@ -595,7 +700,10 @@ export class DocumentStore {
 		const rotation = isFiniteNumber(value.rotation) ? normalizeRotation(value.rotation) : 0;
 		const sized = fitTextFrame(frame, page.orientation, rotation);
 		const placed = pastePlace(page, sized, rotation, at);
-		const id = this.addText(pageId, { text: value.text, style, frame: placed, rotation });
+		const pasted: Omit<DocText, 'id'> = { text: value.text, style, frame: placed, rotation };
+		const table = tableSpec(value.table);
+		if (table) pasted.table = table;
+		const id = this.addText(pageId, pasted);
 		return id ? { kind: 'text', id } : 'full';
 	}
 
@@ -732,12 +840,18 @@ function placeItems(items: DocItem[], plan: readonly PlacedChart[], added?: DocI
 
 /**
  * Set how a page was laid out. An absent field is the default (automatic, no
- * layout, no memo), so a change that passes only `manual` forgets the layout
- * (its frames are no longer the arranger's) and the turn memo.
+ * layout, no memo, no template), so a change that passes only `manual` forgets the
+ * layout (its frames are no longer the arranger's), the turn memo, and the template
+ * the page was laid out as (it is no longer what that made).
  */
 function setLayout(
 	page: DocPage,
-	{ manual, layout, turnMemo }: { manual?: boolean; layout?: PageLayout; turnMemo?: TurnMemo }
+	{
+		manual,
+		layout,
+		turnMemo,
+		template
+	}: { manual?: boolean; layout?: PageLayout; turnMemo?: TurnMemo; template?: PageTemplate }
 ) {
 	if (manual) page.manual = true;
 	else delete page.manual;
@@ -745,6 +859,33 @@ function setLayout(
 	else delete page.layout;
 	if (turnMemo) page.turnMemo = turnMemo;
 	else delete page.turnMemo;
+	if (template) page.template = { ...template };
+	else delete page.template;
+}
+
+/**
+ * Where a text is on its page once the page is turned from `from` to `to`: it keeps
+ * its place in the content box, which is as far across and down it as before, and
+ * its share of the width; turning back puts it where it was.
+ */
+function turnedTextFrame(
+	text: Pick<DocText, 'frame' | 'rotation'>,
+	from: PageOrientation,
+	to: PageOrientation
+): Rect {
+	const was = contentBox(from);
+	const box = contentBox(to);
+	const { x, y, w, h } = text.frame;
+	return fitTextFrame(
+		{
+			x: box.x + ((x - was.x) * box.w) / was.w,
+			y: box.y + ((y - was.y) * box.h) / was.h,
+			w: (w * box.w) / was.w,
+			h
+		},
+		to,
+		text.rotation
+	);
 }
 
 /** What `undo` of an Add compares: a page changed since the Add takes no undo. */
@@ -861,7 +1002,18 @@ function parsePage(value: unknown, ids: Set<string>): DocPage | null {
 	if (layout) page.layout = layout;
 	const turnMemo = parseTurnMemo(value.turnMemo, page);
 	if (turnMemo) page.turnMemo = turnMemo;
+	const template = parseTemplate(value.template);
+	if (template) page.template = template;
 	return page;
+}
+
+/** The template a page remembers: one there is, charts alone apart, in a language there is. */
+function parseTemplate(value: unknown): PageTemplate | null {
+	if (!isRecord(value)) return null;
+	const info = TEMPLATES.find((template) => template.id === value.id);
+	if (!info || info.id === 'charts') return null;
+	const language = TEMPLATE_LANGUAGES.find((code) => code === value.language);
+	return { id: info.id, language: language ?? TEMPLATE_LANGUAGES[0] };
 }
 
 function isOrientation(value: unknown): value is PageOrientation {
@@ -982,9 +1134,24 @@ function parseText(value: unknown, ids: Set<string>, orientation: PageOrientatio
 		frame: fitTextFrame(frame, orientation, rotation)
 	};
 	if (rotation !== 0) parsed.rotation = rotation;
+	const table = tableSpec(value.table);
+	if (table) parsed.table = table;
 	if (TEXT_ROLES.includes(value.role as TextRole)) parsed.role = value.role as TextRole;
 	if (typeof chartId === 'string' && chartId !== '') parsed.chartId = chartId;
 	return parsed;
+}
+
+/** A table's spec as read from anywhere: a source there is, and rows within the limits. */
+function tableSpec(value: unknown): TableSpec | null {
+	if (!isRecord(value) || !TABLE_SOURCES.includes(value.source as TableSpec['source'])) return null;
+	if (!isFiniteNumber(value.rows)) return null;
+	const rows = Math.max(MIN_TABLE_ROWS, Math.min(MAX_TABLE_ROWS, Math.round(value.rows)));
+	const look = TABLE_LOOKS.includes(value.look as TableLook) ? (value.look as TableLook) : 'names';
+	const spec: TableSpec = { source: value.source as TableSpec['source'], look, rows };
+	const language = TEMPLATE_LANGUAGES.find((code) => code === value.language);
+	// English is the absence of a language, as for a template's words.
+	if (language && language !== TEMPLATE_LANGUAGES[0]) spec.language = language;
+	return spec;
 }
 
 function parseTextStyle(value: unknown): TextStyle | null {

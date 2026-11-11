@@ -19,8 +19,8 @@
 	 */
 	import { PINHOLE_CORNER_RADIUS } from '$lib/constants';
 	import { pageSize, PRINT_MM_PER_PREVIEW_PX } from '$lib/document/geometry';
-	import { anchoredFrame, shownText } from '$lib/document/text';
-	import { measuredLayout } from '$lib/document/text-fonts.svelte';
+	import { anchoredFrame } from '$lib/document/text';
+	import { shownLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocPage } from '$lib/document/types';
 	import { catalog } from '$lib/stores.svelte';
 	import { drawChartThumbnail } from './chart-thumbnail';
@@ -32,9 +32,11 @@
 		scale: number;
 		/** The chart still in the air, whose place stays empty for now. */
 		pendingItemId?: string | null;
+		/** The document's pages, for a text that reads a chart on another page. */
+		pages?: readonly DocPage[];
 	}
 
-	let { page, scale, pendingItemId = null }: Props = $props();
+	let { page, scale, pendingItemId = null, pages }: Props = $props();
 
 	/** The pinhole frame's rounded corner, in mm on the page. */
 	const cornerMm = PINHOLE_CORNER_RADIUS * PRINT_MM_PER_PREVIEW_PX;
@@ -78,7 +80,7 @@
 		</div>
 	{/each}
 	{#each page.texts ?? [] as text (text.id)}
-		{@const layout = measuredLayout(shownText(page, text), text.style, text.frame.w)}
+		{@const layout = shownLayout(page, text, text.frame.w, pages)}
 		{@const box = anchoredFrame(text.frame, text.rotation ?? 0, text.frame.w, layout.height)}
 		<div
 			class="text"

@@ -35,8 +35,13 @@ const MAX_ITEMS_PER_PAGE: usize = 50;
 const MAX_CHARTS: usize = 200;
 /// Blocks of text on one page.
 const MAX_TEXTS_PER_PAGE: usize = 50;
-/// Lines in one block of text: a page of 6 pt type is under 200.
-const MAX_LINES_PER_TEXT: usize = 200;
+/// Lines in one block of text: a page of 6 pt type is under 200, and a table is a
+/// line a cell (40 rows of 8 columns under a header).
+const MAX_LINES_PER_TEXT: usize = 400;
+/// Rules in one block of text: a table has one over, under and below its header.
+const MAX_RULES_PER_TEXT: usize = 100;
+/// The thickest rule, mm.
+const MAX_RULE_WIDTH_MM: f64 = 5.0;
 /// Characters in one line: far more than a page is wide at any size worth reading.
 const MAX_LINE_CHARS: usize = 400;
 /// Font sizes, mm: about 3 pt to 280 pt.
@@ -144,6 +149,26 @@ fn validate_text(text: &DocumentText, page: &DocumentPage) -> Result<(), String>
             "rotation_deg, cx_mm and cy_mm must be finite and within ±{MAX_SIDE_MM}"
         ));
     }
+    if text.rules.len() > MAX_RULES_PER_TEXT {
+        return Err(format!(
+            "at most {MAX_RULES_PER_TEXT} rules, got {}",
+            text.rules.len()
+        ));
+    }
+    for (rule_index, rule) in text.rules.iter().enumerate() {
+        let ends = [rule.x1_mm, rule.y1_mm, rule.x2_mm, rule.y2_mm];
+        let sound = ends
+            .iter()
+            .all(|value| value.is_finite() && value.abs() <= MAX_SIDE_MM)
+            && rule.width_mm > 0.0
+            && rule.width_mm <= MAX_RULE_WIDTH_MM;
+        if !sound {
+            return Err(format!(
+                "rule {}: needs finite ends within ±{MAX_SIDE_MM} and a width_mm in (0, {MAX_RULE_WIDTH_MM}]",
+                rule_index + 1
+            ));
+        }
+    }
     let (sin, cos) = text.rotation_deg.to_radians().sin_cos();
     for (line_index, line) in text.lines.iter().enumerate() {
         let line_number = line_index + 1;
@@ -185,8 +210,8 @@ fn xml_text(text: &str) -> String {
     out
 }
 
-/// A block of text as SVG: one `<text>` per line, black, in a bundled font, the block
-/// turned about its centre when it is.
+/// A block of text as SVG: one `<text>` per line, black, in a bundled font, with its
+/// rules, the block turned about its centre when it is.
 fn text_svg(svg: &mut String, text: &DocumentText) {
     let family = match text.font {
         TextFont::Serif => fonts::SERIF,
@@ -194,11 +219,12 @@ fn text_svg(svg: &mut String, text: &DocumentText) {
     };
     let weight = if text.bold { 700 } else { 400 };
     let style = if text.italic { "italic" } else { "normal" };
-    let anchor = match text.anchor {
+    let name = |anchor: TextAnchor| match anchor {
         TextAnchor::Start => "start",
         TextAnchor::Middle => "middle",
         TextAnchor::End => "end",
     };
+    let anchor = name(text.anchor);
     let _ = write!(
         svg,
         r##"<g font-family="{family}" font-size="{}" font-weight="{weight}" font-style="{style}" text-anchor="{anchor}" fill="#000000""##,
@@ -212,16 +238,29 @@ fn text_svg(svg: &mut String, text: &DocumentText) {
         );
     }
     svg.push('>');
+    for rule in &text.rules {
+        let _ = write!(
+            svg,
+            r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="#000000" stroke-width="{}" />"##,
+            rule.x1_mm, rule.y1_mm, rule.x2_mm, rule.y2_mm, rule.width_mm
+        );
+    }
     for line in &text.lines {
         // Nothing to draw, and usvg would only carry an empty node along.
         if line.text.trim().is_empty() {
             continue;
         }
+        let _ = write!(svg, r##"<text x="{}" y="{}""##, line.x_mm, line.y_mm);
+        // A cell's own anchor and weight, where they differ from the block's.
+        if let Some(own) = line.anchor.filter(|own| *own != text.anchor) {
+            let _ = write!(svg, r##" text-anchor="{}""##, name(own));
+        }
+        if let Some(bold) = line.bold.filter(|bold| *bold != text.bold) {
+            let _ = write!(svg, r##" font-weight="{}""##, if bold { 700 } else { 400 });
+        }
         let _ = write!(
             svg,
-            r##"<text x="{}" y="{}" xml:space="preserve">{}</text>"##,
-            line.x_mm,
-            line.y_mm,
+            r##" xml:space="preserve">{}</text>"##,
             xml_text(&line.text)
         );
     }
@@ -668,6 +707,8 @@ mod tests {
             x_mm,
             y_mm,
             text: text.to_string(),
+            anchor: None,
+            bold: None,
         }
     }
 
@@ -682,6 +723,7 @@ mod tests {
             cx_mm: 0.0,
             cy_mm: 0.0,
             lines,
+            rules: vec![],
         }
     }
 
@@ -746,7 +788,7 @@ mod tests {
         let many = (0..=MAX_LINES_PER_TEXT)
             .map(|_| line(12.0, 20.0, "x"))
             .collect();
-        assert!(rejected(&page_with_text(text(many))).contains("at most 200 lines"));
+        assert!(rejected(&page_with_text(text(many))).contains("at most 400 lines"));
 
         let mut page = a4(false, vec![]);
         page.texts = (0..=MAX_TEXTS_PER_PAGE)
@@ -770,6 +812,7 @@ mod tests {
             rotation_deg: 0.0,
             cx_mm: 0.0,
             cy_mm: 0.0,
+            rules: vec![],
             lines: vec![
                 line(105.0, 18.0, "φ < 56° & \"LST\""),
                 line(105.0, 24.0, "   "),
@@ -850,6 +893,69 @@ mod tests {
                 "{bad} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn a_table_is_cells_with_their_own_anchor_and_weight_and_its_rules() {
+        use crate::models::DocumentRule;
+        let mut table = text(vec![
+            line(12.0, 100.0, "Name"),
+            line(90.0, 100.0, "Mag"),
+            line(12.0, 106.0, "Orion Nebula"),
+            line(90.0, 106.0, "4.0"),
+        ]);
+        table.lines[0].bold = Some(true);
+        table.lines[1].bold = Some(true);
+        table.lines[1].anchor = Some(TextAnchor::End);
+        table.lines[3].anchor = Some(TextAnchor::End);
+        // The block's own anchor and weight, named again, add nothing to the cell.
+        table.lines[2].anchor = Some(TextAnchor::Start);
+        table.lines[2].bold = Some(false);
+        table.rules = vec![DocumentRule {
+            x1_mm: 12.0,
+            y1_mm: 101.5,
+            x2_mm: 90.0,
+            y2_mm: 101.5,
+            width_mm: 0.2,
+        }];
+        table.rotation_deg = 90.0;
+        table.cx_mm = 51.0;
+        table.cy_mm = 103.0;
+        let document = page_with_text(table.clone());
+        assert_eq!(validate_document(&document), Ok(()));
+        let svg = page_svg(&document.pages[0], 0, hip_catalog());
+        assert!(svg.contains(
+            r##"<text x="12" y="100" font-weight="700" xml:space="preserve">Name</text>"##
+        ));
+        assert!(svg.contains(
+            r##"<text x="90" y="100" text-anchor="end" font-weight="700" xml:space="preserve">Mag</text>"##
+        ));
+        assert!(svg.contains(r##"<text x="12" y="106" xml:space="preserve">Orion Nebula</text>"##));
+        assert!(svg.contains(
+            r##"<text x="90" y="106" text-anchor="end" xml:space="preserve">4.0</text>"##
+        ));
+        // The rule is in the text's own group, so it turns with the text.
+        let rule = r##"<line x1="12" y1="101.5" x2="90" y2="101.5" stroke="#000000" stroke-width="0.2" />"##;
+        let group = svg.find(r##"transform="rotate(90 51 103)">"##).unwrap();
+        assert!(svg.find(rule).unwrap() > group);
+        assert!(svg.find(rule).unwrap() < svg.rfind("</g>").unwrap());
+
+        for (width_mm, x2_mm) in [(0.0, 90.0), (5.5, 90.0), (0.2, f64::NAN)] {
+            let mut bad = table.clone();
+            bad.rules[0].width_mm = width_mm;
+            bad.rules[0].x2_mm = x2_mm;
+            assert!(rejected(&page_with_text(bad)).starts_with("page 1, text 1: rule 1: needs"));
+        }
+        let mut many = table.clone();
+        many.rules = vec![table.rules[0].clone(); MAX_RULES_PER_TEXT + 1];
+        assert!(rejected(&page_with_text(many)).contains("at most 100 rules"));
+        // A text from before tables were has no rules, and its lines no anchor of their own.
+        let old: DocumentText = serde_json::from_value(serde_json::json!({
+            "font": "serif", "size_mm": 4.0, "lines": [{ "x_mm": 12, "y_mm": 20, "text": "x" }]
+        }))
+        .unwrap();
+        assert!(old.rules.is_empty());
+        assert!(old.lines[0].anchor.is_none() && old.lines[0].bold.is_none());
     }
 
     #[tokio::test]

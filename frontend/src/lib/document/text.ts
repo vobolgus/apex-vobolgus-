@@ -8,9 +8,11 @@
  * hanging off the line's end, and inside a word only when the word alone is too long.
  *
  * A field is a name in braces, `{lst}`: it shows a value of the chart the text
- * reads, and changes with it. An unknown name stays as typed. A text reads one
- * chart: the one it was told to (`chartId`), else the nearest to it on its page, so
- * a caption reads the chart it is put under.
+ * reads, and changes with it. An unknown name stays as typed. An angle or an hour
+ * may say how many decimals to show, `{lat:1}`: of the last unit it shows, so of the
+ * degrees, or of the minutes of an hour. A text reads one chart: the one it was told
+ * to (`chartId`), else the nearest to it on its page, so a caption reads the chart it
+ * is put under.
  */
 
 import { viewBasis } from '$lib/math/projection';
@@ -37,7 +39,7 @@ export const MIN_NEW_TEXT_WIDTH_MM = 40;
 /** The backend's limits (backend/src/handlers/document.rs), and room to type. */
 export const MAX_TEXTS_PER_PAGE = 50;
 export const MAX_TEXT_CHARS = 4000;
-export const MAX_TEXT_LINES = 200;
+export const MAX_TEXT_LINES = 400;
 export const MAX_LINE_CHARS = 400;
 
 /** The sizes the − and + of a text step through, pt. */
@@ -74,10 +76,30 @@ export interface TextLine {
 	text: string;
 	/** The baseline, mm below the block's top. */
 	baseline: number;
+	/**
+	 * A table's cell: where its anchor is, mm from the block's left, which point of
+	 * it that is, and whether it is bold. A line of text has none of the three: it
+	 * is set by the text's own alignment and weight.
+	 */
+	x?: number;
+	anchor?: 'start' | 'middle' | 'end';
+	bold?: boolean;
+}
+
+/** A straight line, mm from the block's top-left: a table's rule. */
+export interface TextRule {
+	x1: number;
+	y1: number;
+	x2: number;
+	y2: number;
+	/** How thick, mm. */
+	width: number;
 }
 
 export interface TextLayout {
 	lines: TextLine[];
+	/** A table's rules. */
+	rules?: TextRule[];
 	/** mm. Never 0: an empty text is one line high. */
 	height: number;
 	/** The font size, mm. */
@@ -90,71 +112,106 @@ export interface TextLayout {
 
 export type FieldName = 'lat' | 'lst' | 'ra' | 'dec' | 'date' | 'time' | 'fov';
 
-/** The fields a text may hold, in the order the editor offers them. */
-export const TEXT_FIELDS: readonly { name: FieldName; label: string }[] = [
-	{ name: 'lat', label: 'Latitude' },
-	{ name: 'lst', label: 'Sidereal time' },
-	{ name: 'date', label: 'Date' },
-	{ name: 'time', label: 'Time' },
-	{ name: 'ra', label: 'Centre RA' },
-	{ name: 'dec', label: 'Centre Dec' },
-	{ name: 'fov', label: 'Field of view' }
+/**
+ * The fields a text may hold, in the order the editor offers them. A `precise` one
+ * takes the number of decimals after its name (`{lat:1}`); a date and a time do not.
+ */
+export const TEXT_FIELDS: readonly { name: FieldName; label: string; precise: boolean }[] = [
+	{ name: 'lat', label: 'Latitude', precise: true },
+	{ name: 'lst', label: 'Sidereal time', precise: true },
+	{ name: 'date', label: 'Date', precise: false },
+	{ name: 'time', label: 'Time', precise: false },
+	{ name: 'ra', label: 'Centre RA', precise: true },
+	{ name: 'dec', label: 'Centre Dec', precise: true },
+	{ name: 'fov', label: 'Field of view', precise: true }
 ];
 
 /** What a field shows with no chart to read, or a value the chart does not have. */
 export const NO_VALUE = '—';
 
-const FIELD_PATTERN = /\{([a-z]+)\}/g;
+/** A name in braces, and after a colon the decimals to show: 0, 1 or 2. */
+const FIELD_PATTERN = /\{([a-z]+)(?::([0-2]))?\}/g;
 const FIELD_NAMES = new Set<string>(TEXT_FIELDS.map((field) => field.name));
+const PRECISE_NAMES = new Set<string>(
+	TEXT_FIELDS.filter((field) => field.precise).map((field) => field.name)
+);
 
-function isField(name: string): name is FieldName {
-	return FIELD_NAMES.has(name);
+/**
+ * The field a match of `FIELD_PATTERN` is, with its decimals, or null when it is
+ * none and stays as typed: an unknown name, or decimals asked of a date or a time.
+ */
+function fieldOf(name: string, decimals: string | undefined): [FieldName, number] | null {
+	if (!FIELD_NAMES.has(name)) return null;
+	if (decimals === undefined) return [name as FieldName, 0];
+	return PRECISE_NAMES.has(name) ? [name as FieldName, Number(decimals)] : null;
 }
 
 export function hasFields(text: string): boolean {
-	return Array.from(text.matchAll(FIELD_PATTERN)).some((match) => isField(match[1]));
+	return Array.from(text.matchAll(FIELD_PATTERN)).some(
+		(match) => fieldOf(match[1], match[2]) !== null
+	);
 }
 
 const pad = (value: number) => String(value).padStart(2, '0');
 
-/** Hours of right ascension as "13h 05m", rounded to the minute. */
-function hours(raRad: number): string {
-	const minutes = Math.round((((raRad / (2 * Math.PI)) % 1) + 1) * 1440) % 1440;
-	return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}m`;
+/**
+ * Hours of right ascension as "13h 05m", rounded to the minute, or to `decimals`
+ * of a minute ("13h 05.2m"). Counted in whole steps of the last decimal, so that
+ * rounding up carries: 59.96 minutes is the next hour's 00.0, and at the day's end
+ * 0h 00.0m.
+ */
+function hours(raRad: number, decimals = 0): string {
+	const perMinute = 10 ** decimals;
+	const day = 1440 * perMinute;
+	const steps = Math.round((((raRad / (2 * Math.PI)) % 1) + 1) * day) % day;
+	const minutes = Math.floor(steps / perMinute);
+	const part = decimals > 0 ? `.${String(steps % perMinute).padStart(decimals, '0')}` : '';
+	return `${Math.floor(minutes / 60)}h ${pad(minutes % 60)}${part}m`;
+}
+
+/** `value` rounded to `decimals`; a negative that rounds to nothing is 0, not −0. */
+function rounded(value: number, decimals: number): number {
+	const scale = 10 ** decimals;
+	return Math.round(value * scale) / scale || 0;
 }
 
 /**
- * The values of a chart's fields. The centre of a stereographic chart is the zenith
- * of whoever sees that sky: its declination is their latitude, its right ascension
- * their sidereal time. A pinhole frame looks wherever it is pointed, so it has a
- * centre but no latitude or sidereal time.
+ * The values of a chart's fields, its angles and hours to `decimals` (0, 1 or 2; a
+ * date and a time are what they are). The centre of a stereographic chart is the
+ * zenith of whoever sees that sky: its declination is their latitude, its right
+ * ascension their sidereal time. A pinhole frame looks wherever it is pointed, so it
+ * has a centre but no latitude or sidereal time.
  */
-export function fieldValues(chart: ChartSnapshot): Record<FieldName, string> {
+export function fieldValues(chart: ChartSnapshot, decimals = 0): Record<FieldName, string> {
 	const [x, y, z] = viewBasis(chart.view.orientation).forward;
 	const ra = Math.atan2(y, x);
-	const dec = Math.round((Math.asin(Math.max(-1, Math.min(1, z))) * 180) / Math.PI);
+	const dec = rounded((Math.asin(Math.max(-1, Math.min(1, z))) * 180) / Math.PI, decimals);
+	const degrees = Math.abs(dec).toFixed(decimals);
 	const stereo = chart.view.projection === 'stereographic';
 	const iso = new Date(chart.createdAt).toISOString();
 	const fov = stereo ? chart.view.stereoFovDeg : chart.view.pinholeFovDeg;
 	return {
-		lat: stereo ? `${Math.abs(dec)}° ${dec < 0 ? 'S' : 'N'}` : NO_VALUE,
-		lst: stereo ? hours(ra) : NO_VALUE,
-		ra: hours(ra),
-		dec: `${dec < 0 ? '−' : '+'}${Math.abs(dec)}°`,
+		lat: stereo ? `${degrees}° ${dec < 0 ? 'S' : 'N'}` : NO_VALUE,
+		lst: stereo ? hours(ra, decimals) : NO_VALUE,
+		ra: hours(ra, decimals),
+		dec: `${dec < 0 ? '−' : '+'}${degrees}°`,
 		date: iso.slice(0, 10),
 		time: `${iso.slice(11, 16)} UTC`,
-		fov: `${Math.round(fov)}°`
+		fov: `${rounded(fov, decimals).toFixed(decimals)}°`
 	};
 }
 
 /** `text` with every field replaced by the chart's value, or by a dash without a chart. */
 export function resolveFields(text: string, chart: ChartSnapshot | null): string {
-	let values: Record<FieldName, string> | null = null;
-	return text.replace(FIELD_PATTERN, (token, name: string) => {
-		if (!isField(name)) return token;
+	// The chart's values at each number of decimals asked for, worked out once.
+	const values: (Record<FieldName, string> | undefined)[] = [];
+	return text.replace(FIELD_PATTERN, (token, name: string, suffix: string | undefined) => {
+		const field = fieldOf(name, suffix);
+		if (!field) return token;
 		if (!chart) return NO_VALUE;
-		values ??= fieldValues(chart);
-		return values[name];
+		const [key, decimals] = field;
+		const read = (values[decimals] ??= fieldValues(chart, decimals));
+		return read[key];
 	});
 }
 
@@ -176,14 +233,26 @@ function centreDistance(a: Rect, b: Rect): number {
 	return Math.hypot(a.x + a.w / 2 - (b.x + b.w / 2), a.y + a.h / 2 - (b.y + b.h / 2));
 }
 
+/** The pages of a document, for a text that reads a chart on another page than its own. */
+export type Sheets = readonly Pick<DocPage, 'items'>[];
+
 /**
- * The chart a text's fields read: the one it names while that is on its page, else
- * the nearest (`gap`); of charts as near (a text across two of them), the one
- * whose centre is nearer, then the earlier on the page.
+ * The chart a text's fields read: the one it names, on its own page or (given the
+ * document's `pages`) on any other, else the nearest on its page (`gap`); of
+ * charts as near (a text across two of them), the one whose centre is nearer, then
+ * the earlier on the page.
  */
-export function boundItem(page: Pick<DocPage, 'items'>, text: DocText): DocItem | null {
-	const named = page.items.find((it) => it.id === text.chartId);
-	if (named) return named;
+export function boundItem(
+	page: Pick<DocPage, 'items'>,
+	text: DocText,
+	pages?: Sheets
+): DocItem | null {
+	if (text.chartId !== undefined) {
+		const named =
+			page.items.find((it) => it.id === text.chartId) ??
+			pages?.flatMap((sheet) => sheet.items).find((it) => it.id === text.chartId);
+		if (named) return named;
+	}
 	const box = textBounds(text);
 	let best: DocItem | null = null;
 	let bestGap = Infinity;
@@ -203,13 +272,17 @@ export function boundItem(page: Pick<DocPage, 'items'>, text: DocText): DocItem 
 	return best;
 }
 
-export function boundChart(page: Pick<DocPage, 'items'>, text: DocText): ChartSnapshot | null {
-	return boundItem(page, text)?.chart ?? null;
+export function boundChart(
+	page: Pick<DocPage, 'items'>,
+	text: DocText,
+	pages?: Sheets
+): ChartSnapshot | null {
+	return boundItem(page, text, pages)?.chart ?? null;
 }
 
 /** What a text shows: its fields read from its chart. */
-export function shownText(page: Pick<DocPage, 'items'>, text: DocText): string {
-	return resolveFields(text.text, boundChart(page, text));
+export function shownText(page: Pick<DocPage, 'items'>, text: DocText, pages?: Sheets): string {
+	return resolveFields(text.text, boundChart(page, text, pages));
 }
 
 // === Lines ===

@@ -926,7 +926,7 @@ describe('DocumentStore: text', () => {
 		expect(page.manual).toBe(true);
 	});
 
-	it("moves a text to another page, where it reads that page's chart", () => {
+	it('moves a text to another page, where it reads the nearest chart or goes on reading its own', () => {
 		const doc = new DocumentStore(null);
 		const first = doc.addPage();
 		const second = doc.addPage('landscape');
@@ -934,14 +934,46 @@ describe('DocumentStore: text', () => {
 		expect(doc.moveText(id, second, { x: 200, y: 150, w: 186, h: 6 })).toBe(true);
 		expect(doc.pages[0].texts).toEqual([]);
 		const moved = doc.pages[1].texts![0];
-		expect(moved).toMatchObject({ id, text: 'Latitude {lat}' });
-		expect(moved).not.toHaveProperty('chartId');
+		// Told a chart, it goes on reading it from the other page.
+		expect(moved).toMatchObject({ id, text: 'Latitude {lat}', chartId: 'chart-a' });
 		expectInside(moved.frame, doc.pages[1]);
 		expect(doc.pages[1].manual).toBe(true);
 		// On its own page a move is a change of frame.
 		expect(doc.moveText(id, second, { x: 12, y: 12, w: 100, h: 6 })).toBe(true);
 		expect(doc.pages[1].texts![0].frame).toEqual({ x: 12, y: 12, w: 100, h: 6 });
 		expect(doc.moveText('gone', first, moved.frame)).toBe(false);
+	});
+
+	it('keeps the sky of a text moved to a page with no chart, and lets go of it on a page with one', () => {
+		const doc = new DocumentStore(null);
+		doc.addChart(chart());
+		const [withChart] = doc.pages;
+		const skyId = withChart.items[0].id;
+		const bare = doc.addPage();
+		const other = doc.addPage();
+		doc.pages[2].items.push({ id: 'other', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } });
+		const frame = { x: 12, y: 250, w: 100, h: 6 };
+
+		// It read the nearest chart of its page; on a page with none it is told that one.
+		const table = doc.addText(withChart.id, {
+			...caption(frame),
+			table: { source: 'messier', rows: 5 }
+		})!;
+		expect(doc.moveText(table, bare, frame)).toBe(true);
+		expect(doc.pages[1].texts![0].chartId).toBe(skyId);
+		// Moved on to a page with a chart, it still reads the one it was told.
+		expect(doc.moveText(table, other, frame)).toBe(true);
+		expect(doc.pages[2].texts![0].chartId).toBe(skyId);
+
+		// One that read the nearest and lands by a chart reads the nearest there.
+		const words = doc.addText(withChart.id, caption(frame))!;
+		expect(doc.moveText(words, other, frame)).toBe(true);
+		expect(doc.pages[2].texts![1]).not.toHaveProperty('chartId');
+		// From a page with no chart to another with none, there is nothing to keep.
+		const lone = doc.addText(bare, caption(frame))!;
+		const empty = doc.addPage();
+		expect(doc.moveText(lone, empty, frame)).toBe(true);
+		expect(doc.pages[3].texts![0]).not.toHaveProperty('chartId');
 	});
 
 	it('turns a text about its centre, fitted to the page by what it takes up', () => {
@@ -1091,6 +1123,77 @@ describe('DocumentStore: text', () => {
 		expect(load(undefined)).not.toHaveProperty('texts');
 		expect(load([text({ text: null })])).not.toHaveProperty('texts');
 		expect(load('nonsense').manual).toBeUndefined();
+	});
+});
+
+describe('DocumentStore: tables', () => {
+	const style = { ...DEFAULT_TEXT_STYLE };
+	const frame = { x: 12, y: 100, w: 186, h: 40 };
+
+	it('keeps a table as a text that is not typed, and changes what it lists', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, {
+			text: '',
+			style,
+			frame,
+			table: { source: 'messier', rows: 10 }
+		})!;
+		const table = () => doc.pages[0].texts![0];
+		expect(table()).toMatchObject({ text: '', table: { source: 'messier', rows: 10 } });
+		// How it looks is kept with it; a look there is not is the look of names.
+		doc.updateText(pageId, id, { table: { source: 'messier', look: 'details', rows: 10 } });
+		expect(table().table).toEqual({ source: 'messier', look: 'details', rows: 10 });
+		doc.updateText(pageId, id, { table: { source: 'messier', look: 'fancy' as never, rows: 10 } });
+		expect(table().table!.look).toBe('names');
+		doc.updateText(pageId, id, { table: { source: 'stars', rows: 25 } });
+		expect(table().table).toEqual({ source: 'stars', look: 'names', rows: 25 });
+		// Rows are whole and within the limits; a source there is not is not taken.
+		doc.updateText(pageId, id, { table: { source: 'stars', rows: 900 } });
+		expect(table().table!.rows).toBe(40);
+		doc.updateText(pageId, id, { table: { source: 'stars', rows: 0 } });
+		expect(table().table!.rows).toBe(1);
+		doc.updateText(pageId, id, { table: { source: 'comets' as never, rows: 5 } });
+		expect(table().table).toEqual({ source: 'stars', look: 'names', rows: 1 });
+		// Its language is kept when it is Russian; English is none said.
+		doc.updateText(pageId, id, { table: { source: 'stars', rows: 5, language: 'ru' } });
+		expect(table().table).toEqual({ source: 'stars', look: 'names', rows: 5, language: 'ru' });
+		doc.updateText(pageId, id, { table: { source: 'stars', rows: 1, language: 'en' } });
+		expect(table().table).toEqual({ source: 'stars', look: 'names', rows: 1 });
+		// A text does not become a table by being told a spec.
+		const words = doc.addText(pageId, { text: 'Hello', style, frame })!;
+		doc.updateText(pageId, words, { table: { source: 'stars', rows: 5 } });
+		expect(doc.pages[0].texts![1]).not.toHaveProperty('table');
+	});
+
+	it('saves a table, copies and pastes it, and reads back only what is a table', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const pageId = doc.addPage();
+		const id = doc.addText(pageId, {
+			text: '',
+			style,
+			frame,
+			table: { source: 'stars', rows: 7 }
+		})!;
+		const copy = doc.copyBlock(id)!;
+		expect(copy).toMatchObject({ kind: 'text', text: '', table: { source: 'stars', rows: 7 } });
+		const pasted = doc.pasteBlock(pageId, copy) as { id: string };
+		expect(doc.pages[0].texts!.find((text) => text.id === pasted.id)!.table).toEqual({
+			source: 'stars',
+			look: 'names',
+			rows: 7
+		});
+		doc.flush();
+		const raw = saved(storage);
+		expect(raw.pages[0].texts![0].table).toEqual({ source: 'stars', rows: 7 });
+		(raw.pages[0].texts![0] as { table: unknown }).table = { source: 'comets', rows: 7 };
+		(raw.pages[0].texts![1] as { table: unknown }).table = { source: 'messier', rows: 3.4 };
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		const again = new DocumentStore(storage);
+		again.load();
+		expect(again.pages[0].texts![0]).not.toHaveProperty('table');
+		expect(again.pages[0].texts![1].table).toEqual({ source: 'messier', look: 'names', rows: 3 });
 	});
 });
 
@@ -1452,6 +1555,446 @@ describe('DocumentStore: templates', () => {
 		const undo = doc.layPage(pageId, layTemplate('caption', doc.pages[0]))!;
 		doc.removePage(doc.pages[1].id);
 		expect(undo()).toBe(false);
+	});
+
+	it('remembers on each page the template that made it, and nothing for charts alone', () => {
+		const { doc, pageId } = mixed();
+		expect(doc.pages[0].template).toBeUndefined();
+		const undo = doc.layPage(pageId, layTemplate('caption', doc.pages[0], { language: 'ru' }))!;
+		expect(doc.pages.map((page) => page.template)).toEqual([
+			{ id: 'caption', language: 'ru' },
+			{ id: 'caption', language: 'ru' },
+			undefined
+		]);
+		// Laid out as another, it is that one's; as charts alone, the arranger's, and no template's.
+		doc.layPage(pageId, layTemplate('sheet', doc.pages[0]));
+		expect(doc.pages[0].template).toEqual({ id: 'sheet', language: 'en' });
+		const back = doc.layPage(pageId, layTemplate('charts', doc.pages[0]))!;
+		expect(doc.pages[0].template).toBeUndefined();
+		// An Undo puts the page back with what it remembered.
+		expect(back()).toBe(true);
+		expect(doc.pages[0].template).toEqual({ id: 'sheet', language: 'en' });
+		expect(undo()).toBe(true);
+		expect(doc.pages[0].template).toBeUndefined();
+	});
+
+	/** What a template placed on a page: its charts, and its texts by part. */
+	const placed = (page: DocPage) => ({
+		orientation: page.orientation,
+		charts: page.items.map((item) => [item.id, item.frame]),
+		texts: (page.texts ?? [])
+			.filter((text) => text.role !== undefined)
+			.map(({ role, chartId, text, style, frame, rotation }) => ({
+				role,
+				chartId,
+				text,
+				style,
+				frame,
+				rotation
+			}))
+	});
+
+	/** The page is `before` again; the owner's own texts, moved there and back, to a hair. */
+	function expectBack(page: DocPage, before: DocPage) {
+		const own = (it: DocPage) => (it.texts ?? []).filter((text) => text.role === undefined);
+		const rest = (it: DocPage) => ({
+			...plain(it),
+			texts: plain(it.texts ?? []).map((text) => (text.role === undefined ? text.id : text))
+		});
+		expect(rest(page)).toEqual(rest(before));
+		own(page).forEach((text, i) => {
+			const was = own(before)[i];
+			expect({ ...plain(text), frame: null }).toEqual({ ...was, frame: null });
+			for (const side of ['x', 'y', 'w', 'h'] as const) {
+				expect(text.frame[side]).toBeCloseTo(was.frame[side], 9);
+			}
+		});
+	}
+
+	it('turns a page as its template lays it out the other way, and back to the page it was', () => {
+		const { doc, pageId, own } = mixed();
+		doc.layPage(pageId, layTemplate('pair', doc.pages[0]));
+		const [page] = doc.pages;
+		const before = plain(page);
+		// Stacked on a portrait page, each under the other's caption.
+		expect(page.items[1].frame.y).toBeGreaterThan(page.items[0].frame.y + page.items[0].frame.h);
+
+		doc.setOrientation(pageId, 'landscape');
+		// The page is what the template makes of these charts on a landscape page to begin with.
+		const direct = mixed();
+		direct.doc.layPage(
+			direct.pageId,
+			layTemplate('pair', direct.doc.pages[0], { orientation: 'landscape' })
+		);
+		expect(placed(page)).toEqual(placed(direct.doc.pages[0]));
+		// Side by side under a title the width of the page, a caption under each.
+		const [disc, frame] = page.items;
+		expect(frame.frame.x).toBeGreaterThan(disc.frame.x + disc.frame.w);
+		const [, title, first, second] = page.texts!;
+		expect(title).toMatchObject({ role: 'title', text: 'Сборная Москвы' });
+		expect(title.frame).toMatchObject({ x: 12, y: 12, w: 273 });
+		expect(first.frame.y).toBeCloseTo(disc.frame.y + disc.frame.h + 2.5);
+		expect(second.frame.y).toBeCloseTo(frame.frame.y + frame.frame.h + 2.5);
+		for (const item of page.items) expectInside(item.frame, page);
+		// Not the arranger's turn of the same charts, which knows nothing of the text.
+		const arranged = mixed();
+		arranged.doc.layPage(arranged.pageId, layTemplate('pair', arranged.doc.pages[0]));
+		delete arranged.doc.pages[0].template;
+		arranged.doc.setOrientation(arranged.pageId, 'landscape');
+		expect(placed(arranged.doc.pages[0]).charts).not.toEqual(placed(page).charts);
+
+		// The texts are the same texts, the charts the same charts.
+		expect(page.texts!.map((text) => text.id)).toEqual(before.texts!.map((text) => text.id));
+		expect(page.items[0]).toMatchObject({ id: 'disc', thumb: 'data:image/png;base64,AA' });
+		// The owner's own text keeps its place in the content box, as on any turn.
+		const mine = page.texts!.find((text) => text.id === own)!;
+		expect(mine.frame.x).toBeCloseTo(12);
+		expect(mine.frame.w).toBeCloseTo((80 * 273) / 186);
+		// Still that template's page, hand-arranged as any page with text, with no memo to keep.
+		expect(page.template).toEqual({ id: 'pair', language: 'en' });
+		expect(page.manual).toBe(true);
+		expect(page.layout).toBeUndefined();
+		expect(page.turnMemo).toBeUndefined();
+
+		doc.setOrientation(pageId, 'portrait');
+		expectBack(doc.pages[0], before);
+		// And round again, to the same landscape page.
+		doc.setOrientation(pageId, 'landscape');
+		expect(placed(doc.pages[0])).toEqual(placed(direct.doc.pages[0]));
+	});
+
+	it('turns every template’s page to what the template makes of it, and back', () => {
+		const pleiades = { name: 'M 45 · Pleiades', raDeg: 56.85, decDeg: 24.12, fovDeg: 20 };
+		for (const id of ['caption', 'pair', 'finder', 'sheet'] as const) {
+			for (const first of ['portrait', 'landscape'] as const) {
+				const other = first === 'portrait' ? 'landscape' : 'portrait';
+				const lay = (orientation: 'portrait' | 'landscape') => {
+					const made = mixed();
+					const options = { orientation, closeUp: pleiades, swap: true, language: 'ru' as const };
+					made.doc.layPage(made.pageId, layTemplate(id, made.doc.pages[0], options));
+					return made.doc;
+				};
+				const doc = lay(first);
+				const direct = lay(other);
+				// Every page it made, the ones after the first too.
+				const made = doc.pages.filter((page) => page.template);
+				expect(made.length, id).toBeGreaterThan(0);
+				for (const [i, page] of made.entries()) {
+					const where = `${id} ${first} page ${i + 1}`;
+					const before = plain(page);
+					doc.setOrientation(page.id, other);
+					expect(page.template, where).toEqual(before.template);
+					// A made close-up has an id of its own in each document: by place, then.
+					const byPlace = (it: DocPage) => {
+						const ids = it.items.map((item) => item.id);
+						const at = (chartId: string | undefined) => (chartId ? ids.indexOf(chartId) : -1);
+						const { charts, texts, orientation } = placed(it);
+						return {
+							orientation,
+							charts: charts.map(([, frame]) => frame),
+							texts: texts.map((text) => ({ ...text, chartId: at(text.chartId) }))
+						};
+					};
+					expect(byPlace(page), where).toEqual(byPlace(direct.pages[i]));
+					doc.setOrientation(page.id, first);
+					expectBack(page, before);
+				}
+				expect(doc.pageCount, id).toBe(direct.pageCount);
+			}
+		}
+	});
+
+	it('turns a finder card with the close-up it has and the ring on its sky', () => {
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage();
+		doc.pages[0].items.push({
+			id: 'sky',
+			chart: chart(),
+			frame: { x: 12, y: 55.5, w: 186, h: 186 }
+		});
+		const pleiades = { name: 'M 45 · Pleiades', raDeg: 56.85, decDeg: 24.12, fovDeg: 20 };
+		doc.layPage(pageId, layTemplate('finder', doc.pages[0], { closeUp: pleiades }));
+		const [page] = doc.pages;
+		const before = plain(page);
+		const [, closeUp] = before.items;
+		expect(page.template).toEqual({ id: 'finder', language: 'en' });
+
+		doc.setOrientation(pageId, 'landscape');
+		// One page still, the same two charts: no new close-up, none sent to a page of its own.
+		expect(doc.pageCount).toBe(1);
+		expect(doc.chartCount).toBe(2);
+		expect(page.items.map((item) => item.id)).toEqual(['sky', closeUp.id]);
+		expect(plain(page.items[1].chart)).toEqual(closeUp.chart);
+		expect(page.items[1].closeUpOf).toBe('sky');
+		expect(page.items[0].chart.marks).toEqual([{ raDeg: 56.85, decDeg: 24.12, radiusDeg: 10 }]);
+		expect(page.items[1].chart.marks).toBeUndefined();
+		// The sky on the left now, the close-up beside it, each over its own caption.
+		const [sky, close] = page.items;
+		expect(close.frame.x).toBeGreaterThan(sky.frame.x + sky.frame.w);
+		expect(sky.frame.w).toBeGreaterThan(close.frame.w);
+		expect(page.texts!.map((text) => [text.role, text.text, text.chartId])).toEqual([
+			['title', 'Finder card', undefined],
+			['caption', 'Latitude {lat} · sidereal time {lst}', 'sky'],
+			['caption', 'M 45 · Pleiades · field {fov}', closeUp.id]
+		]);
+		expect(page.texts![2].frame.y).toBeCloseTo(close.frame.y + close.frame.h + 2.5);
+		expect(page.template).toEqual({ id: 'finder', language: 'en' });
+
+		doc.setOrientation(pageId, 'portrait');
+		expectBack(page, before);
+	});
+
+	it('keeps what a text says and how it is set through a turn, a sheet’s number too', () => {
+		const { doc, pageId } = mixed();
+		doc.layPage(pageId, layTemplate('sheet', doc.pages[0], { language: 'ru' }));
+		const second = doc.pages[1];
+		const [header, number, tasks, stars, messier, key] = second.texts!;
+		expect(number.text).toBe('№ 2');
+		doc.updateText(second.id, tasks.id, { text: 'Найдите Вегу.\nНайдите Денеб.' });
+		doc.updateText(second.id, header.id, { style: { ...header.style, size: 20 } });
+		expect(second.template).toEqual({ id: 'sheet', language: 'ru' });
+
+		doc.setOrientation(second.id, 'landscape');
+		expect(second.texts!.map((text) => [text.id, text.text])).toEqual([
+			[header.id, 'Фамилия, имя ______________________   Класс ________'],
+			[number.id, '№ 2'],
+			[tasks.id, 'Найдите Вегу.\nНайдите Денеб.'],
+			[stars.id, ''],
+			[messier.id, ''],
+			[key.id, '{ra} {dec}']
+		]);
+		expect(second.texts![0].style.size).toBe(20);
+		// The number in the top right corner of the turned page, the key upside down at its foot.
+		const box = contentBox('landscape');
+		expect(second.texts![1].frame.x + second.texts![1].frame.w).toBeCloseTo(box.x + box.w);
+		expect(second.texts![5].rotation).toBe(180);
+		expect(second.texts![5].frame.y + second.texts![5].frame.h).toBeCloseTo(box.y + box.h);
+		// The chart under both lines of the tasks, and over the key.
+		const { frame } = second.items[0];
+		const under = second.texts![2].frame;
+		expect(frame.y).toBeGreaterThanOrEqual(under.y + under.h + GUTTER_MM - 1e-6);
+		expect(under.h).toBeCloseTo(2 * second.texts![2].style.size * (25.4 / 72) * 1.35);
+		expect(frame.y + frame.h).toBeLessThan(second.texts![5].frame.y);
+	});
+
+	it('gives a templated page’s text the room its measure says, when a turn brings one', () => {
+		const lay = () => {
+			const made = mixed();
+			made.doc.layPage(made.pageId, layTemplate('pair', made.doc.pages[0]));
+			return made;
+		};
+		const plainly = lay();
+		plainly.doc.setOrientation(plainly.pageId, 'landscape');
+		const measured = lay();
+		// Every text as tall as its size in mm: taller than a line of it.
+		measured.doc.setOrientation(measured.pageId, 'landscape', (_text, style) => style.size);
+		const title = (doc: DocumentStore) =>
+			doc.pages[0].texts!.find((text) => text.role === 'title')!;
+		expect(title(measured.doc).frame.h).toBe(title(measured.doc).style.size);
+		expect(title(measured.doc).frame.h).toBeGreaterThan(title(plainly.doc).frame.h);
+		expect(measured.doc.pages[0].items[0].frame.y).toBeGreaterThan(
+			plainly.doc.pages[0].items[0].frame.y
+		);
+	});
+
+	it('forgets the template once a chart or a text is added, removed or moved by hand', () => {
+		const style2 = { ...style, bold: true };
+		/** A wide frame under a title and over its caption; a second page with a disc and a text. */
+		const templated = () => {
+			const doc = new DocumentStore(null);
+			const pageId = doc.addPage();
+			doc.pages[0].items.push({
+				id: 'frame',
+				chart: chart(1.6),
+				frame: { x: 12, y: 12, w: 90, h: 56.25 }
+			});
+			doc.layPage(pageId, layTemplate('caption', doc.pages[0]));
+			const otherId = doc.addPage();
+			doc.pages[1].items.push({
+				id: 'other',
+				chart: chart(),
+				frame: { x: 12, y: 12, w: 60, h: 60 }
+			});
+			const elsewhere = doc.addText(otherId, {
+				text: 'Elsewhere',
+				style,
+				frame: { x: 12, y: 200, w: 80, h: 6 }
+			})!;
+			const [title, caption] = doc.pages[0].texts!;
+			return { doc, pageId, otherId, elsewhere, title, caption, item: doc.pages[0].items[0] };
+		};
+		type Made = ReturnType<typeof templated>;
+		const free = { x: 12, y: 180, w: 60, h: 60 };
+		const forgets: Record<string, (made: Made) => unknown> = {
+			'a chart moved': ({ doc, pageId, item }) =>
+				doc.updateItem(pageId, 'frame', { ...item.frame, y: item.frame.y + 10 }),
+			'a chart resized': ({ doc, pageId, item }) =>
+				doc.updateItem(pageId, 'frame', { ...item.frame, w: 100, h: 62.5 }),
+			'a chart moved away': ({ doc, otherId }) =>
+				expect(doc.moveItem('frame', otherId, free)).toBe(true),
+			'a chart moved in': ({ doc, pageId }) =>
+				expect(doc.moveItem('other', pageId, free)).toBe(true),
+			'a chart removed': ({ doc, pageId }) => doc.removeItem(pageId, 'frame'),
+			'a chart removed and put back': ({ doc, pageId }) => doc.removeItem(pageId, 'frame')(),
+			'a text added': ({ doc, pageId }) =>
+				doc.addText(pageId, { text: 'New', style, frame: { x: 12, y: 200, w: 80, h: 6 } }),
+			'a text moved': ({ doc, pageId, title }) =>
+				doc.updateText(pageId, title.id, { frame: { ...title.frame, y: title.frame.y + 20 } }),
+			'a text made narrower': ({ doc, pageId, title }) =>
+				doc.updateText(pageId, title.id, { frame: { ...title.frame, w: 100 } }),
+			'a text turned': ({ doc, pageId, caption }) =>
+				doc.updateText(pageId, caption.id, { rotation: 90 }),
+			'a text moved within the page': ({ doc, pageId, caption }) =>
+				doc.moveText(caption.id, pageId, { ...caption.frame, y: 250 }),
+			'a text moved away': ({ doc, otherId, caption }) =>
+				expect(doc.moveText(caption.id, otherId, caption.frame)).toBe(true),
+			'a text moved in': ({ doc, pageId, elsewhere }) =>
+				expect(doc.moveText(elsewhere, pageId, { x: 12, y: 250, w: 80, h: 6 })).toBe(true),
+			'a text removed': ({ doc, pageId, caption }) => doc.removeText(pageId, caption.id),
+			'a text removed and put back': ({ doc, pageId, caption }) =>
+				doc.removeText(pageId, caption.id)(),
+			'a chart pasted': ({ doc, pageId }) =>
+				expect(doc.pasteBlock(pageId, doc.copyBlock('other'))).toMatchObject({ kind: 'chart' }),
+			'a text pasted': ({ doc, pageId, elsewhere }) =>
+				expect(doc.pasteBlock(pageId, doc.copyBlock(elsewhere))).toMatchObject({ kind: 'text' })
+		};
+		for (const [what, act] of Object.entries(forgets)) {
+			const made = templated();
+			expect(made.doc.pages[0].template, what).toEqual({ id: 'caption', language: 'en' });
+			act(made);
+			expect(made.doc.pages[0].template, what).toBeUndefined();
+			// The page it came from or went to never had one to forget.
+			expect(made.doc.pages[1]?.template, what).toBeUndefined();
+		}
+
+		const keeps: Record<string, (made: Made) => unknown> = {
+			'a text typed in': ({ doc, pageId, title }) =>
+				doc.updateText(pageId, title.id, { text: 'Orion in winter' }),
+			'a text set in another face': ({ doc, pageId, title }) =>
+				doc.updateText(pageId, title.id, { style: style2 }),
+			'a text told its chart': ({ doc, pageId, caption }) =>
+				doc.updateText(pageId, caption.id, { chartId: null }),
+			'a text’s height followed': ({ doc, pageId, title }) =>
+				doc.setTextHeight(pageId, title.id, 14),
+			'a text put where it is': ({ doc, pageId, title }) =>
+				doc.updateText(pageId, title.id, { frame: { ...title.frame }, rotation: 0 }),
+			'a chart put where it is': ({ doc, pageId, item }) =>
+				doc.updateItem(pageId, 'frame', { ...item.frame }),
+			'a text copied': ({ doc, title }) => doc.copyBlock(title.id),
+			'a change on another page': ({ doc, otherId }) =>
+				doc.updateItem(otherId, 'other', { x: 40, y: 40, w: 60, h: 60 })
+		};
+		for (const [what, act] of Object.entries(keeps)) {
+			const made = templated();
+			act(made);
+			expect(made.doc.pages[0].template, what).toEqual({ id: 'caption', language: 'en' });
+		}
+
+		// Add to PDF, where it lands on the page: a strip of sky across the middle of a
+		// landscape page leaves room over it for another. Taken back, the page has its
+		// template again.
+		const doc = new DocumentStore(null);
+		const pageId = doc.addPage('landscape');
+		doc.pages[0].items.push({
+			id: 'strip',
+			chart: chart(6),
+			frame: { x: 12, y: 12, w: 120, h: 20 }
+		});
+		doc.layPage(pageId, layTemplate('caption', doc.pages[0]));
+		const added = doc.addChart(chart(6));
+		expect(added).toMatchObject({ pageId, newPage: false });
+		expect(doc.pages[0].template).toBeUndefined();
+		expect(added.undo()).toBe(true);
+		expect(doc.pages[0].template).toEqual({ id: 'caption', language: 'en' });
+	});
+
+	it('turns a page like any other, and forgets, when it is no longer one page of its template', () => {
+		// A title told which chart its fields read is the template's title still: no chart
+		// is its own, so the page turns as the template lays it out, and the title reads on.
+		const told = mixed();
+		told.doc.layPage(told.pageId, layTemplate('pair', told.doc.pages[0]));
+		const title = told.doc.pages[0].texts!.find((text) => text.role === 'title')!;
+		told.doc.updateText(told.pageId, title.id, { text: 'The sky at {lst}', chartId: 'frame' });
+		told.doc.setOrientation(told.pageId, 'landscape');
+		expect(told.doc.pages[0].template).toEqual({ id: 'pair', language: 'en' });
+		expect(told.doc.pages[0].texts!.find((text) => text.id === title.id)).toMatchObject({
+			text: 'The sky at {lst}',
+			chartId: 'frame',
+			frame: { x: 12, y: 12, w: 273 }
+		});
+
+		// A caption told to read the other chart: the template would not find it as its own.
+		const { doc, pageId } = mixed();
+		doc.layPage(pageId, layTemplate('pair', doc.pages[0]));
+		const [page] = doc.pages;
+		const caption = page.texts!.find((text) => text.chartId === 'disc')!;
+		doc.updateText(pageId, caption.id, { text: 'The winter sky', chartId: 'frame' });
+		expect(page.template).toEqual({ id: 'pair', language: 'en' });
+		const texts = plain(page.texts!);
+		doc.setOrientation(pageId, 'landscape');
+		expect(page.orientation).toBe('landscape');
+		expect(page.template).toBeUndefined();
+		// Nothing is lost on the way: every text is there with its words, moved with the box.
+		expect(page.texts!.map(({ id, text, chartId }) => [id, text, chartId])).toEqual(
+			texts.map(({ id, text, chartId }) => [id, text, chartId])
+		);
+		expect(page.items.map((item) => item.id).sort()).toEqual(['disc', 'frame']);
+		for (const item of page.items) expectInside(item.frame, page);
+
+		// A template remembered by a page that holds none of its text (a save from elsewhere).
+		const storage = memoryStorage();
+		const odd = new DocumentStore(storage);
+		odd.addChart(chart());
+		odd.flush();
+		const raw = saved(storage);
+		raw.pages[0].template = { id: 'sheet', language: 'en' };
+		storage.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+		odd.load();
+		expect(odd.pages[0].template).toEqual({ id: 'sheet', language: 'en' });
+		odd.setOrientation(odd.pages[0].id, 'landscape');
+		expect(odd.pages[0].template).toBeUndefined();
+		expect(odd.pages[0].texts).toBeUndefined();
+		expect(odd.pages[0].turnMemo).toBeDefined();
+	});
+
+	it('saves the template a page remembers, and reads back only one there is', () => {
+		const storage = memoryStorage();
+		const doc = new DocumentStore(storage);
+		const pageId = doc.addPage();
+		doc.pages[0].items.push({ id: 'a', chart: chart(), frame: { x: 12, y: 12, w: 90, h: 90 } });
+		doc.layPage(pageId, layTemplate('caption', doc.pages[0], { language: 'ru' }));
+		doc.flush();
+		expect(saved(storage).pages[0].template).toEqual({ id: 'caption', language: 'ru' });
+		const read = (template: unknown) => {
+			const raw = saved(storage);
+			(raw.pages[0] as { template: unknown }).template = template;
+			const tampered = memoryStorage();
+			tampered.data.set(DOCUMENT_STORAGE_KEY, JSON.stringify(raw));
+			const again = new DocumentStore(tampered);
+			again.load();
+			return again.pages[0].template;
+		};
+		expect(read({ id: 'caption', language: 'ru' })).toEqual({ id: 'caption', language: 'ru' });
+		expect(read({ id: 'finder', language: 'en', swap: true })).toEqual({
+			id: 'finder',
+			language: 'en'
+		});
+		// A language there is not is the first there is; a template there is not is none.
+		expect(read({ id: 'pair', language: 'de' })).toEqual({ id: 'pair', language: 'en' });
+		expect(read({ id: 'pair' })).toEqual({ id: 'pair', language: 'en' });
+		expect(read({ id: 'poster', language: 'en' })).toBeUndefined();
+		expect(read({ id: 'charts', language: 'en' })).toBeUndefined();
+		expect(read({ language: 'ru' })).toBeUndefined();
+		expect(read('caption')).toBeUndefined();
+		expect(read(null)).toBeUndefined();
+
+		// Read back, the page turns as its template lays it out.
+		const again = new DocumentStore(storage);
+		again.load();
+		again.setOrientation(pageId, 'landscape');
+		expect(again.pages[0].template).toEqual({ id: 'caption', language: 'ru' });
+		expect(again.pages[0].texts![0].frame).toMatchObject({ x: 12, y: 12, w: 273 });
+		expect(again.pages[0].texts![0].text).toBe('Карта неба');
 	});
 
 	it('saves the part a text plays, and reads back only the parts there are', () => {

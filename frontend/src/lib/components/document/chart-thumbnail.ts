@@ -5,8 +5,13 @@
  */
 
 import { chartSizePx, type ChartView } from '$lib/api/render-config';
-import { CHART_CANVAS_BACKING_PX, PINHOLE_CORNER_RADIUS, STAR_COLOR } from '$lib/constants';
-import type { ChartSnapshot } from '$lib/document/types';
+import {
+	CHART_CANVAS_BACKING_PX,
+	MARK_COLOR,
+	PINHOLE_CORNER_RADIUS,
+	STAR_COLOR
+} from '$lib/constants';
+import type { ChartSnapshot, SkyMark } from '$lib/document/types';
 import { getProjectionFrameParams, sampleStarMorphFrame, toViewSpace } from '$lib/math/projection';
 import type { StarVector } from '$lib/stores.svelte';
 
@@ -80,6 +85,35 @@ export function thumbnailMagnitudeLimit(sidePx: number): number {
 	return sidePx < 60 ? 3.2 : sidePx < 120 ? 4 : 4.8;
 }
 
+/** A mark's ring on a page thumbnail, CSS px wide. */
+const THUMB_MARK_PX = 1;
+/** The ring is traced in steps of a degree, as the backend traces it. */
+const RING_STEPS = 360;
+
+/**
+ * The ring of points `radiusDeg` from a mark's place, closed, as unit vectors: the
+ * backend's `ring_points` (backend/src/svg_generator/grids.rs), so that the
+ * thumbnail's ring is the one the vector preview and the PDF draw.
+ */
+export function ringPoints(mark: SkyMark): StarVector[] {
+	const ra = (mark.raDeg * Math.PI) / 180;
+	const dec = (mark.decDeg * Math.PI) / 180;
+	const radius = (mark.radiusDeg * Math.PI) / 180;
+	// The centre, and two directions square to it and to each other: east and north.
+	const centre = [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)];
+	const east = [-Math.sin(ra), Math.cos(ra), 0];
+	const north = [-Math.sin(dec) * Math.cos(ra), -Math.sin(dec) * Math.sin(ra), Math.cos(dec)];
+	const points: StarVector[] = [];
+	for (let step = 0; step <= RING_STEPS; step++) {
+		const angle = (step * 2 * Math.PI) / RING_STEPS;
+		const at = (i: number) =>
+			Math.cos(radius) * centre[i] +
+			Math.sin(radius) * (Math.cos(angle) * east[i] + Math.sin(angle) * north[i]);
+		points.push({ x: at(0), y: at(1), z: at(2), v_mag: 0 });
+	}
+	return points;
+}
+
 /**
  * Draws a chart for a page thumbnail on `canvas`, `width` × `height` CSS px: the
  * preview's own camera, but only the brighter stars, none under a floor. The vector
@@ -91,6 +125,9 @@ export function thumbnailMagnitudeLimit(sidePx: number): number {
  * several times larger: it asks for that many times the pixels, so that it is
  * sharp on the way, and for smaller stars while it is large, so that they do not
  * arrive as blots (`flightStarScale`). On the thumbnail itself both are 1.
+ *
+ * A place ringed on the chart (`marks`, a finder card's) is ringed here too, over
+ * the stars: the part of the ring that is on the chart, as a star off it is not drawn.
  */
 export function drawChartThumbnail(
 	canvas: HTMLCanvasElement,
@@ -133,5 +170,34 @@ export function drawChartThumbnail(
 		ctx.beginPath();
 		ctx.arc(width / 2 + sample.px * scale, height / 2 + sample.py * scale, r, 0, Math.PI * 2);
 		ctx.fill();
+	}
+
+	if (!chart.marks?.length) return;
+	ctx.strokeStyle = MARK_COLOR;
+	// Thinner while the drawing is shown larger, as the stars are smaller.
+	ctx.lineWidth = THUMB_MARK_PX * starScale;
+	ctx.lineJoin = 'round';
+	for (const mark of chart.marks) {
+		ctx.beginPath();
+		// The pen is down while the ring is on the chart, and lifted where it leaves it.
+		let down = false;
+		let drawn = false;
+		for (const point of ringPoints(mark)) {
+			const sample = sampleStarMorphFrame(point, blend, params, rotate);
+			if (sample.visibility < 0.5) {
+				down = false;
+				continue;
+			}
+			const x = width / 2 + sample.px * scale;
+			const y = height / 2 + sample.py * scale;
+			if (down) {
+				ctx.lineTo(x, y);
+				drawn = true;
+			} else {
+				ctx.moveTo(x, y);
+				down = true;
+			}
+		}
+		if (drawn) ctx.stroke();
 	}
 }

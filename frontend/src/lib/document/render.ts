@@ -18,15 +18,10 @@ import {
 	type RenderConfig
 } from '$lib/api/render-config';
 import { pageSize, PRINT_MM_PER_PREVIEW_PX } from './geometry';
-import {
-	alignAnchor,
-	anchoredFrame,
-	layoutText,
-	MAX_LINE_CHARS,
-	MAX_TEXT_LINES,
-	shownText,
-	type Measure
-} from './text';
+import { loadMessier } from '$lib/api/catalog';
+import { catalog } from '$lib/stores.svelte';
+import { blockLayout, type Sky } from './table';
+import { alignAnchor, anchoredFrame, MAX_LINE_CHARS, MAX_TEXT_LINES, type Measure } from './text';
 import { loadTextFonts, measureText } from './text-fonts.svelte';
 import type { ChartSnapshot, DocItem, DocPage, DocText, TextFont } from './types';
 
@@ -63,7 +58,16 @@ export interface DocumentTextRequest {
 	rotation_deg: number;
 	cx_mm: number;
 	cy_mm: number;
-	lines: { x_mm: number; y_mm: number; text: string }[];
+	/** A table's cell has an anchor and a weight of its own. */
+	lines: {
+		x_mm: number;
+		y_mm: number;
+		text: string;
+		anchor?: 'start' | 'middle' | 'end';
+		bold?: boolean;
+	}[];
+	/** A table's rules, turned with the text. */
+	rules?: { x1_mm: number; y1_mm: number; x2_mm: number; y2_mm: number; width_mm: number }[];
 }
 
 export interface DocumentPageRequest {
@@ -132,14 +136,22 @@ export function itemRenderConfig(item: DocItem): RenderConfig {
 
 /**
  * A text as the backend sets it: its fields read from its chart, wrapped to its
- * width, its lines given upright with the turn to make about its centre. A line
- * whose baseline starts off the page (once turned) is left out (the backend refuses
- * it), as is everything past the backend's limits.
+ * width, its lines given upright with the turn to make about its centre; a table,
+ * read from its chart and `sky`, is a line a cell and its rules. `pages` is the
+ * document, for a text that reads a chart on another page. A line whose
+ * baseline starts off the page (once turned) is left out (the backend refuses it),
+ * as is everything past the backend's limits.
  */
-export function textRequest(page: DocPage, text: DocText, measure: Measure): DocumentTextRequest {
+export function textRequest(
+	page: DocPage,
+	text: DocText,
+	measure: Measure,
+	sky: Sky = NO_SKY,
+	pages?: readonly DocPage[]
+): DocumentTextRequest {
 	const { w, h } = pageSize(page.orientation);
 	const { style, rotation = 0 } = text;
-	const layout = layoutText(shownText(page, text), style, text.frame.w, measure);
+	const layout = blockLayout(page, text, text.frame.w, measure, sky, pages);
 	// As the editor draws it: as tall as its lines, from its own top-left corner.
 	const frame = anchoredFrame(text.frame, rotation, text.frame.w, layout.height);
 	const cx = frame.x + frame.w / 2;
@@ -152,14 +164,19 @@ export function textRequest(page: DocPage, text: DocText, measure: Measure): Doc
 	};
 	const { x, anchor } = alignAnchor(style.align, frame.w);
 	const lines = layout.lines
-		.map((line) => ({
-			x_mm: frame.x + x,
-			y_mm: frame.y + line.baseline,
-			text: Array.from(line.text).slice(0, MAX_LINE_CHARS).join('')
-		}))
+		.map((line) => {
+			const sent: DocumentTextRequest['lines'][number] = {
+				x_mm: frame.x + (line.x ?? x),
+				y_mm: frame.y + line.baseline,
+				text: Array.from(line.text).slice(0, MAX_LINE_CHARS).join('')
+			};
+			if (line.anchor !== undefined && line.anchor !== anchor) sent.anchor = line.anchor;
+			if (line.bold !== undefined && line.bold !== style.bold) sent.bold = line.bold;
+			return sent;
+		})
 		.filter((line) => line.text !== '' && onPage(line.x_mm, line.y_mm))
 		.slice(0, MAX_TEXT_LINES);
-	return {
+	const request: DocumentTextRequest = {
 		font: style.font,
 		bold: style.bold,
 		italic: style.italic,
@@ -170,12 +187,29 @@ export function textRequest(page: DocPage, text: DocText, measure: Measure): Doc
 		cy_mm: cy,
 		lines
 	};
+	if (layout.rules?.length) {
+		request.rules = layout.rules.map((rule) => ({
+			x1_mm: frame.x + rule.x1,
+			y1_mm: frame.y + rule.y1,
+			x2_mm: frame.x + rule.x2,
+			y2_mm: frame.y + rule.y2,
+			width_mm: rule.width
+		}));
+	}
+	return request;
 }
 
-/** `measure` breaks the text into lines: the canvas's, once the fonts have loaded. */
+/** No catalogues: a table read from this lists nothing. */
+const NO_SKY: Sky = { messier: [], stars: [] };
+
+/**
+ * `measure` breaks the text into lines: the canvas's, once the fonts have loaded.
+ * `sky` is what the tables read: the loaded catalogues.
+ */
 export function documentRequest(
 	pages: readonly DocPage[],
-	measure: Measure = measureText
+	measure: Measure = measureText,
+	sky: Sky = { messier: catalog.messier, stars: catalog.stars }
 ): DocumentRequest {
 	return {
 		pages: pages.map((page) => {
@@ -190,7 +224,7 @@ export function documentRequest(
 					height_mm: item.frame.h,
 					config: itemRenderConfig(item)
 				})),
-				texts: (page.texts ?? []).map((text) => textRequest(page, text, measure))
+				texts: (page.texts ?? []).map((text) => textRequest(page, text, measure, sky, pages))
 			};
 		})
 	};
@@ -206,7 +240,10 @@ export async function exportDocument(pages: readonly DocPage[]): Promise<Documen
 	let message: string | null = null;
 	try {
 		// Lines broken in a fallback font would break elsewhere in the PDF.
-		await loadTextFonts(pages.flatMap((page) => (page.texts ?? []).map((text) => text.style)));
+		const texts = pages.flatMap((page) => page.texts ?? []);
+		await loadTextFonts(texts.map((text) => text.style));
+		// A table of Messier objects lists none without their catalogue.
+		if (texts.some((text) => text.table?.source === 'messier')) await loadMessier();
 		const response = await fetch('/api/export/document', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

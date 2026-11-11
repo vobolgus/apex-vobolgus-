@@ -30,6 +30,10 @@
 	 * (`TemplatePicker`): its charts placed again with a title and captions around
 	 * them, on as many pages as that takes.
 	 *
+	 * A table ("Add a table") is a text that is not typed: it lists what is on its
+	 * chart, the Messier objects or the brightest stars, in as many rows as its
+	 * toolbar says. It is moved, made wider, turned and removed as a text is.
+	 *
 	 * ⌘C / Ctrl+C copies the selected chart or text, ⌘X cuts it, and ⌘V puts a copy
 	 * on the page being shown, at its own size: where it was copied from if that is
 	 * free, else in the nearest free place, and on a page with no room for it over
@@ -72,16 +76,23 @@
 		newTextFrame,
 		normalizeRotation,
 		quarterTurn,
-		shownText,
 		squareRotation,
 		stepTextSize,
 		textBounds
 	} from '$lib/document/text';
-	import { measuredLayout } from '$lib/document/text-fonts.svelte';
+	import { DEFAULT_TABLE, lookOf } from '$lib/document/table';
+	import { loadMessier } from '$lib/api/catalog';
+	import {
+		leastTableWidth,
+		likedTableWidth,
+		measuredLayout,
+		shownLayout
+	} from '$lib/document/text-fonts.svelte';
 	import type {
 		DocItem,
 		DocPage,
 		DocText,
+		TableSpec,
 		PageOrientation,
 		Rect,
 		TextStyle
@@ -370,8 +381,17 @@
 		void tick().then(focusPaper);
 	}
 
+	/**
+	 * Turns a page. One a template laid out is laid out by it the other way, with the
+	 * measure the picker laid it out with, so its text is given the room its lines take.
+	 */
 	function setOrientation(id: string, orientation: PageOrientation) {
-		if (!session) store.setOrientation(id, orientation);
+		if (session) return;
+		store.setOrientation(
+			id,
+			orientation,
+			(text, style, width) => measuredLayout(text, style, width).height
+		);
 	}
 
 	/** Keys on the dialog. They go no further: the generator's shortcuts are behind the modal. */
@@ -516,6 +536,8 @@
 		guides: SnapGuide[];
 		/** A text being turned by its knob: where it is turned to, degrees. */
 		rotation?: number;
+		/** A chart being resized: the margins it is held to are drawn. */
+		margins?: boolean;
 	}
 
 	let session: Session | null = null;
@@ -748,7 +770,9 @@
 				const text = page.texts?.find((it) => it.id === s.itemId);
 				if (!text) return;
 				// Its lines wrap to the new width as it is dragged; the height is theirs.
-				const heightAt = (w: number) => measuredLayout(shownText(page, text), text.style, w).height;
+				const heightAt = (w: number) => shownLayout(page, text, w, store.pages).height;
+				// A table is made no narrower than holds all of it; a text, than a word or two.
+				const least = Math.max(MIN_TEXT_WIDTH_MM, leastTableWidth(page, text, store.pages));
 				let frame: Rect;
 				let guides: SnapGuide[] = [];
 				if (s.rotation === 0) {
@@ -756,7 +780,7 @@
 						s.startFrame,
 						s.side,
 						corner.x,
-						MIN_TEXT_WIDTH_MM,
+						least,
 						others,
 						page.orientation,
 						threshold
@@ -768,7 +792,7 @@
 					// where it is on the page; there are no lines of the page to snap to.
 					const angle = (s.rotation * Math.PI) / 180;
 					const along = (dx * Math.cos(angle) + dy * Math.sin(angle)) / s.scale;
-					const w = Math.max(MIN_TEXT_WIDTH_MM, s.startFrame.w + (s.side === 'e' ? along : -along));
+					const w = Math.max(least, s.startFrame.w + (s.side === 'e' ? along : -along));
 					const fitted = fitTextFrame({ ...s.startFrame, w }, page.orientation, s.rotation).w;
 					frame = anchoredFrame(
 						s.startFrame,
@@ -778,12 +802,28 @@
 						s.side === 'e' ? 'left' : 'right'
 					);
 				}
-				drag = { ...base, kind: 'resizing', targetId: s.pageId, landing: null, frame, guides };
+				// As a chart in the hand: the lines it snaps to show only with Shift held.
+				drag = {
+					...base,
+					kind: 'resizing',
+					targetId: s.pageId,
+					landing: null,
+					frame,
+					guides: s.shift ? guides : []
+				};
 				return;
 			}
 			const raw = resizeRect(s.anchor, s.anchorPoint, corner);
 			const snapped = snapResize(raw, s.anchor, s.aspect, others, page.orientation, threshold);
-			drag = { ...base, kind: 'resizing', targetId: s.pageId, landing: null, ...snapped };
+			drag = {
+				...base,
+				kind: 'resizing',
+				targetId: s.pageId,
+				landing: null,
+				frame: snapped.frame,
+				guides: s.shift ? snapped.guides : [],
+				margins: true
+			};
 			return;
 		}
 
@@ -961,6 +1001,7 @@
 						itemId: null,
 						frame: null,
 						kind: 'moving',
+						margins: false,
 						rotation: null,
 						guides: flash.guides,
 						target: false
@@ -976,6 +1017,7 @@
 			// past its own edges, above the others.
 			frame: isSource ? view.frame : null,
 			kind: view.kind,
+			margins: view.margins === true,
 			rotation: isSource ? (view.rotation ?? null) : null,
 			guides: isTarget ? view.guides : [],
 			target: isTarget
@@ -1109,8 +1151,60 @@
 		announce('Text added. Type to replace it');
 	}
 
+	/**
+	 * A new table on the current page, in the topmost free place there: the names of
+	 * the Messier objects on the chart nearest to it, as on a SkyGen worksheet, as
+	 * wide as it likes to be (so that a second stands beside it), set like the last
+	 * text. It is selected, its toolbar open to say what it should list.
+	 */
+	async function addTable(pageId: string) {
+		// Its width is that of its names: have them before it is measured.
+		await loadMessier();
+		const page = store.page(pageId);
+		if (session || !page) return;
+		if ((page.texts?.length ?? 0) >= MAX_TEXTS_PER_PAGE) {
+			announce('This page holds no more text');
+			return;
+		}
+		const style = { ...lastStyle, bold: false, italic: false };
+		const table = { ...DEFAULT_TABLE };
+		const box = contentBox(page.orientation);
+		const draft = { id: '', text: '', style, table, frame: box };
+		// As tall as its rows; the place found for it may be narrower, but a table's rows are its rows.
+		const height = shownLayout(page, draft, box.w, store.pages).height;
+		const place = newTextFrame(page, height);
+		const w = Math.min(place.w, likedTableWidth(page, { ...draft, frame: place }, store.pages));
+		// Beside something already there it goes to the far end of the room, as the second
+		// table of a SkyGen worksheet stands at the right margin.
+		const x = place.x > box.x + 1e-6 ? place.x + place.w - w : place.x;
+		const textId = store.addText(page.id, { text: '', style, table, frame: { ...place, x, w } });
+		if (!textId) return;
+		announce('Table added');
+		void tick().then(() => focusChart(textId));
+	}
+
+	/**
+	 * A table lists something else, or looks another way, or has more or fewer rows.
+	 * What it lists and how it looks decide how wide it likes to be, so those two
+	 * set its width again; the rows leave the width as it was made.
+	 */
+	async function setTable(text: DocText, table: TableSpec) {
+		if (table.source === 'messier') await loadMessier();
+		const page = pageOf(text.id);
+		if (!page || session) return;
+		const same = text.table?.source === table.source && lookOf(text.table) === lookOf(table);
+		if (same) {
+			store.updateText(page.id, text.id, { table });
+			return;
+		}
+		const liked = likedTableWidth(page, { ...text, table }, store.pages);
+		const w = Math.min(contentBox(page.orientation).w, liked);
+		store.updateText(page.id, text.id, { table, frame: { ...text.frame, w } });
+	}
+
+	/** A table's words are read from its chart: there is nothing in it to type. */
 	function editText(text: DocText) {
-		if (!session) editingId = text.id;
+		if (!session && !text.table) editingId = text.id;
 	}
 
 	/** Typing is over. A text left empty is taken off the page: there is nothing of it to keep. */
@@ -1144,7 +1238,13 @@
 		if (!page || session) return;
 		store.updateText(page.id, text.id, { chartId });
 		const at = page.items.findIndex((item) => item.id === chartId);
-		announce(at < 0 ? 'Reads the nearest chart' : `Reads chart ${at + 1}`);
+		announce(
+			chartId === null
+				? 'Reads the nearest chart'
+				: at < 0
+					? 'Reads a chart on another page'
+					: `Reads chart ${at + 1}`
+		);
 	}
 
 	function setTextHeight(text: DocText, height: number) {
@@ -1424,12 +1524,14 @@
 						{settlingId}
 						{carrying}
 						{editingId}
+						pages={store.pages}
 						{hintId}
 						{textHintId}
 						onactivate={(id) => setCurrent(id)}
 						onorientation={setOrientation}
 						ondelete={deletePage}
 						onaddtext={addText}
+						onaddtable={addTable}
 						ontemplate={pickTemplate}
 						onmovestart={startMove}
 						onresizestart={startResize}
@@ -1447,6 +1549,7 @@
 						ontextcommit={commitText}
 						ontextheight={setTextHeight}
 						ontextbind={bindText}
+						ontexttable={setTable}
 					/>
 				{/each}
 			</div>

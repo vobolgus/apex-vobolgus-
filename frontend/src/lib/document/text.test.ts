@@ -203,6 +203,139 @@ describe('fields', () => {
 		expect(hasFields('at {noon}')).toBe(false);
 	});
 
+	it('shows as many decimals of the last unit as a field asks for', () => {
+		const sky = chart({ orientation: looking(206.3, 55.76), stereoFovDeg: 121.25 });
+		// 206.3° is 13h 45.2m.
+		expect(resolveFields('{lat:1} | {dec:2} | {fov:1} | {lst:1} | {ra:2}', sky)).toBe(
+			'55.8° N | +55.76° | 121.3° | 13h 45.2m | 13h 45.20m'
+		);
+		expect(fieldValues(sky, 1)).toMatchObject({
+			lat: '55.8° N',
+			lst: '13h 45.2m',
+			ra: '13h 45.2m',
+			dec: '+55.8°',
+			fov: '121.3°',
+			date: '2026-10-27',
+			time: '21:05 UTC'
+		});
+		const frame = chart({
+			projection: 'pinhole',
+			orientation: looking(56.85, 24.117),
+			pinholeFovDeg: 42.4
+		});
+		expect(resolveFields('{dec:2}, {fov:1}, {ra:1}, {lat:1}, {lst:2}', frame)).toBe(
+			`+24.12°, 42.4°, 3h 47.4m, ${NO_VALUE}, ${NO_VALUE}`
+		);
+		expect(resolveFields('{lat:2} {fov:2}', null)).toBe(`${NO_VALUE} ${NO_VALUE}`);
+	});
+
+	it('says without a suffix, and with :0, just what it said before there were any', () => {
+		// The fields as they were worked out before: whole degrees, whole minutes.
+		const before = (sky: ChartSnapshot) => {
+			const [x, y, z] = viewBasis(sky.view.orientation).forward;
+			const dec = Math.round((Math.asin(Math.max(-1, Math.min(1, z))) * 180) / Math.PI);
+			const minutes = Math.round((((Math.atan2(y, x) / (2 * Math.PI)) % 1) + 1) * 1440) % 1440;
+			const hours = `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+			return {
+				lat: `${Math.abs(dec)}° ${dec < 0 ? 'S' : 'N'}`,
+				lst: hours,
+				ra: hours,
+				dec: `${dec < 0 ? '−' : '+'}${Math.abs(dec)}°`,
+				date: '2026-10-27',
+				time: '21:05 UTC',
+				fov: `${Math.round(sky.view.stereoFovDeg)}°`
+			};
+		};
+		for (const [ra, dec, fov] of [
+			[206.25, 55.7, 180],
+			[15, -33.4, 121.5],
+			[359.99, -0.4, 90.49],
+			[0, 89.6, 0.4],
+			[83.8, -5.5, 30],
+			[-0.1, 0.5, 179.5],
+			[179.999, -89.6, 60],
+			[180, 90, 60]
+		]) {
+			const sky = chart({ orientation: looking(ra, dec), stereoFovDeg: fov });
+			const plain = fieldValues(sky);
+			expect(plain).toEqual(before(sky));
+			expect(fieldValues(sky, 0)).toEqual(plain);
+			expect(resolveFields('{lat:0} {lst:0} {ra:0} {dec:0} {fov:0}', sky)).toBe(
+				resolveFields('{lat} {lst} {ra} {dec} {fov}', sky)
+			);
+		}
+	});
+
+	it('carries a rounding up into the next unit, and round the day', () => {
+		// 59.96 minutes past 13h is 14h 00.0m, and still 13h 59.96m at two decimals.
+		const late = chart({ orientation: looking((13 + 59.96 / 60) * 15, 10) });
+		expect(resolveFields('{lst:1} / {lst:2} / {lst}', late)).toBe(
+			'14h 00.0m / 13h 59.96m / 14h 00m'
+		);
+		// The day's last minutes round to its first.
+		const midnight = chart({ orientation: looking((23 + 59.96 / 60) * 15, 10) });
+		expect(resolveFields('{ra:1} / {ra:2} / {ra}', midnight)).toBe(
+			'0h 00.0m / 23h 59.96m / 0h 00m'
+		);
+		const before = chart({ orientation: looking(-0.004, 10) });
+		expect(resolveFields('{ra:1} / {ra:2}', before)).toBe('0h 00.0m / 23h 59.98m');
+		// 9.96 minutes is 10.0, not 9.10; a single digit of minutes keeps its zero.
+		const ten = chart({ orientation: looking((2 + 9.96 / 60) * 15, 10) });
+		expect(resolveFields('{ra:1} / {ra:2}', ten)).toBe('2h 10.0m / 2h 09.96m');
+		// Degrees carry too: 55.96° is 56.0°.
+		const north = chart({ orientation: looking(0, 55.96), stereoFovDeg: 99.96 });
+		expect(resolveFields('{lat:1} / {dec:1} / {fov:1}', north)).toBe('56.0° N / +56.0° / 100.0°');
+	});
+
+	it('never writes a negative nothing: a hair south of the equator is 0.0° N', () => {
+		const sky = chart({ orientation: looking(30, -0.04) });
+		expect(resolveFields('{lat:1} | {dec:1} | {lat} | {dec}', sky)).toBe(
+			'0.0° N | +0.0° | 0° N | +0°'
+		);
+		expect(resolveFields('{lat:2} | {dec:2}', sky)).toBe('0.04° S | −0.04°');
+		const hair = chart({ orientation: looking(30, -0.004) });
+		expect(resolveFields('{lat:2} | {dec:2}', hair)).toBe('0.00° N | +0.00°');
+	});
+
+	it('leaves a field with a suffix it does not take as typed', () => {
+		const sky = chart({ orientation: looking(90, 40) });
+		const typed = '{lat:9} {lat:3} {lat:x} {lat:} {lat:10} {lat:-1} {lat: 1} {lat:1.5} {LAT:1}';
+		expect(resolveFields(typed, sky)).toBe(typed);
+		expect(resolveFields(typed, null)).toBe(typed);
+		expect(hasFields(typed)).toBe(false);
+		// A date and a time have no decimals to show; an unknown name is none with a suffix either.
+		expect(resolveFields('{date:1} {time:0} {noon:1}', sky)).toBe('{date:1} {time:0} {noon:1}');
+		expect(hasFields('{date:1} {time:0} {noon:1}')).toBe(false);
+		expect(resolveFields('{date} {lat:9} {lat:1}', sky)).toBe('2026-10-27 {lat:9} 40.0° N');
+	});
+
+	it('agrees with itself about what a field is', () => {
+		const sky = chart({ orientation: looking(90, 40) });
+		for (const typed of [
+			'{lat}',
+			'{lat:0}',
+			'{lat:1}',
+			'{lat:2}',
+			'{lat:3}',
+			'{lst:2}',
+			'{ra:1}',
+			'{dec:2}',
+			'{fov:0}',
+			'{date}',
+			'{date:1}',
+			'{time}',
+			'{time:2}',
+			'{noon}',
+			'{noon:1}',
+			'{lat:x}',
+			'{}',
+			'{:1}',
+			'lat:1'
+		]) {
+			expect(hasFields(typed), typed).toBe(resolveFields(typed, sky) !== typed);
+		}
+	});
+
 	it('reads the chart a text names, else the nearest on its page', () => {
 		const first = chart({ orientation: looking(0, 10) });
 		const second = chart({ orientation: looking(0, 70) });
@@ -236,6 +369,28 @@ describe('fields', () => {
 		expect(boundItem({ items: [] }, under(20))).toBeNull();
 		expect(boundChart({ items: [] }, under(20))).toBeNull();
 		expect(shownText({ items: [] }, under(20))).toBe(NO_VALUE);
+	});
+});
+
+describe('a chart on another page', () => {
+	it('is read by a text told its id, when it is given the document to look in', () => {
+		const mine = chart({ orientation: { x: 0, y: 0, z: 0, w: 1 }, stereoFovDeg: 120 });
+		const theirs = chart({ orientation: { x: 0, y: 0, z: 0, w: 1 }, stereoFovDeg: 60 });
+		const own: DocItem[] = [{ id: 'mine', chart: mine, frame: { x: 12, y: 12, w: 80, h: 80 } }];
+		const pages = [
+			{ items: own },
+			{ items: [{ id: 'theirs', chart: theirs, frame: { x: 12, y: 12, w: 80, h: 80 } }] }
+		];
+		const told = text({ text: '{fov}', chartId: 'theirs' });
+		expect(boundItem({ items: own }, told, pages)?.id).toBe('theirs');
+		expect(shownText({ items: own }, told, pages)).toBe('60°');
+		// Without the document, or told a chart that is nowhere, it reads the nearest on its page.
+		expect(boundItem({ items: own }, told)?.id).toBe('mine');
+		expect(boundItem({ items: own }, text({ chartId: 'gone' }), pages)?.id).toBe('mine');
+		// One on its own page comes before one of the same id elsewhere, and none is read unasked.
+		expect(boundItem({ items: own }, text({ chartId: 'mine' }), pages)?.id).toBe('mine');
+		expect(boundItem({ items: [] }, text(), pages)).toBeNull();
+		expect(shownText({ items: [] }, told, pages)).toBe('60°');
 	});
 });
 

@@ -261,6 +261,114 @@ describe('textRequest', () => {
 	});
 });
 
+describe('a table in the request', () => {
+	const measure = (line: string) => Array.from(line).length / 2;
+	const sky = {
+		messier: [
+			{
+				m: 45,
+				name: 'Pleiades',
+				kind: 'Open Cluster',
+				constellation: 'Tau',
+				mag: 1.6,
+				ra_deg: 0,
+				dec_deg: 0
+			}
+		],
+		stars: []
+	};
+	// A chart that takes in the whole sky but its far point: the object is on it wherever it looks.
+	const everywhere = (): DocItem => {
+		const item = stereoItem();
+		return { ...item, chart: { ...item.chart, view: { ...VIEW, stereoFovDeg: 350 } } };
+	};
+	const table: DocText = {
+		id: 't',
+		text: '',
+		style: { font: 'sans', size: 10, bold: false, italic: false, align: 'left' },
+		frame: { x: 20, y: 120, w: 150, h: 10 },
+		table: { source: 'messier', look: 'details', rows: 5 }
+	};
+	const page = (): DocPage => ({ id: 'p', orientation: 'portrait', items: [everywhere()] });
+
+	it('is sent a line a cell, each with its anchor and weight, and its rules', () => {
+		const sent = textRequest(page(), table, measure, sky);
+		expect(sent).toMatchObject({ font: 'sans', bold: false, anchor: 'start' });
+		expect(sent.lines.map((line) => line.text)).toEqual([
+			'Messier objects',
+			'Object',
+			'Name',
+			'Type',
+			'Constellation',
+			'Mag',
+			'M 45',
+			'Pleiades',
+			'Open Cluster',
+			'Taurus',
+			'1.6'
+		]);
+		// The title is bold in the middle of the table, the header bold under it.
+		expect(sent.lines[0]).toMatchObject({ bold: true, anchor: 'middle' });
+		expect(sent.lines[0].x_mm).toBeCloseTo(95);
+		expect(sent.lines.slice(1, 6).every((line) => line.bold === true)).toBe(true);
+		expect(sent.lines.slice(6).every((line) => line.bold === undefined)).toBe(true);
+		expect(sent.lines[1]).toMatchObject({ x_mm: 20 });
+		expect(sent.lines[1]).not.toHaveProperty('anchor');
+		// The column of numbers is set from its right edge, the table's.
+		expect(sent.lines[5]).toMatchObject({ anchor: 'end' });
+		expect(sent.lines[5].x_mm).toBeCloseTo(170);
+		expect(sent.lines[10]).toMatchObject({ anchor: 'end' });
+		expect(sent.lines[10].y_mm).toBeGreaterThan(sent.lines[5].y_mm);
+		// Three rules across the table, on the page where the table is.
+		expect(sent.rules).toHaveLength(3);
+		for (const rule of sent.rules!) {
+			expect(rule).toMatchObject({ x1_mm: 20, x2_mm: 170 });
+			expect(rule.y1_mm).toBe(rule.y2_mm);
+			expect(rule.y1_mm).toBeGreaterThan(120);
+			expect(rule.width_mm).toBeGreaterThan(0);
+		}
+		// Turned, it is sent upright with its turn, the rules with it.
+		const turned = textRequest(page(), { ...table, rotation: 90 }, measure, sky);
+		expect(turned.rotation_deg).toBe(90);
+		expect(turned.rules).toHaveLength(3);
+	});
+
+	it('lists nothing without the catalogue, and a text has no rules at all', () => {
+		const bare = textRequest(page(), table, measure);
+		expect(bare.lines.at(-1)!.text).toBe('The catalogue is not loaded');
+
+		// A table of names is its title and its names, each in the middle of its column, unruled.
+		const names = textRequest(
+			page(),
+			{ ...table, table: { source: 'messier', rows: 5 } },
+			measure,
+			sky
+		);
+		expect(names.lines.map((line) => [line.text, line.anchor])).toEqual([
+			['Messier objects', 'middle'],
+			['M 45', 'middle']
+		]);
+		expect(names).not.toHaveProperty('rules');
+
+		// A text on a page with no chart reads the one it is told on another page.
+		const elsewhere: DocPage = { id: 'q', orientation: 'portrait', items: [] };
+		const told = { ...table, text: 'FOV {fov}', table: undefined, chartId: 'a' };
+		expect(textRequest(elsewhere, told, measure, sky).lines[0].text).toBe(`FOV ${NO_VALUE}`);
+		expect(textRequest(elsewhere, told, measure, sky, [elsewhere, page()]).lines[0].text).toBe(
+			'FOV 350°'
+		);
+		const whole = documentRequest([{ ...elsewhere, texts: [told] }, page()], measure, sky);
+		expect(whole.pages[0].texts[0].lines[0].text).toBe('FOV 350°');
+		const words = textRequest(page(), { ...table, table: undefined, text: 'Hello' }, measure, sky);
+		expect(words).not.toHaveProperty('rules');
+		expect(words.lines).toEqual([expect.objectContaining({ text: 'Hello' })]);
+		expect(words.lines[0]).not.toHaveProperty('bold');
+		// The whole document is given the sky its tables read.
+		const [sent] = documentRequest([{ ...page(), texts: [table] }], measure, sky).pages;
+		expect(sent.texts[0].lines).toHaveLength(11);
+	});
+});
+
 describe('documentRequest', () => {
 	it('sends every page at its A4 size in mm and every chart at its frame', () => {
 		const pages: DocPage[] = [

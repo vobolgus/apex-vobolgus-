@@ -9,9 +9,10 @@
 	 * card drawn beside it for the object under the pointer (or the focus); a click on
 	 * an object lays the page out. The close-up's field is chosen there too.
 	 *
-	 * Under the tiles: the orientation of the pages to make, and, with two charts or
-	 * more, "Swap charts", which has them go in the other order. Both redraw
-	 * everything.
+	 * Under the tiles: the orientation of the pages to make, the language the template
+	 * writes its words in (English or Russian; Russian to begin with in a browser set
+	 * to it), and, with two charts or more, "Swap charts", which has them go in the
+	 * other order. Each redraws everything.
 	 *
 	 * A native modal `<dialog>` put beside what opened it (`anchor`): the top layer,
 	 * so no panel clips it, Escape and a press outside close it, and the focus goes
@@ -27,10 +28,12 @@
 		finderSky,
 		isOnChart,
 		layTemplate,
+		TEMPLATE_LANGUAGES,
 		TEMPLATES,
 		type CloseUp,
 		type LaidPage,
-		type TemplateInfo
+		type TemplateInfo,
+		type TemplateLanguage
 	} from '$lib/document/templates';
 	import { measuredLayout } from '$lib/document/text-fonts.svelte';
 	import type { DocItem, DocPage, PageOrientation, TextStyle } from '$lib/document/types';
@@ -59,11 +62,15 @@
 	const CARD_PX = 176;
 	/** Clear of the window's edge, and of what opened it, px. */
 	const EDGE_PX = 12;
+	/** What a language's button says, and its name for the tooltip. */
+	const LANGUAGE_NAMES: Record<TemplateLanguage, string> = { en: 'English', ru: 'Russian' };
 
 	const id = $props.id();
 	let dialogEl = $state<HTMLDialogElement>();
 	let orientation = $state<PageOrientation>(untrack(() => page.orientation));
 	let swap = $state(false);
+	/** The language the templates write in: the browser's when it is one of theirs. */
+	let language = $state<TemplateLanguage>(navigator.language.startsWith('ru') ? 'ru' : 'en');
 	let place = $state<{ left: number; top: number } | null>(null);
 	/** The tiles, or the objects a finder card's close-up may be of. */
 	let step = $state<'templates' | 'objects'>('templates');
@@ -119,7 +126,7 @@
 
 	function layFinder(object: MessierObject | null): LaidPage[] {
 		const closeUp = object ? closeUpOf(object) : undefined;
-		return layTemplate('finder', page, { orientation, swap, height, closeUp });
+		return layTemplate('finder', page, { orientation, swap, height, closeUp, language });
 	}
 
 	// === The tiles ===
@@ -143,7 +150,7 @@
 					? []
 					: finder
 						? layFinder(objects[0] ?? null)
-						: layTemplate(info.id, page, { orientation, swap, height });
+						: layTemplate(info.id, page, { orientation, swap, height, language });
 			const blocked =
 				charts < info.minCharts
 					? `Needs ${plural(info.minCharts, 'chart')}`
@@ -169,10 +176,15 @@
 		return {
 			id: `${page.id}-preview`,
 			orientation: laid.orientation,
-			items: laid.charts.flatMap(({ id: chartId, frame, chart }): DocItem[] => {
+			items: laid.charts.flatMap(({ id: chartId, frame, chart, marks }): DocItem[] => {
 				if (chart) return [{ id: chartId, chart, frame }];
 				const item = page.items.find((it) => it.id === chartId);
-				return item ? [{ ...item, frame }] : [];
+				if (!item) return [];
+				// Ringed where the template rings it, and nowhere else, as the page will be.
+				const shown = { ...item.chart };
+				if (marks?.length) shown.marks = marks;
+				else delete shown.marks;
+				return [{ ...item, chart: shown, frame }];
 			}),
 			texts: [...own, ...laid.texts.map((text, i) => ({ ...text, id: `preview-text-${i}` }))]
 		};
@@ -401,6 +413,19 @@
 				value={orientation}
 				onselect={(next) => (orientation = next)}
 			/>
+			<div class="fields" role="group" aria-label="Language of the text">
+				{#each TEMPLATE_LANGUAGES as code (code)}
+					<button
+						class="chip"
+						type="button"
+						aria-pressed={language === code}
+						title={LANGUAGE_NAMES[code]}
+						onclick={() => (language = code)}
+					>
+						{code.toUpperCase()}
+					</button>
+				{/each}
+			</div>
 			{#if step === 'objects'}
 				<div class="fields" role="group" aria-label="Field of the close-up">
 					<span class="fields-label" aria-hidden="true">Field</span>
@@ -721,11 +746,13 @@
 		outline-offset: -2px;
 	}
 
+	/* Four groups at the most; on a narrow screen the last goes under the others whole. */
 	.foot {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 6px 12px;
 		margin-top: 8px;
 		padding-top: 10px;
 		border-top: 1px solid var(--hairline);
@@ -762,6 +789,7 @@
 			system-ui,
 			sans-serif;
 		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 		cursor: pointer;
 		transition:
 			background var(--ease-ui),

@@ -256,7 +256,11 @@ Other errors:
   made about (`cx_mm`, `cy_mm`). The fonts are the files in
   `frontend/static/fonts`, which this server carries in its binary and the page loads
   from `/fonts/`: the same files on both sides, so a line fits as it did in the editor.
-  They are embedded in the PDF as subsets, so the text can be selected and searched
+  They are embedded in the PDF as subsets, so the text can be selected and searched.
+  A line may carry an `anchor` and a `bold` of its own, which then stand for the text's
+  (a table's cell: `{ "x_mm": 198, "y_mm": 140, "text": "4.0", "anchor": "end" }`), and a
+  text may carry `rules`, straight black lines drawn with it and turned with it:
+  `"rules": [{ "x1_mm": 12, "y1_mm": 134, "x2_mm": 198, "y2_mm": 134, "width_mm": 0.3 }]`
 - How it is built: each page is an SVG in mm with every chart nested as an inner `<svg>`
   under its own id prefix (so their clip paths cannot collide), converted with
   `svg2pdf::to_chunk`; `pdf-writer` assembles the chunks into one page tree
@@ -269,7 +273,8 @@ Validation (`400`, plain-text message naming the page and item, 1-based, e.g.
 - page and item `width_mm`/`height_mm` positive, finite and at most `2000`
 - every item inside its page, with 1 mm of tolerance on each side
 - every item `config` has a `view` and passes the `/api/export` checks above
-- `0..=50` texts per page, each of at most `200` lines of at most `400` characters;
+- `0..=50` texts per page, each of at most `400` lines of at most `400` characters and
+  at most `100` rules (finite ends, `width_mm` in `(0, 5]`);
   `size_mm` in `1..=100`; every line's `x_mm`/`y_mm` on its page, with 1 mm of tolerance
   once the text is turned (e.g. `page 1, text 2: line 3 must start inside its page`);
   `rotation_deg`, `cx_mm` and `cy_mm` finite. A control character in a

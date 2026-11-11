@@ -5,6 +5,7 @@
  */
 
 import type { ChartLayers, ChartView } from '$lib/api/render-config';
+import type { TemplateId, TemplateLanguage } from './templates';
 
 export type PageOrientation = 'portrait' | 'landscape';
 
@@ -64,9 +65,31 @@ export interface TextStyle {
 
 /**
  * The part a text plays on a page a template laid out (`templates.ts`). A caption
- * and a key belong to a chart (`chartId`).
+ * and a key belong to a chart (`chartId`), as do a worksheet's two tables, of its
+ * stars and of its Messier objects.
  */
-export type TextRole = 'title' | 'caption' | 'header' | 'number' | 'tasks' | 'key';
+export type TextRole =
+	'title' | 'caption' | 'header' | 'number' | 'tasks' | 'key' | 'stars' | 'messier';
+
+/** What a table lists of its chart. */
+export type TableSource = 'messier' | 'stars';
+
+/**
+ * How a table is set (`table.ts`). `names`: a title over the names alone, three to
+ * a row, as on a SkyGen worksheet. `details`: a row an object under a header, with
+ * what the catalogue knows of it.
+ */
+export type TableLook = 'names' | 'details';
+
+/** A table: what it lists, how it is set, and in how many rows, brightest first. */
+export interface TableSpec {
+	source: TableSource;
+	/** `names` when absent. */
+	look?: TableLook;
+	rows: number;
+	/** The language of its title, its header and what it calls things; English when absent. */
+	language?: TemplateLanguage;
+}
 
 /**
  * A block of text on a page. Its width is set by hand and its lines wrap to it; the
@@ -84,6 +107,11 @@ export interface DocText {
 	 * absent when upright. The frame is the text's own box, as it is before the turn.
 	 */
 	rotation?: number;
+	/**
+	 * Set on a table (`table.ts`): its words are not typed (`text` is empty) but read
+	 * from its chart, and set in rows and columns.
+	 */
+	table?: TableSpec;
 	/**
 	 * Set on a text a template put there. Laid out again, the page keeps what was
 	 * typed in it for the same part, and drops it where the new template has none;
@@ -131,12 +159,27 @@ export interface TurnMemo {
 	manual: boolean;
 }
 
+/**
+ * The template a page was laid out as (`templates.ts`), and the language it wrote
+ * in. Charts alone are no template to remember: that is the arranger's layout.
+ */
+export interface PageTemplate {
+	id: Exclude<TemplateId, 'charts'>;
+	language: TemplateLanguage;
+}
+
 export interface DocPage {
 	id: string;
 	orientation: PageOrientation;
 	items: DocItem[];
 	/** Text, drawn over the charts. A page with text is arranged by hand (`manual`). */
 	texts?: DocText[];
+	/**
+	 * Set when a template lays the page out, and kept while the page is what it made:
+	 * a turn then lays it out as that template does the other way. Moving, adding or
+	 * removing a chart or a text by hand clears it; typing in a text does not.
+	 */
+	template?: PageTemplate;
 	/** Arranged by hand (a drag, a resize, a nudge, a drop): Add to PDF moves nothing here. */
 	manual?: boolean;
 	/** The arranger's layout, while the frames are still the ones it made. */

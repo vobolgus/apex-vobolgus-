@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 /**
  * Page templates: the button on a page's thumbnail (across from its ⊖) and by its
@@ -56,12 +56,20 @@ const DOCUMENT = {
 	]
 };
 
+interface Frame {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
 interface SavedPage {
 	id: string;
 	orientation: string;
 	manual?: boolean;
-	items: { id: string; frame: { x: number; y: number; w: number; h: number } }[];
-	texts?: { role?: string; text: string; chartId?: string; rotation?: number }[];
+	template?: { id: string; language: string };
+	items: { id: string; frame: Frame }[];
+	texts?: { role?: string; text: string; chartId?: string; rotation?: number; frame: Frame }[];
 }
 
 async function seed(page: Page) {
@@ -83,6 +91,52 @@ async function savedPages(page: Page): Promise<SavedPage[]> {
 }
 
 const roles = (saved: SavedPage) => (saved.texts ?? []).map((text) => text.role);
+
+/** Where everything is on a saved page: its charts, and its texts by part. */
+function layoutOf(saved: SavedPage) {
+	return {
+		orientation: saved.orientation,
+		items: saved.items.map(({ id, frame }) => ({ id, frame })),
+		texts: (saved.texts ?? []).map(({ role, text, chartId, rotation, frame }) => ({
+			part: [role, text, chartId, rotation].join('|'),
+			frame
+		}))
+	};
+}
+
+/** Whether two layouts are the same, every frame to a hundredth of a millimetre. */
+function sameLayout(a: ReturnType<typeof layoutOf>, b: ReturnType<typeof layoutOf>): boolean {
+	const near = (p: Frame, q: Frame) =>
+		(['x', 'y', 'w', 'h'] as const).every((side) => Math.abs(p[side] - q[side]) < 0.01);
+	return (
+		a.orientation === b.orientation &&
+		a.items.length === b.items.length &&
+		a.texts.length === b.texts.length &&
+		a.items.every((item, i) => item.id === b.items[i].id && near(item.frame, b.items[i].frame)) &&
+		a.texts.every((text, i) => text.part === b.texts[i].part && near(text.frame, b.texts[i].frame))
+	);
+}
+
+/** How many pixels of a thumbnail's canvas are the accent's red: a ring drawn on it. */
+async function accentPixels(canvas: Locator): Promise<number> {
+	return canvas.evaluate((node) => {
+		const el = node as HTMLCanvasElement;
+		const { data } = el.getContext('2d')!.getImageData(0, 0, el.width, el.height);
+		let count = 0;
+		for (let i = 0; i < data.length; i += 4) {
+			// Antialiased on white or on nothing: red well over green and blue.
+			if (
+				data[i + 3] > 40 &&
+				data[i] > 150 &&
+				data[i] - data[i + 1] > 60 &&
+				data[i] - data[i + 2] > 60
+			) {
+				count += 1;
+			}
+		}
+		return count;
+	});
+}
 
 test('a page is laid out as a template from its thumbnail, and Undo puts it back', async ({
 	page
@@ -182,8 +236,8 @@ test("charts past a template's places go on new pages; swapping and turning redr
 	expect(pages[0].id).toBe('e2e-page-1');
 	expect(pages.slice(0, 2).map((saved) => saved.orientation)).toEqual(['landscape', 'landscape']);
 	for (const saved of pages.slice(0, 2)) {
-		expect(roles(saved)).toEqual(['header', 'number', 'tasks', 'key']);
-		expect(saved.texts![3].rotation).toBe(180);
+		expect(roles(saved)).toEqual(['header', 'number', 'tasks', 'stars', 'messier', 'key']);
+		expect(saved.texts![5].rotation).toBe(180);
 	}
 	expect(pages.slice(0, 2).map((saved) => saved.texts![1].text)).toEqual(['№ 1', '№ 2']);
 	await expect(panel.getByRole('button', { name: /^Page \d,/ })).toHaveCount(4);
@@ -251,6 +305,54 @@ test('the editor lays its page out too, keeping what was typed in a title; Escap
 	).toBeFocused();
 });
 
+test('a page a template laid out turns as the template lays it out the other way, and back', async ({
+	page
+}) => {
+	await seed(page);
+	await page.getByRole('button', { name: 'Page 1, 2 charts' }).click();
+	const editor = page.getByRole('dialog', { name: 'PDF document' });
+	await page.evaluate(() => document.fonts.ready);
+	const open = editor.getByRole('button', { name: 'Lay page 1 out as a template' });
+	const picker = page.getByRole('dialog', { name: 'Lay page 1 out as' });
+	const first = async () => (await savedPages(page))[0];
+
+	// Two skies on the portrait page, one over the other, and the page remembers the template.
+	await open.click();
+	await picker.getByRole('button', { name: 'Two skies: Side by side' }).click();
+	await expect.poll(async () => roles(await first())).toEqual(['title', 'caption', 'caption']);
+	const upright = layoutOf(await first());
+	expect(upright.items[1].frame.y).toBeGreaterThan(
+		upright.items[0].frame.y + upright.items[0].frame.h
+	);
+	expect((await first()).template).toEqual({ id: 'pair', language: 'en' });
+
+	// What the template makes of the same charts on a landscape page: side by side.
+	await open.click();
+	await picker.getByRole('radio', { name: 'Landscape' }).click();
+	await picker.getByRole('button', { name: 'Two skies: Side by side' }).click();
+	await expect.poll(async () => (await first()).orientation).toBe('landscape');
+	const across = layoutOf(await first());
+	expect(across.items[1].frame.x).toBeGreaterThan(
+		across.items[0].frame.x + across.items[0].frame.w
+	);
+	expect(across.texts[0].frame).toMatchObject({ x: 12, y: 12, w: 273 });
+
+	// Turned with the page's own toggle, it is the template's portrait page again, not the
+	// arranger's turn of two charts with the text carried along.
+	const toggle = editor.getByRole('radiogroup', { name: 'Page 1 orientation' });
+	await toggle.getByRole('radio', { name: 'Portrait' }).click();
+	await expect.poll(async () => (await first()).orientation).toBe('portrait');
+	await expect.poll(async () => sameLayout(layoutOf(await first()), upright)).toBe(true);
+	expect((await first()).template).toEqual({ id: 'pair', language: 'en' });
+	await expect(editor.getByRole('button', { name: /^Text 1 of 3: Two skies$/ })).toBeVisible();
+
+	// And turned back, the landscape page the picker made.
+	await toggle.getByRole('radio', { name: 'Landscape' }).click();
+	await expect.poll(async () => (await first()).orientation).toBe('landscape');
+	await expect.poll(async () => sameLayout(layoutOf(await first()), across)).toBe(true);
+	expect((await first()).template).toEqual({ id: 'pair', language: 'en' });
+});
+
 test('a finder card is made of one sky and an object chosen on it: a close-up, and its place ringed', async ({
 	page
 }) => {
@@ -284,6 +386,11 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	await expect(rows).toHaveText([/^M 44 · Beehive Cluster/]);
 	// The card beside the list is drawn for it: the sky, and the close-up under it.
 	await expect(objects.locator('.card .chart[data-item-id]')).toHaveCount(2);
+	// The object's place is ringed on the sky there, and not on the close-up.
+	const cardSky = objects.locator('.card .chart[data-item-id="e2e-lone"] canvas');
+	const cardCloseUp = objects.locator('.card .chart:not([data-item-id="e2e-lone"]) canvas');
+	await expect.poll(async () => accentPixels(cardSky)).toBeGreaterThan(10);
+	expect(await accentPixels(cardCloseUp)).toBe(0);
 
 	// Escape goes back to the templates, not out; then in again, at 10°.
 	await page.keyboard.press('Escape');
@@ -323,6 +430,11 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	]);
 	// One page: nothing else was on it to move on.
 	expect((await savedPages(page)).length).toBe(3);
+	// The page's thumbnail in the panel shows the ring on the sky; a page with no card has none.
+	const thumb = (id: string) => panel.locator(`.chart[data-item-id="${id}"] canvas`);
+	await expect.poll(async () => accentPixels(thumb('e2e-lone'))).toBeGreaterThan(10);
+	expect(await accentPixels(thumb(close.id))).toBe(0);
+	expect(await accentPixels(thumb('e2e-disc'))).toBe(0);
 
 	// The PDF is told the ring on the sky, and none on the close-up.
 	let body: { pages: { items: { config: { marks?: unknown[]; projection: string } }[] }[] } | null =
@@ -354,4 +466,78 @@ test('a finder card is made of one sky and an object chosen on it: a close-up, a
 	const replaced = (await savedPages(page))[1];
 	expect(replaced.items).toHaveLength(2);
 	expect(replaced.items[1].id).not.toBe(close.id);
+});
+
+test('a template writes in the language chosen under the tiles: Russian, or English', async ({
+	page
+}) => {
+	await seed(page);
+	const panel = page.getByRole('complementary', { name: 'PDF pages' });
+	await panel.getByRole('button', { name: 'Page 2, 1 chart' }).hover();
+	await panel.getByRole('button', { name: 'Lay page 2 out as a template' }).click();
+	const picker = page.getByRole('dialog', { name: 'Lay page 2 out as' });
+	const language = picker.getByRole('group', { name: 'Language of the text' });
+	await expect(language.getByRole('button')).toHaveText(['EN', 'RU']);
+	// This browser is set to English, so the templates begin in it.
+	await expect(language.getByRole('button', { name: 'EN' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	const tile = picker.getByRole('button', { name: 'With a caption: One to a page' });
+	await expect(tile.locator('.text').first()).toHaveText('Sky chart');
+
+	// Russian redraws the tiles in it.
+	await language.getByRole('button', { name: 'RU' }).click();
+	await expect(language.getByRole('button', { name: 'RU' })).toHaveAttribute(
+		'aria-pressed',
+		'true'
+	);
+	await expect(language.getByRole('button', { name: 'EN' })).toHaveAttribute(
+		'aria-pressed',
+		'false'
+	);
+	await expect(tile.locator('.text').first()).toHaveText('Карта неба');
+	const sheet = picker.getByRole('button', { name: /^Worksheet/ });
+	await expect(sheet.locator('.text').first()).toHaveText(/^Фамилия, имя/);
+
+	// The page is laid out in it: the words are Russian, what the fields show is as it was.
+	await tile.click();
+	await expect
+		.poll(async () => (await savedPages(page))[1].texts?.map((text) => [text.role, text.text]))
+		.toEqual([
+			['title', 'Карта неба'],
+			['caption', 'Широта {lat} · звёздное время {lst}']
+		]);
+	await panel.getByRole('button', { name: 'Page 2, 1 chart' }).click();
+	const editor = page.getByRole('dialog', { name: 'PDF document' });
+	await expect(
+		editor.getByRole('button', {
+			name: /^Text 2 of 2: Широта \d+° [NS] · звёздное время \d+h \d\dm$/
+		})
+	).toBeVisible();
+});
+
+test.describe('in a browser set to Russian', () => {
+	test.use({ locale: 'ru-RU' });
+
+	test('the templates begin in Russian, and English is a click away', async ({ page }) => {
+		await seed(page);
+		const panel = page.getByRole('complementary', { name: 'PDF pages' });
+		await panel.getByRole('button', { name: 'Page 2, 1 chart' }).hover();
+		await panel.getByRole('button', { name: 'Lay page 2 out as a template' }).click();
+		const picker = page.getByRole('dialog', { name: 'Lay page 2 out as' });
+		const language = picker.getByRole('group', { name: 'Language of the text' });
+		await expect(language.getByRole('button', { name: 'RU' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		const tile = picker.getByRole('button', { name: 'With a caption: One to a page' });
+		await expect(tile.locator('.text').first()).toHaveText('Карта неба');
+		await language.getByRole('button', { name: 'EN' }).click();
+		await expect(tile.locator('.text').first()).toHaveText('Sky chart');
+		await tile.click();
+		await expect
+			.poll(async () => (await savedPages(page))[1].texts?.map((text) => text.text))
+			.toEqual(['Sky chart', 'Latitude {lat} · sidereal time {lst}']);
+	});
 });

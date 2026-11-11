@@ -545,7 +545,7 @@
 								onclick={() => onopen(page.id)}
 								onkeydown={(event) => handleThumbKeydown(event, page.id)}
 							>
-								<PageThumbnail {page} scale={scaleFor(page)} {pendingItemId} />
+								<PageThumbnail {page} scale={scaleFor(page)} {pendingItemId} pages={store.pages} />
 							</button>
 							<button
 								class="remove"

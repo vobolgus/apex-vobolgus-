@@ -455,7 +455,8 @@ describe('PageEditor', () => {
 		const group = ctx.dialog.querySelector('[role="radiogroup"][aria-label="Page 2 orientation"]')!;
 		const before = ctx.store.page('p2')!.items.map((it) => ({ ...it.frame }));
 		click(group.querySelector('[role="radio"][aria-label="Landscape"]')!);
-		expect(orientation).toHaveBeenCalledWith('p2', 'landscape');
+		// With the measure for its text, should a template have laid the page out.
+		expect(orientation).toHaveBeenCalledWith('p2', 'landscape', expect.any(Function));
 		expect(ctx.store.page('p2')!.orientation).toBe('landscape');
 		expect(group.querySelector('[aria-checked="true"]')?.getAttribute('aria-label')).toBe(
 			'Landscape'

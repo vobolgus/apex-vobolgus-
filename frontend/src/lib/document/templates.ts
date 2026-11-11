@@ -16,12 +16,21 @@
  * with text. Laid out again by another template, a text keeps what was typed in it
  * when the new template has the same part for it; what the page's owner added (a
  * text with no `role`) stays where it is.
+ *
+ * A laid page says which template made it (`LaidPage.template`), for the page to
+ * remember while it is still what the template made. Turned, such a page is laid out
+ * by the same template for the other orientation (`again`), as it is: its own
+ * words, its own close-up.
+ *
+ * A template writes in a language (`TemplateLanguage`), English or Russian: its own
+ * words only. What a field shows (`text.ts`) and an object's name are the same in both.
  */
 
 import { viewBasis } from '$lib/math/projection';
 import { pointingToOrientation } from '$lib/math/pointing';
 import { arrangePage, chartKind } from './arrange';
 import { contentBox, GUTTER_MM } from './geometry';
+import { fullTableHeight } from './table';
 import { LINE_HEIGHT, MM_PER_PT } from './text';
 import type {
 	ChartKind,
@@ -31,8 +40,10 @@ import type {
 	DocText,
 	PageLayout,
 	PageOrientation,
+	PageTemplate,
 	Rect,
 	SkyMark,
+	TableSpec,
 	TextRole,
 	TextStyle
 } from './types';
@@ -57,13 +68,21 @@ export const TEMPLATES: readonly TemplateInfo[] = [
 	{ id: 'sheet', name: 'Worksheet', note: 'Tasks, and a key', minCharts: 1 }
 ];
 
+/** The languages a template writes its words in. */
+export type TemplateLanguage = 'en' | 'ru';
+
+/** In the order the picker offers them; the first is the one a template writes in untold. */
+export const TEMPLATE_LANGUAGES: readonly TemplateLanguage[] = ['en', 'ru'];
+
 export const TEXT_ROLES: readonly TextRole[] = [
 	'title',
 	'caption',
 	'header',
 	'number',
 	'tasks',
-	'key'
+	'key',
+	'stars',
+	'messier'
 ];
 
 /** A text a template puts on a page: a `DocText` yet to get its id. */
@@ -91,6 +110,8 @@ export interface LaidPage {
 	layout?: PageLayout;
 	/** Charts of the page that go: an earlier close-up of the sky, replaced by this one. */
 	dropped?: string[];
+	/** The template that made it, for the page to remember; none for charts alone. */
+	template?: PageTemplate;
 }
 
 /** What a finder card's close-up looks at, and how much of the sky it takes in. */
@@ -116,6 +137,15 @@ export interface TemplateOptions {
 	swap?: boolean;
 	/** For a finder card: the object to draw the close-up of. Without one it is the sky alone. */
 	closeUp?: CloseUp;
+	/** The language of the words it writes; English when absent. */
+	language?: TemplateLanguage;
+	/**
+	 * The page is already what this template made, and is laid out as it is (for a
+	 * turn): every text of a part keeps its words and its face, stock or not, a
+	 * worksheet its number, and a finder card the close-up its sky has and the ring
+	 * on it. Without it a finder card's sky stands alone until an object is chosen.
+	 */
+	again?: boolean;
 	/** The height of `text` set in `style` in a column `width` mm wide, mm. */
 	height?: (text: string, style: TextStyle, width: number) => number;
 }
@@ -127,32 +157,92 @@ const CAPTION: TextStyle = { font: 'serif', size: 10, bold: false, italic: true,
 const HEADER: TextStyle = { font: 'serif', size: 12, bold: false, italic: false, align: 'left' };
 const TASKS: TextStyle = { font: 'serif', size: 11, bold: false, italic: false, align: 'left' };
 const KEY: TextStyle = { font: 'sans', size: 8, bold: false, italic: false, align: 'left' };
+const TABLE: TextStyle = { font: 'serif', size: 10, bold: false, italic: false, align: 'left' };
+/** The rows a worksheet's tables start with: three names a row. */
+const SHEET_TABLE_ROWS = 4;
 
-const TITLES: Partial<Record<TemplateId, string>> = {
-	caption: 'Sky chart',
-	pair: 'Two skies',
-	finder: 'Finder card'
+/** The words a template writes on its own, in one language. */
+interface Words {
+	titles: Record<'caption' | 'pair' | 'finder', string>;
+	skyCaption: string;
+	frameCaption: string;
+	/** What a close-up's caption says after the object's name. */
+	closeUpCaption: string;
+	header: string;
+	tasks: string;
+}
+
+const WORDS: Record<TemplateLanguage, Words> = {
+	en: {
+		titles: { caption: 'Sky chart', pair: 'Two skies', finder: 'Finder card' },
+		skyCaption: 'Latitude {lat} · sidereal time {lst}',
+		frameCaption: 'Centre {ra}, {dec} · field {fov}',
+		closeUpCaption: ' · field {fov}',
+		header: 'Name ______________________   Class ________',
+		tasks: [
+			'1. Mark the zenith with Z and the cardinal points with N, S, W, E.',
+			'2. Mark the celestial pole with P.',
+			'3. Mark the vernal equinox, or else the autumnal one.',
+			'4. Draw the great circles of the celestial equator and of the ecliptic.',
+			'5. Work out the sidereal time of the chart: __________',
+			'6. Find the latitude it was taken at: __________',
+			'7. Draw the outlines of all the constellations in sight.',
+			'8. Mark on the chart the objects of the tables below.'
+		].join('\n')
+	},
+	ru: {
+		titles: { caption: 'Карта неба', pair: 'Два неба', finder: 'Поисковая карта' },
+		skyCaption: 'Широта {lat} · звёздное время {lst}',
+		frameCaption: 'Центр {ra}, {dec} · поле {fov}',
+		closeUpCaption: ' · поле {fov}',
+		header: 'Фамилия, имя ______________________   Класс ________',
+		tasks: [
+			'1. Обозначьте точку зенита символом Z и стороны света символами N, S, W, E.',
+			'2. Обозначьте полюс мира символом P.',
+			'3. Обозначьте точку весны или же точку осени.',
+			'4. Проведите большие круги небесного экватора и эклиптики.',
+			'5. Рассчитайте звёздное время скайчарта: __________',
+			'6. Определите широту места съёмки: __________',
+			'7. Проведите контуры всех видимых созвездий.',
+			'8. Отметьте на скайчарте объекты из таблиц ниже.'
+		].join('\n')
+	}
 };
 
-const SKY_CAPTION = 'Latitude {lat} · sidereal time {lst}';
-const FRAME_CAPTION = 'Centre {ra}, {dec} · field {fov}';
-const HEADER_TEXT = 'Name ______________________   Class ________';
-const TASKS_TEXT =
-	'1. Find the zenith and mark it.\n2. Name the ten brightest stars.\n3. Draw the celestial equator.';
+/** A key is fields alone, and a sheet's number a sign: the same in every language. */
 const SKY_KEY = '{lat} · {lst}';
 const FRAME_KEY = '{ra} {dec}';
 
 /**
- * What a template writes on its own. A text that still says one of these was not
- * typed over, so the next template writes its own words there instead of keeping it.
+ * What a template writes on its own, in any language. A text that still says one of
+ * these was not typed over, so the next template writes its own words there instead
+ * of keeping it: in another language, those words are that language's.
  */
 const STOCK = new Set<string>([
-	...Object.values(TITLES),
-	SKY_CAPTION,
-	FRAME_CAPTION,
+	...Object.values(WORDS).flatMap((words) => [
+		...Object.values(words.titles),
+		words.skyCaption,
+		words.frameCaption,
+		words.header,
+		words.tasks
+	]),
 	SKY_KEY,
 	FRAME_KEY
 ]);
+
+/**
+ * `text` as it is kept in `language`. A close-up's caption is the object's name with
+ * stock words after it, so it is in no list: the name stays, and the words after it
+ * become the language's.
+ */
+function keptWords(text: string, language: TemplateLanguage): string {
+	for (const { closeUpCaption } of Object.values(WORDS)) {
+		if (text.endsWith(closeUpCaption) && text.length > closeUpCaption.length) {
+			return text.slice(0, -closeUpCaption.length) + WORDS[language].closeUpCaption;
+		}
+	}
+	return text;
+}
 
 /** Between a chart and the caption under it, mm. */
 const CAPTION_GAP_MM = 2.5;
@@ -161,9 +251,12 @@ const KEY_WIDTH_MM = 70;
 /** The share of the page a finder card gives the wide sky. */
 const FINDER_MAIN_SHARE = 0.6;
 
-/** One line a size, for a caller with no fonts to measure with: good for a single line. */
-function oneLine(_text: string, style: TextStyle): number {
-	return style.size * MM_PER_PT * LINE_HEIGHT;
+/**
+ * A line for each line the text is typed in, for a caller with no fonts to measure
+ * with: right for text that does not wrap.
+ */
+function typedLines(text: string, style: TextStyle): number {
+	return text.split('\n').length * style.size * MM_PER_PT * LINE_HEIGHT;
 }
 
 // === Laying out ===
@@ -177,9 +270,18 @@ interface Chart {
 interface Context {
 	orientation: PageOrientation;
 	box: Rect;
+	/** The template's own words, in the language it writes in. */
+	words: Words;
 	height: (text: string, style: TextStyle, width: number) => number;
-	/** What the page's text of that part says now, and how it is set, if it was typed over. */
+	/**
+	 * What the page's text of that part says now, and how it is set, if it is kept:
+	 * typed over, or anything at all on a page laid out again as it is (`again`).
+	 */
 	kept: (role: TextRole, chartId?: string) => { text: string; style: TextStyle } | null;
+	/** The language it writes in, for a table's own words. */
+	language: TemplateLanguage;
+	/** The table of that part the page has now, if it has one: its rows and its look are kept. */
+	keptTable: (role: TextRole, chartId: string) => DocText | undefined;
 }
 
 /** A text of `role` at (`x`, `y`), `w` wide: the page's own words for that part, else `words`. */
@@ -191,8 +293,7 @@ function textAt(
 	at: { x: number; y: number; w: number },
 	chartId?: string
 ): LaidText {
-	// A sheet's number is its place in the run, whatever the last one said.
-	const kept = role === 'number' ? null : ctx.kept(role, chartId);
+	const kept = ctx.kept(role, chartId);
 	const text = kept?.text ?? words;
 	const set = kept?.style ?? style;
 	const laid: LaidText = {
@@ -226,8 +327,8 @@ function captioned(
 	return { chart: { id: chart.id, frame }, text: caption };
 }
 
-function captionFor(chart: Chart): string {
-	return chart.kind === 'stereo' ? SKY_CAPTION : FRAME_CAPTION;
+function captionFor(ctx: Context, chart: Chart): string {
+	return chart.kind === 'stereo' ? ctx.words.skyCaption : ctx.words.frameCaption;
 }
 
 /** The title at the top of the content box, and the room under it. */
@@ -264,8 +365,8 @@ function page(ctx: Context, parts: ReturnType<typeof captioned>[], texts: LaidTe
 
 /** One chart under a title, its caption under it. */
 function captionPage(ctx: Context, [chart]: Chart[]): LaidPage {
-	const { title, room } = titled(ctx, TITLES.caption!);
-	return page(ctx, [captioned(ctx, room, chart, captionFor(chart))], [title]);
+	const { title, room } = titled(ctx, ctx.words.titles.caption);
+	return page(ctx, [captioned(ctx, room, chart, captionFor(ctx, chart))], [title]);
 }
 
 /**
@@ -274,12 +375,12 @@ function captionPage(ctx: Context, [chart]: Chart[]): LaidPage {
  * column, two wide frames on a landscape one too). One chart takes all the room.
  */
 function pairPage(ctx: Context, charts: Chart[]): LaidPage {
-	const { title, room } = titled(ctx, TITLES.pair!);
+	const { title, room } = titled(ctx, ctx.words.titles.pair);
 	if (charts.length < 2) {
-		return page(ctx, [captioned(ctx, room, charts[0], captionFor(charts[0]))], [title]);
+		return page(ctx, [captioned(ctx, room, charts[0], captionFor(ctx, charts[0]))], [title]);
 	}
 	const lay = (way: 'cols' | 'rows') =>
-		split(room, way).map((cell, i) => captioned(ctx, cell, charts[i], captionFor(charts[i])));
+		split(room, way).map((cell, i) => captioned(ctx, cell, charts[i], captionFor(ctx, charts[i])));
 	const area = (parts: ReturnType<typeof lay>) =>
 		parts.reduce((sum, part) => sum + part.chart.frame.w * part.chart.frame.h, 0);
 	const cols = lay('cols');
@@ -292,33 +393,45 @@ function pairPage(ctx: Context, charts: Chart[]): LaidPage {
  * larger part of the page (the top of a portrait page, the left of a landscape one)
  * with the place ringed on it, the close-up the rest, named in its caption. With no
  * object chosen yet it is the sky alone.
+ *
+ * `target` is an object to draw the close-up of; `had` the close-up the sky has
+ * already, a chart of the page, kept as it is with the ring that is on the sky.
  */
-function finderPage(ctx: Context, sky: DocItem, target: CloseUp | undefined): LaidPage {
-	const { title, room } = titled(ctx, TITLES.finder!);
+function finderPage(ctx: Context, sky: DocItem, target?: CloseUp, had?: DocItem): LaidPage {
+	const { title, room } = titled(ctx, ctx.words.titles.finder);
 	const main = chartOf(sky);
-	if (!target) return page(ctx, [captioned(ctx, room, main, captionFor(main))], [title]);
-	const made = closeUpChart(sky.chart, target);
-	const detail: Chart = { id: closeUpId(sky.id), kind: 'pinhole', aspect: made.aspect };
+	const made = target && !had ? closeUpChart(sky.chart, target) : undefined;
+	const detail: Chart | undefined = had
+		? chartOf(had)
+		: made && { id: closeUpId(sky.id), kind: 'pinhole', aspect: made.aspect };
+	if (!detail) return page(ctx, [captioned(ctx, room, main, captionFor(ctx, main))], [title]);
 	const way = ctx.orientation === 'landscape' ? 'cols' : 'rows';
 	const [mainCell, detailCell] = split(room, way, FINDER_MAIN_SHARE);
-	const wide = captioned(ctx, mainCell, main, captionFor(main));
-	const close = captioned(ctx, detailCell, detail, `${target.name} · field {fov}`);
-	// Where the close-up looks: a ring as wide as its frame.
-	wide.chart.marks = [{ raDeg: target.raDeg, decDeg: target.decDeg, radiusDeg: target.fovDeg / 2 }];
-	close.chart.chart = made;
-	close.chart.closeUpOf = sky.id;
+	const wide = captioned(ctx, mainCell, main, captionFor(ctx, main));
+	const name = made && target ? target.name + ctx.words.closeUpCaption : ctx.words.frameCaption;
+	const close = captioned(ctx, detailCell, detail, name);
+	if (made && target) {
+		// Where the close-up looks: a ring as wide as its frame.
+		const { raDeg, decDeg, fovDeg } = target;
+		wide.chart.marks = [{ raDeg, decDeg, radiusDeg: fovDeg / 2 }];
+		close.chart.chart = made;
+		close.chart.closeUpOf = sky.id;
+	} else if (sky.chart.marks?.length) {
+		wide.chart.marks = sky.chart.marks.map((mark) => ({ ...mark }));
+	}
 	return page(ctx, [wide, close], [title]);
 }
 
 /**
  * A worksheet, after SkyGen's: a line for the name and the sheet's number at the
- * top, the tasks, the chart, and its key upside down at the foot, where whoever
- * holds the sheet the right way up does not read it at a glance.
+ * top, the tasks, the names of the chart's stars and of its Messier objects in two
+ * tables side by side, the chart, and its key upside down at the foot, where
+ * whoever holds the sheet the right way up does not read it at a glance.
  */
 function sheetPage(ctx: Context, [chart]: Chart[], number: number): LaidPage {
 	const { box } = ctx;
 	const numberWidth = 30;
-	const header = textAt(ctx, 'header', HEADER_TEXT, HEADER, {
+	const header = textAt(ctx, 'header', ctx.words.header, HEADER, {
 		x: box.x,
 		y: box.y,
 		w: box.w - numberWidth - GUTTER_MM
@@ -330,7 +443,7 @@ function sheetPage(ctx: Context, [chart]: Chart[], number: number): LaidPage {
 		{ ...HEADER, align: 'right' },
 		{ x: box.x + box.w - numberWidth, y: box.y, w: numberWidth }
 	);
-	const tasks = textAt(ctx, 'tasks', TASKS_TEXT, TASKS, {
+	const tasks = textAt(ctx, 'tasks', ctx.words.tasks, TASKS, {
 		x: box.x,
 		y: box.y + Math.max(header.frame.h, count.frame.h) + GUTTER_MM,
 		w: box.w
@@ -345,12 +458,50 @@ function sheetPage(ctx: Context, [chart]: Chart[], number: number): LaidPage {
 	);
 	key.frame.y = box.y + box.h - key.frame.h;
 	key.rotation = 180;
-	const top = tasks.frame.y + tasks.frame.h + GUTTER_MM;
+	// The two tables, each half the width: the stars on the left, Messier on the right.
+	const half = (box.w - GUTTER_MM) / 2;
+	const listsTop = tasks.frame.y + tasks.frame.h + GUTTER_MM / 2;
+	const stars = tableAt(ctx, 'stars', chart.id, { x: box.x, y: listsTop, w: half });
+	const messier = tableAt(ctx, 'messier', chart.id, {
+		x: box.x + half + GUTTER_MM,
+		y: listsTop,
+		w: half
+	});
+	const top = listsTop + Math.max(stars.frame.h, messier.frame.h) + GUTTER_MM;
 	const room = { x: box.x, y: top, w: box.w, h: key.frame.y - GUTTER_MM - top };
 	return {
 		orientation: ctx.orientation,
 		charts: [{ id: chart.id, frame: fitIn(room, chart.aspect) }],
-		texts: [header, count, tasks, key]
+		texts: [header, count, tasks, stars, messier, key]
+	};
+}
+
+/**
+ * One of a worksheet's two tables, reading `chartId`: the names alone, as on a
+ * SkyGen worksheet. One the page has already keeps what was chosen for it (its
+ * rows, its look, its face); only the language follows the template's.
+ */
+function tableAt(
+	ctx: Context,
+	role: 'stars' | 'messier',
+	chartId: string,
+	at: { x: number; y: number; w: number }
+): LaidText {
+	const had = ctx.keptTable(role, chartId);
+	const table: TableSpec = {
+		source: role,
+		look: had?.table?.look ?? 'names',
+		rows: had?.table?.rows ?? SHEET_TABLE_ROWS
+	};
+	if (ctx.language !== TEMPLATE_LANGUAGES[0]) table.language = ctx.language;
+	const style = { ...(had?.style ?? TABLE) };
+	return {
+		role,
+		text: '',
+		style,
+		table,
+		chartId,
+		frame: { x: at.x, y: at.y, w: at.w, h: fullTableHeight(table, style) }
 	};
 }
 
@@ -452,35 +603,68 @@ export function layTemplate(
 		];
 	}
 
+	const language = options.language ?? TEMPLATE_LANGUAGES[0];
+	const again = options.again === true;
 	const ctx: Context = {
 		orientation,
 		box: contentBox(orientation),
-		height: options.height ?? oneLine,
+		words: WORDS[language],
+		language,
+		keptTable: (role, chartId) =>
+			(source.texts ?? []).find(
+				(it) => it.role === role && it.chartId === chartId && it.table !== undefined
+			),
+		height: options.height ?? typedLines,
 		kept(role, chartId) {
 			const text = (source.texts ?? []).find(
 				(it) => it.role === role && (chartId === undefined || it.chartId === chartId)
 			);
-			return text && !STOCK.has(text.text) ? { text: text.text, style: text.style } : null;
+			if (!text) return null;
+			if (again) return { text: text.text, style: text.style };
+			// A sheet's number is its place in the run, whatever the last one said.
+			if (role === 'number' || STOCK.has(text.text)) return null;
+			return { text: keptWords(text.text, language), style: text.style };
 		}
 	};
 	const inOrder = options.swap ? [...items].reverse() : items;
 	const ordered = inOrder.map(chartOf);
+	/** `pages` as made by the template `id`, for each to remember. */
+	const by = (id: PageTemplate['id'], pages: LaidPage[]): LaidPage[] =>
+		pages.map((made) => ({ ...made, template: { id, language } }));
 	switch (template) {
 		case 'caption':
-			return runs(ordered, 1).map((run) => captionPage(ctx, run));
+			return by(
+				'caption',
+				runs(ordered, 1).map((run) => captionPage(ctx, run))
+			);
 		case 'pair':
-			return runs(ordered, 2).map((run) => pairPage(ctx, run));
+			return by(
+				'pair',
+				runs(ordered, 2).map((run) => pairPage(ctx, run))
+			);
 		case 'finder': {
 			// One sky and its close-up; a close-up it had before goes, and whatever else is
 			// on the page follows, a chart to a page under its caption.
 			const sky = finderSky(inOrder)!;
-			const card = finderPage(ctx, sky, options.closeUp);
-			const old = options.closeUp ? inOrder.filter((item) => item.closeUpOf === sky.id) : [];
+			const closeUps = inOrder.filter((item) => item.closeUpOf === sky.id);
+			// Laid out again as it is, the card keeps the close-up it has.
+			const had = again && !options.closeUp ? closeUps[0] : undefined;
+			const card = finderPage(ctx, sky, options.closeUp, had);
+			const old = options.closeUp ? closeUps : [];
 			if (old.length > 0) card.dropped = old.map((item) => item.id);
-			const rest = inOrder.filter((item) => item !== sky && !old.includes(item));
-			return [card, ...rest.map((item) => captionPage(ctx, [chartOf(item)]))];
+			const rest = inOrder.filter((item) => item !== sky && item !== had && !old.includes(item));
+			return [
+				...by('finder', [card]),
+				...by(
+					'caption',
+					rest.map((item) => captionPage(ctx, [chartOf(item)]))
+				)
+			];
 		}
 		case 'sheet':
-			return runs(ordered, 1).map((run, i) => sheetPage(ctx, run, i + 1));
+			return by(
+				'sheet',
+				runs(ordered, 1).map((run, i) => sheetPage(ctx, run, i + 1))
+			);
 	}
 }

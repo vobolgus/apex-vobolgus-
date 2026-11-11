@@ -9,6 +9,8 @@
 		/** Where to draw it, this page's mm. */
 		frame: Rect | null;
 		kind: 'moving' | 'detached' | 'resizing';
+		/** A chart is being resized: the margins it is held to are drawn. */
+		margins: boolean;
 		/** A text of this page being turned by its knob: where to, degrees. */
 		rotation: number | null;
 		/** Snap guides to draw on this page, mm. */
@@ -27,7 +29,14 @@
 	import { contentBox, pageSize, type ResizeAnchor } from '$lib/document/geometry';
 	import { isBlank } from '$lib/document/document.svelte';
 	import { boundItem, hasFields, shownText } from '$lib/document/text';
-	import type { DocItem, DocPage, DocText, PageOrientation, TextStyle } from '$lib/document/types';
+	import type {
+		DocItem,
+		DocPage,
+		DocText,
+		PageOrientation,
+		TableSpec,
+		TextStyle
+	} from '$lib/document/types';
 	import { chartCountLabel, plural } from '$lib/document/labels';
 	import EditorItem, { type ChartAction } from './EditorItem.svelte';
 	import EditorOrientation from './EditorOrientation.svelte';
@@ -56,6 +65,8 @@
 		carrying?: boolean;
 		/** The text being typed in. */
 		editingId?: string | null;
+		/** The document's pages: a text may read a chart on another of them. */
+		pages?: readonly DocPage[];
 		hintId: string;
 		textHintId?: string;
 		onactivate: (pageId: string) => void;
@@ -64,6 +75,8 @@
 		ondelete?: (pageId: string) => void;
 		/** Put a new text on this page; offered on the current one. */
 		onaddtext?: (pageId: string) => void;
+		/** Put a new table on this page; offered on the current one. */
+		onaddtable?: (pageId: string) => void;
 		/** Lay this page out as a template; offered on the current one while it has charts. */
 		ontemplate?: (pageId: string, button: HTMLElement) => void;
 		onmovestart: (event: PointerEvent, item: DocItem) => void;
@@ -83,6 +96,8 @@
 		ontextheight?: (text: DocText, height: number) => void;
 		/** A text is told the chart to read, or with null to read the nearest again. */
 		ontextbind?: (text: DocText, chartId: string | null) => void;
+		/** A table lists something else, or in more or fewer rows. */
+		ontexttable?: (text: DocText, table: TableSpec) => void;
 	}
 
 	let {
@@ -99,12 +114,14 @@
 		settlingId = null,
 		carrying = false,
 		editingId = null,
+		pages = [],
 		hintId,
 		textHintId,
 		onactivate,
 		onorientation,
 		ondelete,
 		onaddtext,
+		onaddtable,
 		ontemplate,
 		onmovestart,
 		onresizestart,
@@ -121,7 +138,8 @@
 		ontextedit,
 		ontextcommit,
 		ontextheight,
-		ontextbind
+		ontextbind,
+		ontexttable
 	}: Props = $props();
 
 	const current = $derived(role === 'current');
@@ -167,15 +185,30 @@
 	const readId = $derived.by(() => {
 		if (!current || count < 2) return null;
 		const text = texts.find((it) => it.id === selectedTextId);
-		if (!text || !(hasFields(text.text) || editingId === text.id)) return null;
-		return boundItem(page, text)?.id ?? null;
+		if (!text || !(text.table || hasFields(text.text) || editingId === text.id)) return null;
+		return boundItem(page, text, pages)?.id ?? null;
 	});
 
-	/** Where on the page the chart a text reads is, 0-based. */
+	/** Where on the page the chart a text reads is, 0-based; null when it reads none here. */
 	function readIndex(text: DocText): number | null {
-		const id = boundItem(page, text)?.id;
+		const id = boundItem(page, text, pages)?.id;
 		const at = page.items.findIndex((item) => item.id === id);
 		return at < 0 ? null : at;
+	}
+
+	/** The charts on the other pages, each by its id and "Page 2 · chart 1". */
+	const others = $derived(
+		pages.flatMap((sheet, at) =>
+			sheet.id === page.id
+				? []
+				: sheet.items.map((item, i) => ({ id: item.id, label: `Page ${at + 1} · chart ${i + 1}` }))
+		)
+	);
+
+	/** The id of the chart on another page a text reads, if it reads one there. */
+	function readOther(text: DocText): string | null {
+		const id = boundItem(page, text, pages)?.id;
+		return id !== undefined && others.some((other) => other.id === id) ? id : null;
 	}
 
 	function itemState(item: { id: string }) {
@@ -237,6 +270,19 @@
 				>
 					<svg viewBox="0 0 16 16" aria-hidden="true">
 						<path d="M3.5 5V3.5h9V5M8 3.5v9M6.25 12.5h3.5" />
+					</svg>
+				</button>
+			{/if}
+			{#if current && onaddtable}
+				<button
+					class="action"
+					type="button"
+					aria-label="Add a table to page {number}"
+					title="Add a table"
+					onclick={() => onaddtable(page.id)}
+				>
+					<svg viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M2.5 4h11M2.5 8h11M2.5 12h11M6.5 4v8" />
 					</svg>
 				</button>
 			{/if}
@@ -312,7 +358,12 @@
 			{@const turned = drag?.itemId === text.id ? drag.rotation : null}
 			<EditorText
 				{text}
-				shown={shownText(page, text)}
+				shown={shownText(page, text, pages)}
+				sheet={page}
+				{pages}
+				{others}
+				readsOther={readOther(text)}
+				ontable={ontexttable}
 				{index}
 				count={texts.length}
 				page={size}
@@ -328,7 +379,7 @@
 				reads={readIndex(text)}
 				pinned={page.items.some((item) => item.id === text.chartId)}
 				onbind={(bound, chart) =>
-					ontextbind?.(bound, chart === null ? null : (page.items[chart]?.id ?? null))}
+					ontextbind?.(bound, typeof chart === 'number' ? (page.items[chart]?.id ?? null) : chart)}
 				hintId={textHintId}
 				onmovestart={ontextmovestart}
 				onresizestart={ontextresizestart}
@@ -353,15 +404,15 @@
 			</div>
 		{/if}
 
-		<!-- A resize shows the margins it is held to; a chart being carried, its snap lines only with Shift held. -->
-		{#if drag && (drag.guides.length > 0 || drag.kind === 'resizing')}
+		<!-- A chart being resized shows the margins it is held to; the lines anything snaps to, only with Shift held. -->
+		{#if drag && (drag.guides.length > 0 || drag.margins)}
 			<svg
 				class="guides"
 				viewBox="0 0 {size.w} {size.h}"
 				preserveAspectRatio="none"
 				aria-hidden="true"
 			>
-				{#if drag.kind === 'resizing'}
+				{#if drag.margins}
 					<rect
 						class="margin"
 						x={margin.x}

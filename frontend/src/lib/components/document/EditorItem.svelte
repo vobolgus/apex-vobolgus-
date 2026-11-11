@@ -337,7 +337,8 @@
 	 * moves every frame left smears behind it in Safari.
 	 */
 	.item[data-state='moving'],
-	.item[data-state='detached'] {
+	.item[data-state='detached'],
+	.item[data-state='resizing'] {
 		will-change: transform;
 	}
 

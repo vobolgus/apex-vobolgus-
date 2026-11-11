@@ -21,6 +21,10 @@
 	 * as does the toolbar's quarter turn. Turned, it is drawn turned; typed in, it
 	 * stands upright for as long as the typing lasts.
 	 *
+	 * A table (`text.table`) is such a block whose words are read from its chart:
+	 * nothing in it is typed. Its toolbar says what it lists (Messier objects, the
+	 * brightest stars) and in how many rows, in place of bold, italic and alignment.
+	 *
 	 * On a page with two charts or more a text with fields says which one it reads:
 	 * the nearest unless it is told a chart by its number, which the page shows on the
 	 * charts meanwhile.
@@ -38,8 +42,19 @@
 		TEXT_FIELDS,
 		type FieldName
 	} from '$lib/document/text';
-	import { measuredLayout } from '$lib/document/text-fonts.svelte';
-	import type { DocText, Rect, TextStyle } from '$lib/document/types';
+	import {
+		MAX_TABLE_ROWS,
+		MIN_TABLE_ROWS,
+		lookOf,
+		TABLE_LANGUAGES,
+		TABLE_LOOK_NAMES,
+		TABLE_LOOKS,
+		TABLE_SOURCE_NAMES,
+		TABLE_SOURCES,
+		tableName
+	} from '$lib/document/table';
+	import { measuredLayout, shownLayout } from '$lib/document/text-fonts.svelte';
+	import type { DocPage, DocText, Rect, TableSpec, TextStyle } from '$lib/document/types';
 	import type { ItemState } from './EditorItem.svelte';
 	import type { Size } from './editor-geometry';
 	import TextLines from './TextLines.svelte';
@@ -48,6 +63,14 @@
 		text: DocText;
 		/** What it shows: its words with the fields read from its chart. */
 		shown: string;
+		/** Its page: a table lists what is on a chart of it. */
+		sheet: Pick<DocPage, 'items'>;
+		/** The document: a block may read a chart on another page than its own. */
+		pages?: readonly Pick<DocPage, 'items'>[];
+		/** The charts on the other pages, to read one of them: each by its id, and what to call it. */
+		others?: readonly { id: string; label: string }[];
+		/** The id of the chart on another page it reads, if it reads one there. */
+		readsOther?: string | null;
 		/** 0-based position among the page's texts, for the accessible name. */
 		index: number;
 		count: number;
@@ -76,8 +99,13 @@
 		pinned?: boolean;
 		/** Id of the element that explains the keys. */
 		hintId?: string;
-		/** Read chart `chart` (0-based) whatever is nearer, or with null the nearest again. */
-		onbind?: (text: DocText, chart: number | null) => void;
+		/**
+		 * Read chart `chart` of its page (0-based) whatever is nearer, the chart of
+		 * another page with that id, or with null the nearest again.
+		 */
+		onbind?: (text: DocText, chart: number | string | null) => void;
+		/** A table lists something else, or in more or fewer rows. */
+		ontable?: (text: DocText, table: TableSpec) => void;
 		onmovestart?: (event: PointerEvent, text: DocText) => void;
 		onresizestart?: (event: PointerEvent, text: DocText, side: TextSide) => void;
 		onrotatestart?: (event: PointerEvent, text: DocText) => void;
@@ -97,6 +125,10 @@
 	let {
 		text,
 		shown,
+		sheet,
+		pages,
+		others = [],
+		readsOther = null,
 		index,
 		count,
 		page,
@@ -113,6 +145,7 @@
 		pinned = false,
 		hintId,
 		onbind,
+		ontable,
 		onmovestart,
 		onresizestart,
 		onrotatestart,
@@ -143,9 +176,13 @@
 	let draft = $state('');
 
 	// Typing shows the words as they were typed, fields by their names.
-	const layout = $derived(measuredLayout(editing ? draft : shown, text.style, frame.w));
+	const layout = $derived(
+		editing ? measuredLayout(draft, text.style, frame.w) : shownLayout(sheet, text, frame.w, pages)
+	);
 	const style = $derived(text.style);
+	const table = $derived(text.table);
 	const name = $derived.by(() => {
+		if (table) return `Table ${index + 1} of ${count}: ${tableName(table)}`;
 		const words = shown.replace(/\s+/g, ' ').trim();
 		const start = words.length > 60 ? `${words.slice(0, 60)}…` : words;
 		return `Text ${index + 1} of ${count}: ${start}`;
@@ -153,7 +190,10 @@
 	const smaller = $derived(stepTextSize(style.size, -1));
 	const larger = $derived(stepTextSize(style.size, 1));
 	/** Which chart it reads is a question only with fields to read and two charts to choose from. */
-	const chooses = $derived(charts >= 2 && hasFields(editing ? draft : text.text));
+	const chooses = $derived(
+		(charts >= 2 || others.length > 0) &&
+			(table !== undefined || hasFields(editing ? draft : text.text))
+	);
 	/** Low on the page, the toolbar goes above the text: under it, it would leave the stage. */
 	/** Typed in, it stands upright where it is. */
 	const turn = $derived(editing ? 0 : rotation);
@@ -247,6 +287,17 @@
 		if (pressedHere(event)) onbind?.(text, chart);
 	}
 
+	/** A chart on another page, chosen from the list; the focus goes back to the text. */
+	function bindOther(event: Event) {
+		const chosen = (event.currentTarget as HTMLSelectElement).value;
+		if (chosen !== '') onbind?.(text, chosen);
+		bodyEl?.focus({ preventScroll: true });
+	}
+
+	function retable(event: MouseEvent, patch: Partial<TableSpec>) {
+		if (pressedHere(event) && table) ontable?.(text, { ...table, ...patch });
+	}
+
 	function commit() {
 		if (editing) oncommit?.(text, draft);
 	}
@@ -283,12 +334,14 @@
 				class="body"
 				role="button"
 				tabindex="0"
-				aria-roledescription="text"
+				aria-roledescription={table ? 'table' : 'text'}
 				aria-label={name}
 				aria-describedby={hintId}
 				aria-keyshortcuts="Enter ArrowLeft ArrowRight ArrowUp ArrowDown = - R PageUp PageDown Delete"
 				onpointerdown={handleBodyPointerDown}
-				ondblclick={() => onedit?.(text)}
+				ondblclick={() => {
+					if (!table) onedit?.(text);
+				}}
 				onkeydown={(event) => onkeydown?.(event, text)}
 			>
 				<TextLines {layout} {style} width={frame.w} />
@@ -385,41 +438,43 @@
 					<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8h7M8 4.5v7" /></svg>
 				</button>
 				<span class="tool-divider" aria-hidden="true"></span>
-				<button
-					class="tool is-letter"
-					type="button"
-					tabindex="-1"
-					aria-label="Bold"
-					aria-pressed={style.bold}
-					title="Bold"
-					onpointerdown={handleToolPointerDown}
-					onclick={(event) => restyle(event, { bold: !style.bold })}
-				>
-					<b>B</b>
-				</button>
-				<button
-					class="tool is-letter"
-					type="button"
-					tabindex="-1"
-					aria-label="Italic"
-					aria-pressed={style.italic}
-					title="Italic"
-					onpointerdown={handleToolPointerDown}
-					onclick={(event) => restyle(event, { italic: !style.italic })}
-				>
-					<i>I</i>
-				</button>
-				<button
-					class="tool"
-					type="button"
-					tabindex="-1"
-					aria-label="Aligned {style.align}. Change"
-					title="Alignment"
-					onpointerdown={handleToolPointerDown}
-					onclick={(event) => restyle(event, { align: nextAlign() })}
-				>
-					<svg viewBox="0 0 16 16" aria-hidden="true"><path d={ALIGN_ICONS[style.align]} /></svg>
-				</button>
+				{#if !table}
+					<button
+						class="tool is-letter"
+						type="button"
+						tabindex="-1"
+						aria-label="Bold"
+						aria-pressed={style.bold}
+						title="Bold"
+						onpointerdown={handleToolPointerDown}
+						onclick={(event) => restyle(event, { bold: !style.bold })}
+					>
+						<b>B</b>
+					</button>
+					<button
+						class="tool is-letter"
+						type="button"
+						tabindex="-1"
+						aria-label="Italic"
+						aria-pressed={style.italic}
+						title="Italic"
+						onpointerdown={handleToolPointerDown}
+						onclick={(event) => restyle(event, { italic: !style.italic })}
+					>
+						<i>I</i>
+					</button>
+					<button
+						class="tool"
+						type="button"
+						tabindex="-1"
+						aria-label="Aligned {style.align}. Change"
+						title="Alignment"
+						onpointerdown={handleToolPointerDown}
+						onclick={(event) => restyle(event, { align: nextAlign() })}
+					>
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d={ALIGN_ICONS[style.align]} /></svg>
+					</button>
+				{/if}
 				<button
 					class="tool"
 					type="button"
@@ -452,6 +507,80 @@
 					</svg>
 				</button>
 			</div>
+			{#if table}
+				<div class="row fields is-table" role="group" aria-label="What the table lists">
+					{#each TABLE_SOURCES as source (source)}
+						<button
+							class="field"
+							type="button"
+							tabindex="-1"
+							aria-pressed={table.source === source}
+							onpointerdown={handleToolPointerDown}
+							onclick={(event) => retable(event, { source })}
+						>
+							{TABLE_SOURCE_NAMES[source]}
+						</button>
+					{/each}
+					<span class="tool-divider" aria-hidden="true"></span>
+					{#each TABLE_LOOKS as look (look)}
+						<button
+							class="field"
+							type="button"
+							tabindex="-1"
+							aria-pressed={lookOf(table) === look}
+							title={look === 'names'
+								? 'The names alone, three to a row'
+								: 'A row an object, with what is known of it'}
+							onpointerdown={handleToolPointerDown}
+							onclick={(event) => retable(event, { look })}
+						>
+							{TABLE_LOOK_NAMES[look]}
+						</button>
+					{/each}
+				</div>
+				<div class="row fields is-table" role="group" aria-label="Rows of the table">
+					<button
+						class="tool"
+						type="button"
+						tabindex="-1"
+						aria-label="Fewer rows"
+						title="Fewer rows"
+						disabled={table.rows <= MIN_TABLE_ROWS}
+						onpointerdown={handleToolPointerDown}
+						onclick={(event) => retable(event, { rows: table.rows - 1 })}
+					>
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8h7" /></svg>
+					</button>
+					<span class="size is-rows" aria-label="{table.rows} rows">{table.rows} rows</span>
+					<button
+						class="tool"
+						type="button"
+						tabindex="-1"
+						aria-label="More rows"
+						title="More rows"
+						disabled={table.rows >= MAX_TABLE_ROWS}
+						onpointerdown={handleToolPointerDown}
+						onclick={(event) => retable(event, { rows: table.rows + 1 })}
+					>
+						<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8h7M8 4.5v7" /></svg>
+					</button>
+					<span class="tool-divider" aria-hidden="true"></span>
+					{#each TABLE_LANGUAGES as language (language)}
+						<button
+							class="field"
+							type="button"
+							tabindex="-1"
+							aria-pressed={(table.language ?? 'en') === language}
+							aria-label={language === 'ru' ? 'Russian' : 'English'}
+							title={language === 'ru' ? 'Its words in Russian' : 'Its words in English'}
+							onpointerdown={handleToolPointerDown}
+							onclick={(event) => retable(event, { language })}
+						>
+							{language.toUpperCase()}
+						</button>
+					{/each}
+				</div>
+			{/if}
 			{#if chooses}
 				<div class="row fields" role="group" aria-label="The chart the fields read">
 					<span class="row-label" aria-hidden="true">Reads</span>
@@ -459,7 +588,7 @@
 						class="field"
 						type="button"
 						tabindex="-1"
-						aria-pressed={!pinned}
+						aria-pressed={!pinned && readsOther === null}
 						aria-label="Read the nearest chart{reads !== null ? `, now chart ${reads + 1}` : ''}"
 						title="The chart nearest to the text"
 						onpointerdown={handleToolPointerDown}
@@ -481,6 +610,23 @@
 							{chart + 1}
 						</button>
 					{/each}
+					{#if others.length > 0}
+						<!-- Charts of the other pages: a table on a page of its own reads its sky from there. -->
+						<select
+							class="field other"
+							class:is-chosen={readsOther !== null}
+							tabindex="-1"
+							aria-label="Read a chart on another page"
+							value={readsOther ?? ''}
+							onpointerdown={(event) => event.stopPropagation()}
+							onchange={bindOther}
+						>
+							<option value="" disabled>Other page…</option>
+							{#each others as other (other.id)}
+								<option value={other.id}>{other.label}</option>
+							{/each}
+						</select>
+					{/if}
 				</div>
 			{/if}
 			{#if editing}
@@ -490,7 +636,7 @@
 							class="field"
 							type="button"
 							tabindex="-1"
-							title={`{${field.name}}`}
+							title={`{${field.name}}${field.precise ? ` · {${field.name}:1} or :2 for decimals` : ''}`}
 							onpointerdown={handleToolPointerDown}
 							onclick={(event) => insertField(event, field.name)}
 						>
@@ -531,8 +677,15 @@
 			top 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 	}
 
+	/*
+	 * In the hand, or made wider or narrower: on a layer of its own. Painted on the
+	 * paper's, every frame of it leaves the paper to repaint what it gave up, and in
+	 * Safari, with the page zoomed to anything but a whole number of pixels, the edge
+	 * of each such repaint is left behind as a hairline down the page.
+	 */
 	.text[data-state='moving'],
-	.text[data-state='detached'] {
+	.text[data-state='detached'],
+	.text[data-state='resizing'] {
 		will-change: transform;
 	}
 
@@ -914,12 +1067,37 @@
 		text-align: center;
 	}
 
+	.size.is-rows {
+		min-width: 52px;
+	}
+
+	/* The list of the other pages' charts: a chip like its neighbours, the browser's own list behind it. */
+	.field.other {
+		max-width: 132px;
+		appearance: none;
+		text-overflow: ellipsis;
+	}
+
+	.field.other.is-chosen {
+		background: rgba(255, 255, 255, 0.18);
+	}
+
+	.field.other option {
+		color: initial;
+	}
+
 	.tool-divider {
 		flex: none;
 		width: 1px;
 		height: 16px;
 		margin: 0 2px;
 		background: rgba(255, 255, 255, 0.14);
+	}
+
+	/* What a table lists and its rows, on one line. */
+	.fields.is-table {
+		flex-wrap: nowrap;
+		max-width: none;
 	}
 
 	.fields {

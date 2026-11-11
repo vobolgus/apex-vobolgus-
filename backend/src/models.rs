@@ -143,15 +143,35 @@ pub struct DocumentText {
     #[serde(default)]
     pub cy_mm: f64,
     pub lines: Vec<DocumentTextLine>,
+    /// Hairlines drawn with the text and turned with it: the rules of a table.
+    #[serde(default)]
+    pub rules: Vec<DocumentRule>,
+}
+
+/// A straight line from (`x1_mm`, `y1_mm`) to (`x2_mm`, `y2_mm`), `width_mm` thick, black.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentRule {
+    pub x1_mm: f64,
+    pub y1_mm: f64,
+    pub x2_mm: f64,
+    pub y2_mm: f64,
+    pub width_mm: f64,
 }
 
 /// One line of text: where its baseline starts (or its middle, or its end: the
-/// text's `anchor`), mm from the page's top-left, y down.
+/// text's `anchor`), mm from the page's top-left, y down. A cell of a table is a
+/// line with an anchor and a weight of its own.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentTextLine {
     pub x_mm: f64,
     pub y_mm: f64,
     pub text: String,
+    /// Which point of this line its `x_mm` is; the text's `anchor` when absent.
+    #[serde(default)]
+    pub anchor: Option<TextAnchor>,
+    /// Set this line bold, or not, whatever the text is; the text's `bold` when absent.
+    #[serde(default)]
+    pub bold: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
