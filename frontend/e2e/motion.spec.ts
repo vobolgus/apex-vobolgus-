@@ -267,7 +267,7 @@ test('Add to PDF flies a copy of the chart to its place on the page, which is dr
 	// A second chart goes to its own place on the same page: the copy stops exactly there.
 	const landed = page.evaluate(
 		() =>
-			new Promise<{ copy: number[]; place: number[] }>((resolve) => {
+			new Promise<number[]>((resolve) => {
 				const watch = () => {
 					const flying = document.querySelector('.pdf-flight');
 					if (!flying) return requestAnimationFrame(watch);
@@ -275,13 +275,10 @@ test('Add to PDF flies a copy of the chart to its place on the page, which is dr
 						const effect = animation.effect as KeyframeEffect | null;
 						return effect?.getKeyframes().some((frame) => 'transform' in frame);
 					});
-					const box = (el: Element) => {
-						const r = el.getBoundingClientRect();
-						return [r.x, r.y, r.width, r.height];
-					};
-					move!.finished.then(() =>
-						resolve({ copy: box(flying), place: box(document.querySelector('.chart.pending')!) })
-					);
+					move!.finished.then(() => {
+						const r = flying.getBoundingClientRect();
+						resolve([r.x, r.y, r.width, r.height]);
+					});
 				};
 				watch();
 			})
@@ -292,10 +289,19 @@ test('Add to PDF flies a copy of the chart to its place on the page, which is dr
 	await add.click();
 	await page.waitForTimeout(220);
 	const making = (await first.boundingBox())!;
-	const { copy: copyBox, place: placeBox } = await landed;
-	for (let i = 0; i < 4; i += 1) expect(Math.abs(copyBox[i] - placeBox[i])).toBeLessThan(1.5);
+	const copyBox = await landed;
 	await expect(copy).toHaveCount(0);
 	await expect(place.locator('canvas')).toHaveCount(2);
+	// Its place is measured at rest: as the copy lands the page is bumped (to 1.08 of
+	// its size and back), and a place read then is off by as much as the bump has got
+	// to, which is the machine's pace and not the flight's aim.
+	await expect
+		.poll(async () => {
+			const at = (await place.last().boundingBox())!;
+			const placeBox = [at.x, at.y, at.width, at.height];
+			return Math.max(...copyBox.map((side, i) => Math.abs(side - placeBox[i])));
+		})
+		.toBeLessThan(1.5);
 	// It moved as the copy flew: part of the way while the copy was in the air, the rest by landing.
 	await page.waitForTimeout(700);
 	const settled = (await first.boundingBox())!;
