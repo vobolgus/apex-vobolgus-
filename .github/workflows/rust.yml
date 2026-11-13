@@ -15,8 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # One named version, not `stable`: the workspace is held to clippy::pedantic
+      # with -D warnings, and a new clippy brings new lints, which would turn this
+      # job red on a day nothing in the code changed. Move it on purpose: update
+      # the toolchain here and at the desk together, and fix what the new lints say.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
 

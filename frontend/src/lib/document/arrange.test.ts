@@ -990,7 +990,12 @@ describe('the arranger: random pages', () => {
 		}
 	}, 60_000);
 
-	it('lays out the worst case (five distinct charts, every order) in under 30 ms', () => {
+	// The 30 ms are a desk's (about 11 there). CI's shared runner is some three times
+	// slower and uneven, so it is given four times as long: enough still to catch the
+	// search growing with every order of the charts, which is what this guards.
+	const WORST_CASE_MS = process.env.CI ? 120 : 30;
+
+	it(`lays out the worst case (five distinct charts, every order) in under ${WORST_CASE_MS} ms`, () => {
 		const charts = [S(), P(1.61), P(16 / 9), P(3), P(0.6)].map(item);
 		arrange('portrait', charts);
 		let best = Infinity;
@@ -999,6 +1004,6 @@ describe('the arranger: random pages', () => {
 			arrange('portrait', charts);
 			best = Math.min(best, performance.now() - t0);
 		}
-		expect(best).toBeLessThan(30);
+		expect(best).toBeLessThan(WORST_CASE_MS);
 	});
 });
