@@ -11,7 +11,10 @@ concurrency:
 
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    # A named Ubuntu, not `ubuntu-latest`: Playwright installs Chromium's system
+    # packages by the release it runs on, and the one in package-lock.json (1.60)
+    # does not know 26.04, which `latest` now is. Move this with Playwright.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
